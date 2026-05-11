@@ -1,7 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
-import com.kama.jchatmind.model.entity.ChunkBgeM3;
+import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.RagService;
 import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,9 +54,15 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public List<String> similaritySearch(String kbId, String title) {
-        String queryEmbedding = toPgVector(doEmbed(title));
-        List<ChunkBgeM3> chunks = chunkBgeM3Mapper.similaritySearch(kbId, queryEmbedding, 3);
-        return chunks.stream().map(ChunkBgeM3::getContent).toList();
+        return retrieve(kbId, title, 3).stream()
+                .map(RagRetrievalResult::getContent)
+                .toList();
+    }
+
+    @Override
+    public List<RagRetrievalResult> retrieve(String kbId, String query, int limit) {
+        String queryEmbedding = toPgVector(doEmbed(query));
+        return chunkBgeM3Mapper.similaritySearchDetailed(kbId, queryEmbedding, limit);
     }
 
     private String toPgVector(float[] v) {

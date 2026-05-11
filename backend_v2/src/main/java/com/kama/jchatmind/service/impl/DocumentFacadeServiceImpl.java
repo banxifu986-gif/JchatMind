@@ -1,6 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.converter.DocumentConverter;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.DocumentMapper;
@@ -37,6 +38,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
 
     private final DocumentMapper documentMapper;
     private final DocumentConverter documentConverter;
+    private final ObjectMapper objectMapper;
     private final DocumentStorageService documentStorageService;
     private final MarkdownParserService markdownParserService;
     private final RagService ragService;
@@ -225,7 +227,8 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                 int chunkCount = 0;
 
                 // 为每个章节生成 chunk
-                for (MarkdownParserService.MarkdownSection section : sections) {
+                for (int i = 0; i < sections.size(); i++) {
+                    MarkdownParserService.MarkdownSection section = sections.get(i);
                     String title = section.getTitle();
                     String content = section.getContent();
 
@@ -233,15 +236,14 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                         continue;
                     }
 
-                    // 对标题进行 embedding
-                    float[] embedding = ragService.embed(title);
+                    float[] embedding = ragService.embed(buildChunkEmbeddingText(title, content));
 
                     // 创建 ChunkBgeM3 实体
                     ChunkBgeM3 chunk = ChunkBgeM3.builder()
                             .kbId(kbId)
                             .docId(documentId)
                             .content(content != null ? content : "")
-                            .metadata(null) // 可以存储标题信息到 metadata
+                            .metadata(buildChunkMetadata(title, i))
                             .embedding(embedding)
                             .createdAt(now)
                             .updatedAt(now)
@@ -273,6 +275,30 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             return "unknown";
         }
         return filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
+    }
+
+    private String buildChunkMetadata(String title, int sectionIndex) {
+        try {
+            ChunkMetaData chunkMetaData = new ChunkMetaData();
+            chunkMetaData.setTitle(title);
+            chunkMetaData.setSectionIndex(sectionIndex);
+            return objectMapper.writeValueAsString(chunkMetaData);
+        } catch (JsonProcessingException e) {
+            throw new BizException("序列化文档 chunk metadata 失败: " + e.getMessage());
+        }
+    }
+
+    private String buildChunkEmbeddingText(String title, String content) {
+        if (content == null || content.trim().isEmpty()) {
+            return title;
+        }
+        return title + "\n" + content.trim();
+    }
+
+    @lombok.Data
+    private static class ChunkMetaData {
+        private String title;
+        private Integer sectionIndex;
     }
 
     @Override

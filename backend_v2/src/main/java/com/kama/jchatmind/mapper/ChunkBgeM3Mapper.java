@@ -1,5 +1,6 @@
 package com.kama.jchatmind.mapper;
 
+import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -27,4 +28,12 @@ public interface ChunkBgeM3Mapper {
             @Param("vectorLiteral") String vectorLiteral,
             @Param("limit") int limit
     );
+
+    List<RagRetrievalResult> similaritySearchDetailed(
+            @Param("kbId") String kbId,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("limit") int limit
+    );
+
+    List<ChunkBgeM3> selectByDocId(@Param("docId") String docId);
 }

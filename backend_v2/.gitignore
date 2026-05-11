@@ -36,3 +36,6 @@ src/main/resources/application-dev.yaml
 .env
 .env.*
 !.env.example
+
+
+/data
