@@ -1,6 +1,7 @@
 package com.kama.jchatmind.rag;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.converter.DocumentConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
@@ -48,9 +49,11 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @SpringBootTest(classes = RagRecallEvaluationTest.RagEvalTestConfig.class)
@@ -63,6 +66,19 @@ class RagRecallEvaluationTest {
     private static final String MODE_BOTH = "both";
     private static final String QUERY_STYLE_TITLE = "title_exact";
     private static final String QUERY_STYLE_REWRITE = "content_rewrite";
+    private static final int EVAL_RETRIEVAL_LIMIT = 10;
+    private static final int REPORT_CASE_LIMIT = 10;
+    private static final int DIFF_CASE_LIMIT = 10;
+    private static final String EXCLUDED_EMPTY_QUERY = "empty_query";
+    private static final String EXCLUDED_EMPTY_REWRITE_QUERY = "empty_rewrite_query";
+    private static final String EXCLUDED_MISSING_GOLD_CHUNK = "missing_gold_chunk";
+    private static final String SKIPPED_MISSING_FILE_OR_METADATA = "missing_file_or_metadata";
+    private static final String SKIPPED_NON_MARKDOWN = "non_markdown";
+    private static final String GOLD_EXACT_CONTENT = "exact_content";
+    private static final String GOLD_METADATA_SECTION_INDEX = "metadata_section_index";
+    private static final String GOLD_SECTION_ORDER_EXACT = "section_order_exact";
+    private static final String GOLD_CONTENT_OVERLAP = "content_overlap";
+    private static final String GOLD_NOT_FOUND = "not_found";
 
     @Autowired
     private RagService ragService;
@@ -109,6 +125,9 @@ class RagRecallEvaluationTest {
     @Value("${rag.eval.min-recall-at-5:0}")
     private double minRecallAt5;
 
+    @Value("${rag.eval.compare-with:}")
+    private String compareWithReportPath;
+
     @Value("classpath:rag-eval/fixtures/fixture-kb.md")
     private Resource fixtureMarkdown;
 
@@ -127,14 +146,15 @@ class RagRecallEvaluationTest {
     @Test
     void evaluateRecall() throws Exception {
         List<EvaluationSummary> summaries = new ArrayList<>();
+        Map<String, Set<String>> previousMissCaseIds = loadPreviousMissCaseIds();
 
         if (shouldRunFixture()) {
-            summaries.add(runFixtureEvaluation());
+            summaries.add(runFixtureEvaluation(previousMissCaseIds));
         }
 
         if (shouldRunReal()) {
             Assumptions.assumeTrue(StringUtils.hasText(realKbId), "缺少 rag.eval.real-kb-id，跳过真实知识库评测");
-            summaries.add(runRealEvaluation(realKbId));
+            summaries.add(runRealEvaluation(realKbId, previousMissCaseIds));
         }
 
         String jsonReport = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(summaries);
@@ -150,7 +170,7 @@ class RagRecallEvaluationTest {
         }
     }
 
-    private EvaluationSummary runFixtureEvaluation() throws Exception {
+    private EvaluationSummary runFixtureEvaluation(Map<String, Set<String>> previousMissCaseIds) throws Exception {
         cleanupFixtureData();
 
         KnowledgeBase knowledgeBase = createKnowledgeBase(FIXTURE_KB_NAME, "离线召回测试知识库");
@@ -165,22 +185,26 @@ class RagRecallEvaluationTest {
                 persistedChunks,
                 "fixture"
         );
-        return evaluateCases("fixture", queryCases);
+        return evaluateCases("fixture", queryCases, Map.of(), previousMissCaseIds);
     }
 
-    private EvaluationSummary runRealEvaluation(String kbId) throws Exception {
+    private EvaluationSummary runRealEvaluation(String kbId, Map<String, Set<String>> previousMissCaseIds) throws Exception {
         List<QueryCase> queryCases = new ArrayList<>();
+        Map<String, Integer> skippedDocumentReasons = new LinkedHashMap<>();
         List<Document> documents = documentMapper.selectByKbId(kbId);
 
         for (Document document : documents) {
             if (!isMarkdown(document.getFiletype())) {
+                addCount(skippedDocumentReasons, SKIPPED_NON_MARKDOWN);
                 continue;
             }
             DocumentDTO documentDTO = documentConverter.toDTO(document);
             if (documentDTO.getMetadata() == null || !StringUtils.hasText(documentDTO.getMetadata().getFilePath())) {
+                addCount(skippedDocumentReasons, SKIPPED_MISSING_FILE_OR_METADATA);
                 continue;
             }
             if (!documentStorageService.fileExists(documentDTO.getMetadata().getFilePath())) {
+                addCount(skippedDocumentReasons, SKIPPED_MISSING_FILE_OR_METADATA);
                 continue;
             }
 
@@ -189,65 +213,174 @@ class RagRecallEvaluationTest {
             queryCases.addAll(buildQueryCases(kbId, document.getId(), sections, persistedChunks, "real"));
         }
 
-        return evaluateCases("real", queryCases);
+        return evaluateCases("real", queryCases, skippedDocumentReasons, previousMissCaseIds);
     }
 
-    private EvaluationSummary evaluateCases(String source, List<QueryCase> cases) {
+    private EvaluationSummary evaluateCases(
+            String source,
+            List<QueryCase> cases,
+            Map<String, Integer> skippedDocumentReasons,
+            Map<String, Set<String>> previousMissCaseIds
+    ) {
         Map<String, List<QueryCase>> caseGroups = cases.stream()
                 .collect(Collectors.groupingBy(QueryCase::queryStyle, LinkedHashMap::new, Collectors.toList()));
 
         List<EvaluationSummary> breakdown = new ArrayList<>();
         for (String queryStyle : List.of(QUERY_STYLE_TITLE, QUERY_STYLE_REWRITE)) {
-            breakdown.add(evaluateStyleGroup(source + "/" + queryStyle, caseGroups.getOrDefault(queryStyle, List.of())));
+            breakdown.add(evaluateStyleGroup(
+                    source + "/" + queryStyle,
+                    caseGroups.getOrDefault(queryStyle, List.of()),
+                    previousMissCaseIds
+            ));
         }
 
         int total = breakdown.stream().mapToInt(EvaluationSummary::total).sum();
         int evaluated = breakdown.stream().mapToInt(EvaluationSummary::evaluated).sum();
         int excluded = breakdown.stream().mapToInt(EvaluationSummary::excluded).sum();
+        double coverage = ratio(evaluated, total);
         double recallAt1 = average(breakdown.stream().map(EvaluationSummary::recallAt1).toList());
         double recallAt3 = average(breakdown.stream().map(EvaluationSummary::recallAt3).toList());
         double recallAt5 = average(breakdown.stream().map(EvaluationSummary::recallAt5).toList());
+        double recallAt10 = average(breakdown.stream().map(EvaluationSummary::recallAt10).toList());
+        int hitAt1Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt1Count).sum();
+        int hitAt3Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt3Count).sum();
+        int hitAt5Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt5Count).sum();
+        int hitAt10Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt10Count).sum();
+        double weightedRecallAt1 = ratio(hitAt1Count, evaluated);
+        double weightedRecallAt3 = ratio(hitAt3Count, evaluated);
+        double weightedRecallAt5 = ratio(hitAt5Count, evaluated);
+        double weightedRecallAt10 = ratio(hitAt10Count, evaluated);
+        double mrrAt3 = weightedAverage(breakdown, 3);
+        double mrrAt10 = weightedAverage(breakdown, 10);
+        HitDistribution hitDistribution = mergeHitDistributions(breakdown);
+        Map<String, Integer> excludedReasons = mergeExcludedReasons(breakdown);
         List<String> missCases = breakdown.stream()
                 .flatMap(summary -> summary.missCases().stream())
-                .limit(10)
+                .limit(REPORT_CASE_LIMIT)
                 .toList();
+        List<String> missCaseIds = breakdown.stream()
+                .flatMap(summary -> summary.missCaseIds().stream())
+                .toList();
+        List<String> newMissCases = newMissCases(source, missCaseIds, previousMissCaseIds);
+        List<String> fixedMissCases = fixedMissCases(source, missCaseIds, previousMissCaseIds);
 
-        return new EvaluationSummary(source, total, evaluated, excluded, recallAt1, recallAt3, recallAt5, missCases, breakdown);
+        return new EvaluationSummary(
+                source,
+                total,
+                evaluated,
+                excluded,
+                coverage,
+                recallAt1,
+                recallAt3,
+                recallAt5,
+                recallAt10,
+                weightedRecallAt1,
+                weightedRecallAt3,
+                weightedRecallAt5,
+                weightedRecallAt10,
+                hitAt1Count,
+                hitAt3Count,
+                hitAt5Count,
+                hitAt10Count,
+                mrrAt3,
+                mrrAt10,
+                hitDistribution,
+                excludedReasons,
+                skippedDocumentReasons,
+                missCases,
+                missCaseIds,
+                newMissCases,
+                fixedMissCases,
+                breakdown
+        );
     }
 
-    private EvaluationSummary evaluateStyleGroup(String group, List<QueryCase> cases) {
+    private EvaluationSummary evaluateStyleGroup(
+            String group,
+            List<QueryCase> cases,
+            Map<String, Set<String>> previousMissCaseIds
+    ) {
         List<EvaluatedCase> evaluatedCases = new ArrayList<>();
-        int excluded = 0;
+        Map<String, Integer> excludedReasons = new LinkedHashMap<>();
 
         for (QueryCase queryCase : cases) {
             if (!queryCase.evaluable()) {
-                excluded++;
+                addCount(excludedReasons, queryCase.excludedReason());
                 continue;
             }
 
-            List<RagRetrievalResult> results = ragService.retrieve(queryCase.kbId(), queryCase.query(), 5);
+            List<RagRetrievalResult> results = ragService.retrieve(queryCase.kbId(), queryCase.query(), EVAL_RETRIEVAL_LIMIT);
             List<String> topChunkIds = results.stream()
                     .map(RagRetrievalResult::getChunkId)
                     .toList();
             evaluatedCases.add(new EvaluatedCase(
                     queryCase.caseId(),
-                    queryCase.goldChunkId(),
+                    queryCase.goldChunkIds(),
+                    queryCase.goldResolutionMode(),
+                    queryCase.goldCandidateCount(),
                     topChunkIds
             ));
         }
 
         int total = cases.size();
         int evaluated = evaluatedCases.size();
+        int excluded = total - evaluated;
+        double coverage = ratio(evaluated, total);
         double recallAt1 = hitRate(evaluatedCases, 1);
         double recallAt3 = hitRate(evaluatedCases, 3);
         double recallAt5 = hitRate(evaluatedCases, 5);
+        double recallAt10 = hitRate(evaluatedCases, 10);
+        int hitAt1Count = hitCount(evaluatedCases, 1);
+        int hitAt3Count = hitCount(evaluatedCases, 3);
+        int hitAt5Count = hitCount(evaluatedCases, 5);
+        int hitAt10Count = hitCount(evaluatedCases, 10);
+        double mrrAt3 = mrrAt(evaluatedCases, 3);
+        double mrrAt10 = mrrAt(evaluatedCases, 10);
+        HitDistribution hitDistribution = hitDistribution(evaluatedCases);
         List<String> missCases = evaluatedCases.stream()
                 .filter(item -> !item.hitAt(5))
-                .map(item -> item.caseId() + " | gold=" + item.goldChunkId() + " | top=" + item.topChunkIds())
-                .limit(10)
+                .map(item -> item.caseId()
+                        + " | gold=" + item.goldChunkIds()
+                        + " | goldMode=" + item.goldResolutionMode()
+                        + " | top=" + item.topChunkIds())
+                .limit(REPORT_CASE_LIMIT)
                 .toList();
+        List<String> missCaseIds = evaluatedCases.stream()
+                .filter(item -> !item.hitAt(5))
+                .map(EvaluatedCase::caseId)
+                .toList();
+        List<String> newMissCases = newMissCases(group, missCaseIds, previousMissCaseIds);
+        List<String> fixedMissCases = fixedMissCases(group, missCaseIds, previousMissCaseIds);
 
-        return new EvaluationSummary(group, total, evaluated, excluded, recallAt1, recallAt3, recallAt5, missCases, List.of());
+        return new EvaluationSummary(
+                group,
+                total,
+                evaluated,
+                excluded,
+                coverage,
+                recallAt1,
+                recallAt3,
+                recallAt5,
+                recallAt10,
+                recallAt1,
+                recallAt3,
+                recallAt5,
+                recallAt10,
+                hitAt1Count,
+                hitAt3Count,
+                hitAt5Count,
+                hitAt10Count,
+                mrrAt3,
+                mrrAt10,
+                hitDistribution,
+                excludedReasons,
+                Map.of(),
+                missCases,
+                missCaseIds,
+                newMissCases,
+                fixedMissCases,
+                List.of()
+        );
     }
 
     private List<QueryCase> buildQueryCases(
@@ -264,7 +397,7 @@ class RagRecallEvaluationTest {
 
         for (int i = 0; i < sections.size(); i++) {
             MarkdownParserService.MarkdownSection section = sections.get(i);
-            String goldChunkId = resolveGoldChunkId(docId, section, sortedChunks, i);
+            GoldResolution goldResolution = resolveGoldChunks(docId, section, sortedChunks, i);
 
             queryCases.add(createCase(
                     source,
@@ -273,7 +406,7 @@ class RagRecallEvaluationTest {
                     docId,
                     i,
                     section.getTitle(),
-                    goldChunkId
+                    goldResolution
             ));
 
             String rewriteQuery = buildRewriteQuery(section.getContent());
@@ -284,7 +417,7 @@ class RagRecallEvaluationTest {
                     docId,
                     i,
                     rewriteQuery,
-                    goldChunkId
+                    goldResolution
             ));
         }
 
@@ -298,14 +431,25 @@ class RagRecallEvaluationTest {
             String docId,
             int sectionIndex,
             String query,
-            String goldChunkId
+            GoldResolution goldResolution
     ) {
         String caseId = source + "/" + queryStyle + "/" + docId + "/" + sectionIndex;
-        boolean evaluable = StringUtils.hasText(query) && StringUtils.hasText(goldChunkId);
-        return new QueryCase(caseId, queryStyle, kbId, query, goldChunkId, evaluable);
+        String excludedReason = excludedReason(queryStyle, query, goldResolution);
+        boolean evaluable = excludedReason == null;
+        return new QueryCase(
+                caseId,
+                queryStyle,
+                kbId,
+                query,
+                goldResolution.chunkIds(),
+                goldResolution.mode(),
+                goldResolution.chunkIds().size(),
+                excludedReason,
+                evaluable
+        );
     }
 
-    private String resolveGoldChunkId(
+    private GoldResolution resolveGoldChunks(
             String docId,
             MarkdownParserService.MarkdownSection section,
             List<ChunkBgeM3> persistedChunks,
@@ -315,17 +459,43 @@ class RagRecallEvaluationTest {
                 .filter(chunk -> docId.equals(chunk.getDocId()))
                 .filter(chunk -> normalize(chunk.getContent()).equals(normalize(section.getContent())))
                 .toList();
-        if (exactMatches.size() == 1) {
-            return exactMatches.get(0).getId();
+        if (!exactMatches.isEmpty()) {
+            return new GoldResolution(
+                    exactMatches.stream().map(ChunkBgeM3::getId).toList(),
+                    GOLD_EXACT_CONTENT
+            );
+        }
+
+        List<ChunkBgeM3> metadataMatches = persistedChunks.stream()
+                .filter(chunk -> docId.equals(chunk.getDocId()))
+                .filter(chunk -> sectionIndexFromMetadata(chunk.getMetadata()) == sectionIndex)
+                .toList();
+        if (!metadataMatches.isEmpty()) {
+            return new GoldResolution(
+                    metadataMatches.stream().map(ChunkBgeM3::getId).toList(),
+                    GOLD_METADATA_SECTION_INDEX
+            );
         }
 
         if (sectionIndex >= 0 && sectionIndex < persistedChunks.size()) {
             ChunkBgeM3 candidate = persistedChunks.get(sectionIndex);
             if (normalize(candidate.getContent()).equals(normalize(section.getContent()))) {
-                return candidate.getId();
+                return new GoldResolution(List.of(candidate.getId()), GOLD_SECTION_ORDER_EXACT);
             }
         }
-        return null;
+
+        List<ChunkBgeM3> overlapMatches = persistedChunks.stream()
+                .filter(chunk -> docId.equals(chunk.getDocId()))
+                .filter(chunk -> contentOverlaps(section.getContent(), chunk.getContent()))
+                .toList();
+        if (!overlapMatches.isEmpty()) {
+            return new GoldResolution(
+                    overlapMatches.stream().map(ChunkBgeM3::getId).toList(),
+                    GOLD_CONTENT_OVERLAP
+            );
+        }
+
+        return new GoldResolution(List.of(), GOLD_NOT_FOUND);
     }
 
     private Document ingestFixtureMarkdown(String kbId, Resource resource) throws Exception {
@@ -418,7 +588,7 @@ class RagRecallEvaluationTest {
         if (!StringUtils.hasText(content)) {
             return title;
         }
-        return title + "\n" + content.trim();
+        return title + "\n" + title + "\n" + content.trim();
     }
 
     private KnowledgeBase createKnowledgeBase(String name, String description) throws JsonProcessingException {
@@ -497,12 +667,228 @@ class RagRecallEvaluationTest {
                 .trim();
     }
 
+    private boolean contentOverlaps(String sectionContent, String chunkContent) {
+        String normalizedSection = normalize(sectionContent);
+        String normalizedChunk = normalize(chunkContent);
+        if (!StringUtils.hasText(normalizedSection) || !StringUtils.hasText(normalizedChunk)) {
+            return false;
+        }
+        return normalizedSection.contains(normalizedChunk) || normalizedChunk.contains(normalizedSection);
+    }
+
+    private int sectionIndexFromMetadata(String metadata) {
+        if (!StringUtils.hasText(metadata)) {
+            return -1;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(metadata);
+            JsonNode sectionIndexNode = root.get("sectionIndex");
+            return sectionIndexNode != null && sectionIndexNode.canConvertToInt() ? sectionIndexNode.asInt() : -1;
+        } catch (JsonProcessingException e) {
+            return -1;
+        }
+    }
+
+    private String excludedReason(String queryStyle, String query, GoldResolution goldResolution) {
+        if (!StringUtils.hasText(query)) {
+            return QUERY_STYLE_REWRITE.equals(queryStyle) ? EXCLUDED_EMPTY_REWRITE_QUERY : EXCLUDED_EMPTY_QUERY;
+        }
+        if (goldResolution.chunkIds().isEmpty()) {
+            return EXCLUDED_MISSING_GOLD_CHUNK;
+        }
+        return null;
+    }
+
     private double hitRate(List<EvaluatedCase> cases, int k) {
         if (cases.isEmpty()) {
             return 0D;
         }
-        long hit = cases.stream().filter(item -> item.hitAt(k)).count();
-        return (double) hit / cases.size();
+        return ratio(hitCount(cases, k), cases.size());
+    }
+
+    private int hitCount(List<EvaluatedCase> cases, int k) {
+        return (int) cases.stream().filter(item -> item.hitAt(k)).count();
+    }
+
+    private double mrrAt(List<EvaluatedCase> cases, int k) {
+        if (cases.isEmpty()) {
+            return 0D;
+        }
+        return cases.stream()
+                .mapToDouble(item -> reciprocalRank(item, k))
+                .average()
+                .orElse(0D);
+    }
+
+    private double reciprocalRank(EvaluatedCase evaluatedCase, int k) {
+        int limit = Math.min(k, evaluatedCase.topChunkIds().size());
+        for (int i = 0; i < limit; i++) {
+            if (evaluatedCase.goldChunkIds().contains(evaluatedCase.topChunkIds().get(i))) {
+                return 1D / (i + 1);
+            }
+        }
+        return 0D;
+    }
+
+    private HitDistribution hitDistribution(List<EvaluatedCase> cases) {
+        int hitAt1 = 0;
+        int hitAt3Not1 = 0;
+        int hitAt5Not3 = 0;
+        int missAt5 = 0;
+        for (EvaluatedCase item : cases) {
+            if (item.hitAt(1)) {
+                hitAt1++;
+            } else if (item.hitAt(3)) {
+                hitAt3Not1++;
+            } else if (item.hitAt(5)) {
+                hitAt5Not3++;
+            } else {
+                missAt5++;
+            }
+        }
+        return new HitDistribution(hitAt1, hitAt3Not1, hitAt5Not3, missAt5);
+    }
+
+    private HitDistribution mergeHitDistributions(List<EvaluationSummary> summaries) {
+        int hitAt1 = 0;
+        int hitAt3Not1 = 0;
+        int hitAt5Not3 = 0;
+        int missAt5 = 0;
+        for (EvaluationSummary summary : summaries) {
+            HitDistribution distribution = summary.hitDistribution();
+            hitAt1 += distribution.hitAt1();
+            hitAt3Not1 += distribution.hitAt3Not1();
+            hitAt5Not3 += distribution.hitAt5Not3();
+            missAt5 += distribution.missAt5();
+        }
+        return new HitDistribution(hitAt1, hitAt3Not1, hitAt5Not3, missAt5);
+    }
+
+    private Map<String, Integer> mergeExcludedReasons(List<EvaluationSummary> summaries) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (EvaluationSummary summary : summaries) {
+            for (Map.Entry<String, Integer> entry : summary.excludedReasons().entrySet()) {
+                addCount(result, entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private double weightedAverage(List<EvaluationSummary> summaries, int k) {
+        int evaluated = summaries.stream().mapToInt(EvaluationSummary::evaluated).sum();
+        if (evaluated == 0) {
+            return 0D;
+        }
+        return summaries.stream()
+                .mapToDouble(summary -> (k == 3 ? summary.mrrAt3() : summary.mrrAt10()) * summary.evaluated())
+                .sum() / evaluated;
+    }
+
+    private void addCount(Map<String, Integer> counts, String key) {
+        addCount(counts, key, 1);
+    }
+
+    private void addCount(Map<String, Integer> counts, String key, int value) {
+        counts.merge(key, value, Integer::sum);
+    }
+
+    private double ratio(int numerator, int denominator) {
+        if (denominator == 0) {
+            return 0D;
+        }
+        return (double) numerator / denominator;
+    }
+
+    private Map<String, Set<String>> loadPreviousMissCaseIds() throws IOException {
+        if (!StringUtils.hasText(compareWithReportPath)) {
+            return Map.of();
+        }
+        Path path = Path.of(compareWithReportPath);
+        if (!Files.exists(path)) {
+            return Map.of();
+        }
+
+        JsonNode root = objectMapper.readTree(Files.readString(path));
+        Map<String, Set<String>> missCaseIdsByGroup = new LinkedHashMap<>();
+        if (root.isArray()) {
+            for (JsonNode summary : root) {
+                collectPreviousMissCaseIds(summary, missCaseIdsByGroup);
+            }
+        } else {
+            collectPreviousMissCaseIds(root, missCaseIdsByGroup);
+        }
+        return missCaseIdsByGroup;
+    }
+
+    private void collectPreviousMissCaseIds(JsonNode summary, Map<String, Set<String>> missCaseIdsByGroup) {
+        JsonNode groupNode = summary.get("group");
+        if (groupNode == null || !groupNode.isTextual()) {
+            return;
+        }
+
+        String group = groupNode.asText();
+        Set<String> missCaseIds = new LinkedHashSet<>();
+        JsonNode missCaseIdsNode = summary.get("missCaseIds");
+        if (missCaseIdsNode != null && missCaseIdsNode.isArray()) {
+            for (JsonNode item : missCaseIdsNode) {
+                if (item.isTextual()) {
+                    missCaseIds.add(item.asText());
+                }
+            }
+        } else {
+            JsonNode missCasesNode = summary.get("missCases");
+            if (missCasesNode != null && missCasesNode.isArray()) {
+                for (JsonNode item : missCasesNode) {
+                    if (item.isTextual()) {
+                        missCaseIds.add(parseCaseId(item.asText()));
+                    }
+                }
+            }
+        }
+        missCaseIdsByGroup.put(group, missCaseIds);
+
+        JsonNode breakdownNode = summary.get("breakdown");
+        if (breakdownNode != null && breakdownNode.isArray()) {
+            for (JsonNode item : breakdownNode) {
+                collectPreviousMissCaseIds(item, missCaseIdsByGroup);
+            }
+        }
+    }
+
+    private String parseCaseId(String missCase) {
+        int separatorIndex = missCase.indexOf(" | ");
+        return separatorIndex >= 0 ? missCase.substring(0, separatorIndex) : missCase;
+    }
+
+    private List<String> newMissCases(
+            String group,
+            List<String> currentMissCaseIds,
+            Map<String, Set<String>> previousMissCaseIds
+    ) {
+        Set<String> previous = previousMissCaseIds.get(group);
+        if (previous == null) {
+            return List.of();
+        }
+        return currentMissCaseIds.stream()
+                .filter(caseId -> !previous.contains(caseId))
+                .limit(DIFF_CASE_LIMIT)
+                .toList();
+    }
+
+    private List<String> fixedMissCases(
+            String group,
+            List<String> currentMissCaseIds,
+            Map<String, Set<String>> previousMissCaseIds
+    ) {
+        Set<String> previous = previousMissCaseIds.get(group);
+        if (previous == null) {
+            return List.of();
+        }
+        Set<String> current = new LinkedHashSet<>(currentMissCaseIds);
+        return previous.stream()
+                .filter(caseId -> !current.contains(caseId))
+                .limit(DIFF_CASE_LIMIT)
+                .toList();
     }
 
     private double average(List<Double> values) {
@@ -546,18 +932,23 @@ class RagRecallEvaluationTest {
             String queryStyle,
             String kbId,
             String query,
-            String goldChunkId,
+            List<String> goldChunkIds,
+            String goldResolutionMode,
+            int goldCandidateCount,
+            String excludedReason,
             boolean evaluable
     ) {
     }
 
     private record EvaluatedCase(
             String caseId,
-            String goldChunkId,
+            List<String> goldChunkIds,
+            String goldResolutionMode,
+            int goldCandidateCount,
             List<String> topChunkIds
     ) {
         boolean hitAt(int k) {
-            return topChunkIds.stream().limit(k).anyMatch(goldChunkId::equals);
+            return topChunkIds.stream().limit(k).anyMatch(goldChunkIds::contains);
         }
     }
 
@@ -566,11 +957,43 @@ class RagRecallEvaluationTest {
             int total,
             int evaluated,
             int excluded,
+            double coverage,
             double recallAt1,
             double recallAt3,
             double recallAt5,
+            double recallAt10,
+            double weightedRecallAt1,
+            double weightedRecallAt3,
+            double weightedRecallAt5,
+            double weightedRecallAt10,
+            int hitAt1Count,
+            int hitAt3Count,
+            int hitAt5Count,
+            int hitAt10Count,
+            double mrrAt3,
+            double mrrAt10,
+            HitDistribution hitDistribution,
+            Map<String, Integer> excludedReasons,
+            Map<String, Integer> skippedDocumentReasons,
             List<String> missCases,
+            List<String> missCaseIds,
+            List<String> newMissCases,
+            List<String> fixedMissCases,
             List<EvaluationSummary> breakdown
+    ) {
+    }
+
+    private record HitDistribution(
+            int hitAt1,
+            int hitAt3Not1,
+            int hitAt5Not3,
+            int missAt5
+    ) {
+    }
+
+    private record GoldResolution(
+            List<String> chunkIds,
+            String mode
     ) {
     }
 

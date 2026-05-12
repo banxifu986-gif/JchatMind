@@ -26,6 +26,7 @@
         <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
         <result property="docId" column="doc_id" jdbcType="VARCHAR"/>
         <result property="content" column="content" jdbcType="VARCHAR"/>
+        <result property="metadata" column="metadata" jdbcType="VARCHAR"/>
         <result property="distance" column="distance" jdbcType="DOUBLE"/>
         <result property="rank" column="rank" jdbcType="INTEGER"/>
     </resultMap>
@@ -128,11 +129,160 @@
                kb_id,
                doc_id,
                content,
+               metadata::text AS metadata,
                embedding <-> #{vectorLiteral}::vector AS distance,
                ROW_NUMBER() OVER (ORDER BY embedding <-> #{vectorLiteral}::vector) AS rank
         FROM chunk_bge_m3
         WHERE kb_id = CAST(#{kbId} AS uuid)
         ORDER BY embedding <-> #{vectorLiteral}::vector
+        LIMIT #{limit}
+        ]]>
+    </select>
+
+    <select id="searchByTitleExact" resultMap="RagRetrievalResultMap">
+        <![CDATA[
+        SELECT id AS chunk_id,
+               kb_id,
+               doc_id,
+               content,
+               metadata::text AS metadata,
+               0::double precision AS distance,
+               ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS rank
+        FROM chunk_bge_m3
+        WHERE kb_id = CAST(#{kbId} AS uuid)
+          AND lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')) = #{normalizedTitle}
+        ORDER BY created_at ASC, id ASC
+        LIMIT #{limit}
+        ]]>
+    </select>
+
+    <select id="searchByTitleContains" resultMap="RagRetrievalResultMap">
+        <![CDATA[
+        SELECT chunk_id,
+               kb_id,
+               doc_id,
+               content,
+               metadata,
+               distance,
+               rank
+        FROM (
+            SELECT id AS chunk_id,
+                   kb_id,
+                   doc_id,
+                   content,
+                   metadata::text AS metadata,
+                   1::double precision AS distance,
+                   ROW_NUMBER() OVER (
+                       ORDER BY ABS(char_length(normalized_title) - char_length(#{normalizedTitle})) ASC,
+                                char_length(normalized_title) ASC,
+                                created_at ASC,
+                                id ASC
+                   ) AS rank
+            FROM (
+                SELECT id,
+                       kb_id,
+                       doc_id,
+                       content,
+                       metadata,
+                       created_at,
+                       lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')) AS normalized_title
+                FROM chunk_bge_m3
+                WHERE kb_id = CAST(#{kbId} AS uuid)
+            ) t
+            WHERE normalized_title LIKE #{containsPattern}
+        ) ranked
+        ORDER BY rank ASC
+        LIMIT #{limit}
+        ]]>
+    </select>
+
+    <select id="searchByTitleKeywords" resultMap="RagRetrievalResultMap">
+        SELECT chunk_id,
+               kb_id,
+               doc_id,
+               content,
+               metadata,
+               distance,
+               rank
+        FROM (
+            SELECT id AS chunk_id,
+                   kb_id,
+                   doc_id,
+                   content,
+                   metadata::text AS metadata,
+                   2::double precision AS distance,
+                   ROW_NUMBER() OVER (
+                       ORDER BY keyword_hit_count DESC,
+                                keyword_length_sum DESC,
+                                ABS(char_length(normalized_title) - #{queryLength}) ASC,
+                                char_length(normalized_title) ASC,
+                                created_at ASC,
+                                id ASC
+                   ) AS rank
+            FROM (
+                SELECT id,
+                       kb_id,
+                       doc_id,
+                       content,
+                       metadata,
+                       created_at,
+                       lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')) AS normalized_title,
+                       (
+                           SELECT COUNT(*)
+                           FROM (
+                               SELECT DISTINCT keyword
+                               FROM (
+                                   <foreach collection="keywords" item="keyword" separator=" UNION ALL ">
+                                       SELECT #{keyword} AS keyword
+                                   </foreach>
+                               ) keyword_list
+                               WHERE lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g'))
+                                     LIKE CONCAT('%', keyword, '%')
+                           ) hit_keywords
+                       ) AS keyword_hit_count,
+                       (
+                           SELECT COALESCE(SUM(char_length(keyword)), 0)
+                           FROM (
+                               SELECT DISTINCT keyword
+                               FROM (
+                                   <foreach collection="keywords" item="keyword" separator=" UNION ALL ">
+                                       SELECT #{keyword} AS keyword
+                                   </foreach>
+                               ) keyword_list
+                               WHERE lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g'))
+                                     LIKE CONCAT('%', keyword, '%')
+                           ) hit_keywords
+                       ) AS keyword_length_sum
+                FROM chunk_bge_m3
+                WHERE kb_id = CAST(#{kbId} AS uuid)
+            ) t
+            WHERE keyword_hit_count > 0
+        ) ranked
+        ORDER BY rank ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchByTitleTrigram" resultMap="RagRetrievalResultMap">
+        <![CDATA[
+        SELECT id AS chunk_id,
+               kb_id,
+               doc_id,
+               content,
+               metadata::text AS metadata,
+               (1 - similarity(lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)))::double precision AS distance,
+               ROW_NUMBER() OVER (
+                   ORDER BY similarity(lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)) DESC,
+                            ABS(char_length(lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g'))) - char_length(CAST(#{normalizedTitle} AS text))) ASC,
+                            created_at ASC,
+                            id ASC
+               ) AS rank
+        FROM chunk_bge_m3
+        WHERE kb_id = CAST(#{kbId} AS uuid)
+          AND similarity(lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)) >= #{minScore}
+        ORDER BY similarity(lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)) DESC,
+                 ABS(char_length(lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g'))) - char_length(CAST(#{normalizedTitle} AS text))) ASC,
+                 created_at ASC,
+                 id ASC
         LIMIT #{limit}
         ]]>
     </select>

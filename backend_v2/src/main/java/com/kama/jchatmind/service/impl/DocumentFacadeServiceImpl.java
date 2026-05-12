@@ -292,7 +292,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         if (content == null || content.trim().isEmpty()) {
             return title;
         }
-        return title + "\n" + content.trim();
+        return title + "\n" + title + "\n" + content.trim();
     }
 
     @lombok.Data

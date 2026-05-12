@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE agent (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -85,3 +86,7 @@ CREATE INDEX idx_chunk_embedding
 ON chunk_bge_m3
 USING ivfflat (embedding vector_l2_ops)
 WITH (lists = 100);
+
+CREATE INDEX idx_chunk_title_trgm
+ON chunk_bge_m3
+USING gin ((lower(regexp_replace(trim(metadata->>'title'), '\s+', ' ', 'g'))) gin_trgm_ops);

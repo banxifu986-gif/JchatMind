@@ -35,5 +35,32 @@ public interface ChunkBgeM3Mapper {
             @Param("limit") int limit
     );
 
+    List<RagRetrievalResult> searchByTitleExact(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleContains(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("containsPattern") String containsPattern,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleKeywords(
+            @Param("kbId") String kbId,
+            @Param("keywords") List<String> keywords,
+            @Param("queryLength") int queryLength,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleTrigram(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("minScore") double minScore,
+            @Param("limit") int limit
+    );
+
     List<ChunkBgeM3> selectByDocId(@Param("docId") String docId);
 }

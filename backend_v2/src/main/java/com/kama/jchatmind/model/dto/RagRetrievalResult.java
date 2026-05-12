@@ -16,6 +16,8 @@ public class RagRetrievalResult {
 
     private String content;
 
+    private String metadata;
+
     private Double distance;
 
     private Integer rank;
