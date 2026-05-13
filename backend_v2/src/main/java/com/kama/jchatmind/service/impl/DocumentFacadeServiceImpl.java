@@ -162,7 +162,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
 
             // 如果是 Markdown 文件，进行解析并生成 chunks
             if ("md".equalsIgnoreCase(filetype) || "markdown".equalsIgnoreCase(filetype)) {
-                processMarkdownDocument(kbId, documentId, filePath);
+                processMarkdownDocument(kbId, documentId, filePath, originalFilename, filetype);
             } else {
                 // TODO: 未来可以增加其他文件类型的处理逻辑
                 log.warn("待新增处理的文件类型: {}", filetype);
@@ -206,7 +206,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     /**
      * 处理 Markdown 文档，解析并生成 chunks
      */
-    private void processMarkdownDocument(String kbId, String documentId, String filePath) {
+    private void processMarkdownDocument(String kbId, String documentId, String filePath, String sourceName, String sourceType) {
         try {
             log.info("开始处理 Markdown 文档: kbId={}, documentId={}, filePath={}", kbId, documentId, filePath);
 
@@ -231,19 +231,20 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                     MarkdownParserService.MarkdownSection section = sections.get(i);
                     String title = section.getTitle();
                     String content = section.getContent();
+                    String contentPath = section.getContentPath();
 
                     if (title == null || title.trim().isEmpty()) {
                         continue;
                     }
 
-                    float[] embedding = ragService.embed(buildChunkEmbeddingText(title, content));
+                    float[] embedding = ragService.embed(buildChunkEmbeddingText(contentPath, title, content));
 
                     // 创建 ChunkBgeM3 实体
                     ChunkBgeM3 chunk = ChunkBgeM3.builder()
                             .kbId(kbId)
                             .docId(documentId)
                             .content(content != null ? content : "")
-                            .metadata(buildChunkMetadata(title, i))
+                            .metadata(buildChunkMetadata(title, contentPath, sourceType, sourceName, i))
                             .embedding(embedding)
                             .createdAt(now)
                             .updatedAt(now)
@@ -277,10 +278,17 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         return filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
     }
 
-    private String buildChunkMetadata(String title, int sectionIndex) {
+    private String buildChunkMetadata(String title, String contentPath, String sourceType, String sourceName, int sectionIndex) {
         try {
             ChunkMetaData chunkMetaData = new ChunkMetaData();
             chunkMetaData.setTitle(title);
+            chunkMetaData.setRetrievableTitle(title);
+            chunkMetaData.setRetrievableTitleSearchText(
+                    RetrievableTitleLexicalizer.buildSearchText(title, title, contentPath, sourceName)
+            );
+            chunkMetaData.setContentPath(contentPath);
+            chunkMetaData.setSourceType(sourceType);
+            chunkMetaData.setSourceName(sourceName);
             chunkMetaData.setSectionIndex(sectionIndex);
             return objectMapper.writeValueAsString(chunkMetaData);
         } catch (JsonProcessingException e) {
@@ -288,16 +296,22 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         }
     }
 
-    private String buildChunkEmbeddingText(String title, String content) {
+    private String buildChunkEmbeddingText(String contentPath, String title, String content) {
+        String effectiveTitle = contentPath != null && !contentPath.trim().isEmpty() ? contentPath.trim() : title;
         if (content == null || content.trim().isEmpty()) {
-            return title;
+            return effectiveTitle;
         }
-        return title + "\n" + title + "\n" + content.trim();
+        return effectiveTitle + "\n" + title + "\n" + content.trim();
     }
 
     @lombok.Data
     private static class ChunkMetaData {
         private String title;
+        private String retrievableTitle;
+        private String retrievableTitleSearchText;
+        private String contentPath;
+        private String sourceType;
+        private String sourceName;
         private Integer sectionIndex;
     }
 

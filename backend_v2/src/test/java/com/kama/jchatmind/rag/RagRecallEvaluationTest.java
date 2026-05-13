@@ -10,6 +10,7 @@ import com.kama.jchatmind.mapper.DocumentMapper;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.model.dto.DocumentDTO;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
+import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import com.kama.jchatmind.model.entity.Document;
@@ -20,6 +21,7 @@ import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.DocumentStorageServiceImpl;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
+import com.kama.jchatmind.service.impl.RetrievableTitleLexicalizer;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.Resource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -65,6 +68,11 @@ class RagRecallEvaluationTest {
     private static final String MODE_REAL = "real";
     private static final String MODE_BOTH = "both";
     private static final String QUERY_STYLE_TITLE = "title_exact";
+    private static final String QUERY_STYLE_TITLE_PATH = "title_path";
+    private static final String QUERY_STYLE_TITLE_TO_CONTENT = "title_to_content";
+    private static final String QUERY_STYLE_SOURCE_SCOPED_TITLE = "source_scoped_title";
+    private static final String QUERY_STYLE_CONTEXTUAL_TITLE_QUERY = "contextual_title_query";
+    private static final String QUERY_STYLE_AUTO_PATH_SELECTION = "auto_path_selection";
     private static final String QUERY_STYLE_REWRITE = "content_rewrite";
     private static final int EVAL_RETRIEVAL_LIMIT = 10;
     private static final int REPORT_CASE_LIMIT = 10;
@@ -75,6 +83,7 @@ class RagRecallEvaluationTest {
     private static final String SKIPPED_MISSING_FILE_OR_METADATA = "missing_file_or_metadata";
     private static final String SKIPPED_NON_MARKDOWN = "non_markdown";
     private static final String GOLD_EXACT_CONTENT = "exact_content";
+    private static final String GOLD_TITLE_ANCHOR = "title_anchor";
     private static final String GOLD_METADATA_SECTION_INDEX = "metadata_section_index";
     private static final String GOLD_SECTION_ORDER_EXACT = "section_order_exact";
     private static final String GOLD_CONTENT_OVERLAP = "content_overlap";
@@ -107,6 +116,9 @@ class RagRecallEvaluationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Value("${rag.eval.mode:fixture}")
     private String evalMode;
 
@@ -128,6 +140,12 @@ class RagRecallEvaluationTest {
     @Value("${rag.eval.compare-with:}")
     private String compareWithReportPath;
 
+    @Value("${rag.eval.ensure-pg-trgm:true}")
+    private boolean ensurePgTrgm;
+
+    @Value("${rag.eval.rebuild-real-kb:false}")
+    private boolean rebuildRealKb;
+
     @Value("classpath:rag-eval/fixtures/fixture-kb.md")
     private Resource fixtureMarkdown;
 
@@ -141,6 +159,29 @@ class RagRecallEvaluationTest {
         reportOutputPath = Path.of("target", "rag-eval", "report.json");
         Files.createDirectories(reportOutputPath.getParent());
         Files.createDirectories(Path.of(documentStorageBasePath));
+        ensurePgTrgmReady();
+    }
+
+    private void ensurePgTrgmReady() {
+        if (!ensurePgTrgm) {
+            return;
+        }
+        try {
+            jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+            jdbcTemplate.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_chunk_retrievable_title_trgm
+                    ON chunk_bge_m3
+                    USING gin ((lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\\s+', ' ', 'g'))) gin_trgm_ops)
+                    """);
+            jdbcTemplate.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_chunk_retrievable_title_search_tsv
+                    ON chunk_bge_m3
+                    USING gin (to_tsvector('simple', COALESCE(metadata->>'retrievableTitleSearchText', '')))
+                    """);
+            jdbcTemplate.queryForObject("SELECT similarity('jchatmind', 'jchatmind')", Double.class);
+        } catch (Exception e) {
+            throw new IllegalStateException("评测库 pg_trgm 初始化失败，请确认当前数据库用户有 CREATE EXTENSION 权限", e);
+        }
     }
 
     @Test
@@ -191,7 +232,9 @@ class RagRecallEvaluationTest {
     private EvaluationSummary runRealEvaluation(String kbId, Map<String, Set<String>> previousMissCaseIds) throws Exception {
         List<QueryCase> queryCases = new ArrayList<>();
         Map<String, Integer> skippedDocumentReasons = new LinkedHashMap<>();
-        List<Document> documents = documentMapper.selectByKbId(kbId);
+        List<Document> documents = rebuildRealKb
+                ? rebuildRealKnowledgeBase(kbId)
+                : documentMapper.selectByKbId(kbId);
 
         for (Document document : documents) {
             if (!isMarkdown(document.getFiletype())) {
@@ -216,6 +259,42 @@ class RagRecallEvaluationTest {
         return evaluateCases("real", queryCases, skippedDocumentReasons, previousMissCaseIds);
     }
 
+    private List<Document> rebuildRealKnowledgeBase(String kbId) throws Exception {
+        List<Document> existingDocuments = documentMapper.selectByKbId(kbId);
+        List<RealDocumentSnapshot> snapshots = new ArrayList<>();
+        for (Document document : existingDocuments) {
+            if (!isMarkdown(document.getFiletype())) {
+                continue;
+            }
+            DocumentDTO documentDTO = documentConverter.toDTO(document);
+            if (documentDTO.getMetadata() == null || !StringUtils.hasText(documentDTO.getMetadata().getFilePath())) {
+                continue;
+            }
+            if (!documentStorageService.fileExists(documentDTO.getMetadata().getFilePath())) {
+                continue;
+            }
+            Path sourcePath = documentStorageService.getFilePath(documentDTO.getMetadata().getFilePath());
+            snapshots.add(new RealDocumentSnapshot(
+                    document.getFilename(),
+                    document.getFiletype(),
+                    Files.readAllBytes(sourcePath)
+            ));
+        }
+
+        cleanupKnowledgeBaseDocuments(kbId);
+
+        List<Document> rebuiltDocuments = new ArrayList<>();
+        for (RealDocumentSnapshot snapshot : snapshots) {
+            String documentId = insertDocumentRecord(kbId, snapshot.filename(), snapshot.bytes().length, snapshot.filetype());
+            MultipartFile multipartFile = new InMemoryMultipartFile(snapshot.filename(), "text/markdown", snapshot.bytes());
+            String filePath = documentStorageService.saveFile(kbId, documentId, multipartFile);
+            updateDocumentMetadata(documentId, kbId, snapshot.filename(), snapshot.bytes().length, filePath, snapshot.filetype());
+            createChunksFromMarkdown(kbId, documentId, filePath, snapshot.filename(), snapshot.filetype());
+            rebuiltDocuments.add(documentMapper.selectById(documentId));
+        }
+        return rebuiltDocuments;
+    }
+
     private EvaluationSummary evaluateCases(
             String source,
             List<QueryCase> cases,
@@ -225,40 +304,59 @@ class RagRecallEvaluationTest {
         Map<String, List<QueryCase>> caseGroups = cases.stream()
                 .collect(Collectors.groupingBy(QueryCase::queryStyle, LinkedHashMap::new, Collectors.toList()));
 
-        List<EvaluationSummary> breakdown = new ArrayList<>();
+        List<EvaluationSummary> primaryBreakdown = new ArrayList<>();
         for (String queryStyle : List.of(QUERY_STYLE_TITLE, QUERY_STYLE_REWRITE)) {
-            breakdown.add(evaluateStyleGroup(
+            primaryBreakdown.add(evaluateStyleGroup(
                     source + "/" + queryStyle,
                     caseGroups.getOrDefault(queryStyle, List.of()),
                     previousMissCaseIds
             ));
         }
 
-        int total = breakdown.stream().mapToInt(EvaluationSummary::total).sum();
-        int evaluated = breakdown.stream().mapToInt(EvaluationSummary::evaluated).sum();
-        int excluded = breakdown.stream().mapToInt(EvaluationSummary::excluded).sum();
+        List<EvaluationSummary> diagnosticBreakdown = new ArrayList<>();
+        for (String queryStyle : List.of(
+                QUERY_STYLE_TITLE_TO_CONTENT,
+                QUERY_STYLE_SOURCE_SCOPED_TITLE,
+                QUERY_STYLE_CONTEXTUAL_TITLE_QUERY,
+                QUERY_STYLE_AUTO_PATH_SELECTION,
+                QUERY_STYLE_TITLE_PATH
+        )) {
+            diagnosticBreakdown.add(evaluateStyleGroup(
+                    source + "/" + queryStyle,
+                    caseGroups.getOrDefault(queryStyle, List.of()),
+                    previousMissCaseIds
+            ));
+        }
+
+        List<EvaluationSummary> allBreakdown = new ArrayList<>();
+        allBreakdown.addAll(primaryBreakdown);
+        allBreakdown.addAll(diagnosticBreakdown);
+
+        int total = primaryBreakdown.stream().mapToInt(EvaluationSummary::total).sum();
+        int evaluated = primaryBreakdown.stream().mapToInt(EvaluationSummary::evaluated).sum();
+        int excluded = primaryBreakdown.stream().mapToInt(EvaluationSummary::excluded).sum();
         double coverage = ratio(evaluated, total);
-        double recallAt1 = average(breakdown.stream().map(EvaluationSummary::recallAt1).toList());
-        double recallAt3 = average(breakdown.stream().map(EvaluationSummary::recallAt3).toList());
-        double recallAt5 = average(breakdown.stream().map(EvaluationSummary::recallAt5).toList());
-        double recallAt10 = average(breakdown.stream().map(EvaluationSummary::recallAt10).toList());
-        int hitAt1Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt1Count).sum();
-        int hitAt3Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt3Count).sum();
-        int hitAt5Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt5Count).sum();
-        int hitAt10Count = breakdown.stream().mapToInt(EvaluationSummary::hitAt10Count).sum();
+        double recallAt1 = average(primaryBreakdown.stream().map(EvaluationSummary::recallAt1).toList());
+        double recallAt3 = average(primaryBreakdown.stream().map(EvaluationSummary::recallAt3).toList());
+        double recallAt5 = average(primaryBreakdown.stream().map(EvaluationSummary::recallAt5).toList());
+        double recallAt10 = average(primaryBreakdown.stream().map(EvaluationSummary::recallAt10).toList());
+        int hitAt1Count = primaryBreakdown.stream().mapToInt(EvaluationSummary::hitAt1Count).sum();
+        int hitAt3Count = primaryBreakdown.stream().mapToInt(EvaluationSummary::hitAt3Count).sum();
+        int hitAt5Count = primaryBreakdown.stream().mapToInt(EvaluationSummary::hitAt5Count).sum();
+        int hitAt10Count = primaryBreakdown.stream().mapToInt(EvaluationSummary::hitAt10Count).sum();
         double weightedRecallAt1 = ratio(hitAt1Count, evaluated);
         double weightedRecallAt3 = ratio(hitAt3Count, evaluated);
         double weightedRecallAt5 = ratio(hitAt5Count, evaluated);
         double weightedRecallAt10 = ratio(hitAt10Count, evaluated);
-        double mrrAt3 = weightedAverage(breakdown, 3);
-        double mrrAt10 = weightedAverage(breakdown, 10);
-        HitDistribution hitDistribution = mergeHitDistributions(breakdown);
-        Map<String, Integer> excludedReasons = mergeExcludedReasons(breakdown);
-        List<String> missCases = breakdown.stream()
+        double mrrAt3 = weightedAverage(primaryBreakdown, 3);
+        double mrrAt10 = weightedAverage(primaryBreakdown, 10);
+        HitDistribution hitDistribution = mergeHitDistributions(primaryBreakdown);
+        Map<String, Integer> excludedReasons = mergeExcludedReasons(primaryBreakdown);
+        List<String> missCases = primaryBreakdown.stream()
                 .flatMap(summary -> summary.missCases().stream())
                 .limit(REPORT_CASE_LIMIT)
                 .toList();
-        List<String> missCaseIds = breakdown.stream()
+        List<String> missCaseIds = primaryBreakdown.stream()
                 .flatMap(summary -> summary.missCaseIds().stream())
                 .toList();
         List<String> newMissCases = newMissCases(source, missCaseIds, previousMissCaseIds);
@@ -291,7 +389,7 @@ class RagRecallEvaluationTest {
                 missCaseIds,
                 newMissCases,
                 fixedMissCases,
-                breakdown
+                allBreakdown
         );
     }
 
@@ -309,7 +407,7 @@ class RagRecallEvaluationTest {
                 continue;
             }
 
-            List<RagRetrievalResult> results = ragService.retrieve(queryCase.kbId(), queryCase.query(), EVAL_RETRIEVAL_LIMIT);
+            List<RagRetrievalResult> results = retrieveForEvaluation(queryCase);
             List<String> topChunkIds = results.stream()
                     .map(RagRetrievalResult::getChunkId)
                     .toList();
@@ -383,6 +481,10 @@ class RagRecallEvaluationTest {
         );
     }
 
+    private List<RagRetrievalResult> retrieveForEvaluation(QueryCase queryCase) {
+        return ragService.retrieve(queryCase.kbId(), queryCase.query(), queryCase.context(), EVAL_RETRIEVAL_LIMIT);
+    }
+
     private List<QueryCase> buildQueryCases(
             String kbId,
             String docId,
@@ -397,7 +499,12 @@ class RagRecallEvaluationTest {
 
         for (int i = 0; i < sections.size(); i++) {
             MarkdownParserService.MarkdownSection section = sections.get(i);
-            GoldResolution goldResolution = resolveGoldChunks(docId, section, sortedChunks, i);
+            GoldResolution contentGoldResolution = resolveGoldChunks(docId, section, sortedChunks, i);
+            GoldResolution titleGoldResolution = resolveTitleAnchorGoldChunks(docId, section, sortedChunks);
+            String sourceName = extractSourceName(contentGoldResolution, sortedChunks);
+            String sourceType = extractSourceType(contentGoldResolution, sortedChunks);
+            String contentPath = section.getContentPath();
+            String parentContentPath = parentContentPath(contentPath);
 
             queryCases.add(createCase(
                     source,
@@ -406,7 +513,66 @@ class RagRecallEvaluationTest {
                     docId,
                     i,
                     section.getTitle(),
-                    goldResolution
+                    titleGoldResolution
+            ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_TITLE_TO_CONTENT,
+                    kbId,
+                    docId,
+                    i,
+                    section.getTitle(),
+                    contentGoldResolution
+            ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_SOURCE_SCOPED_TITLE,
+                    kbId,
+                    docId,
+                    i,
+                    section.getTitle(),
+                    RagRetrievalContext.builder()
+                            .sourceName(sourceName)
+                            .sourceType(sourceType)
+                            .build(),
+                    contentGoldResolution
+            ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_CONTEXTUAL_TITLE_QUERY,
+                    kbId,
+                    docId,
+                    i,
+                    section.getTitle(),
+                    RagRetrievalContext.builder()
+                            .sourceName(sourceName)
+                            .sourceType(sourceType)
+                            .contentPath(parentContentPath)
+                            .build(),
+                    contentGoldResolution
+            ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_AUTO_PATH_SELECTION,
+                    kbId,
+                    docId,
+                    i,
+                    buildPathAwareTitleQuery(parentContentPath, section.getTitle()),
+                    contentGoldResolution
+            ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_TITLE_PATH,
+                    kbId,
+                    docId,
+                    i,
+                    section.getContentPath(),
+                    contentGoldResolution
             ));
 
             String rewriteQuery = buildRewriteQuery(section.getContent());
@@ -417,11 +583,35 @@ class RagRecallEvaluationTest {
                     docId,
                     i,
                     rewriteQuery,
-                    goldResolution
+                    contentGoldResolution
             ));
         }
 
         return queryCases;
+    }
+
+    private GoldResolution resolveTitleAnchorGoldChunks(
+            String docId,
+            MarkdownParserService.MarkdownSection section,
+            List<ChunkBgeM3> persistedChunks
+    ) {
+        String normalizedTitle = normalizeTitle(section.getTitle());
+        if (!StringUtils.hasText(normalizedTitle)) {
+            return new GoldResolution(List.of(), GOLD_NOT_FOUND);
+        }
+
+        List<ChunkBgeM3> titleMatches = persistedChunks.stream()
+                .filter(chunk -> docId.equals(chunk.getDocId()))
+                .filter(chunk -> normalizeTitle(extractRetrievableTitle(chunk.getMetadata())).equals(normalizedTitle))
+                .toList();
+        if (!titleMatches.isEmpty()) {
+            return new GoldResolution(
+                    titleMatches.stream().map(ChunkBgeM3::getId).toList(),
+                    GOLD_TITLE_ANCHOR
+            );
+        }
+
+        return new GoldResolution(List.of(), GOLD_NOT_FOUND);
     }
 
     private QueryCase createCase(
@@ -433,6 +623,19 @@ class RagRecallEvaluationTest {
             String query,
             GoldResolution goldResolution
     ) {
+        return createCase(source, queryStyle, kbId, docId, sectionIndex, query, null, goldResolution);
+    }
+
+    private QueryCase createCase(
+            String source,
+            String queryStyle,
+            String kbId,
+            String docId,
+            int sectionIndex,
+            String query,
+            RagRetrievalContext context,
+            GoldResolution goldResolution
+    ) {
         String caseId = source + "/" + queryStyle + "/" + docId + "/" + sectionIndex;
         String excludedReason = excludedReason(queryStyle, query, goldResolution);
         boolean evaluable = excludedReason == null;
@@ -441,6 +644,7 @@ class RagRecallEvaluationTest {
                 queryStyle,
                 kbId,
                 query,
+                context,
                 goldResolution.chunkIds(),
                 goldResolution.mode(),
                 goldResolution.chunkIds().size(),
@@ -498,6 +702,44 @@ class RagRecallEvaluationTest {
         return new GoldResolution(List.of(), GOLD_NOT_FOUND);
     }
 
+    private String extractSourceName(GoldResolution goldResolution, List<ChunkBgeM3> persistedChunks) {
+        return extractMetadataText(goldResolution, persistedChunks, "sourceName");
+    }
+
+    private String extractSourceType(GoldResolution goldResolution, List<ChunkBgeM3> persistedChunks) {
+        return extractMetadataText(goldResolution, persistedChunks, "sourceType");
+    }
+
+    private String extractMetadataText(GoldResolution goldResolution, List<ChunkBgeM3> persistedChunks, String fieldName) {
+        if (goldResolution.chunkIds().isEmpty()) {
+            return null;
+        }
+        String chunkId = goldResolution.chunkIds().get(0);
+        return persistedChunks.stream()
+                .filter(chunk -> chunkId.equals(chunk.getId()))
+                .findFirst()
+                .map(chunk -> extractMetadataText(chunk.getMetadata(), fieldName))
+                .orElse(null);
+    }
+
+    private String parentContentPath(String contentPath) {
+        if (!StringUtils.hasText(contentPath)) {
+            return null;
+        }
+        int separatorIndex = contentPath.lastIndexOf(" > ");
+        if (separatorIndex <= 0) {
+            return contentPath;
+        }
+        return contentPath.substring(0, separatorIndex);
+    }
+
+    private String buildPathAwareTitleQuery(String parentContentPath, String title) {
+        if (!StringUtils.hasText(parentContentPath)) {
+            return title;
+        }
+        return parentContentPath + " > " + title;
+    }
+
     private Document ingestFixtureMarkdown(String kbId, Resource resource) throws Exception {
         byte[] bytes;
         try (InputStream inputStream = resource.getInputStream()) {
@@ -509,15 +751,29 @@ class RagRecallEvaluationTest {
         MultipartFile multipartFile = new InMemoryMultipartFile(originalFilename, "text/markdown", bytes);
         String filePath = documentStorageService.saveFile(kbId, documentId, multipartFile);
         updateDocumentMetadata(documentId, kbId, originalFilename, bytes.length, filePath);
-        createChunksFromMarkdown(kbId, documentId, filePath);
+        createChunksFromMarkdown(kbId, documentId, filePath, originalFilename, "md");
         return documentMapper.selectById(documentId);
     }
 
+    private void cleanupKnowledgeBaseDocuments(String kbId) throws Exception {
+        for (Document document : documentMapper.selectByKbId(kbId)) {
+            DocumentDTO documentDTO = documentConverter.toDTO(document);
+            if (documentDTO.getMetadata() != null && StringUtils.hasText(documentDTO.getMetadata().getFilePath())) {
+                documentStorageService.deleteFile(documentDTO.getMetadata().getFilePath());
+            }
+            documentMapper.deleteById(document.getId());
+        }
+    }
+
     private String insertDocumentRecord(String kbId, String filename, long size) throws JsonProcessingException {
+        return insertDocumentRecord(kbId, filename, size, "md");
+    }
+
+    private String insertDocumentRecord(String kbId, String filename, long size, String filetype) throws JsonProcessingException {
         DocumentDTO documentDTO = DocumentDTO.builder()
                 .kbId(kbId)
                 .filename(filename)
-                .filetype("md")
+                .filetype(filetype)
                 .size(size)
                 .build();
 
@@ -530,6 +786,10 @@ class RagRecallEvaluationTest {
     }
 
     private void updateDocumentMetadata(String documentId, String kbId, String filename, long size, String filePath) throws JsonProcessingException {
+        updateDocumentMetadata(documentId, kbId, filename, size, filePath, "md");
+    }
+
+    private void updateDocumentMetadata(String documentId, String kbId, String filename, long size, String filePath, String filetype) throws JsonProcessingException {
         DocumentDTO.MetaData metadata = new DocumentDTO.MetaData();
         metadata.setFilePath(filePath);
 
@@ -537,7 +797,7 @@ class RagRecallEvaluationTest {
                 .id(documentId)
                 .kbId(kbId)
                 .filename(filename)
-                .filetype("md")
+                .filetype(filetype)
                 .size(size)
                 .metadata(metadata)
                 .createdAt(LocalDateTime.now())
@@ -549,7 +809,13 @@ class RagRecallEvaluationTest {
         documentMapper.updateById(document);
     }
 
-    private void createChunksFromMarkdown(String kbId, String documentId, String filePath) throws Exception {
+    private void createChunksFromMarkdown(
+            String kbId,
+            String documentId,
+            String filePath,
+            String sourceName,
+            String sourceType
+    ) throws Exception {
         Path path = documentStorageService.getFilePath(filePath);
         try (InputStream inputStream = Files.newInputStream(path)) {
             List<MarkdownParserService.MarkdownSection> sections = markdownParserService.parseMarkdown(inputStream);
@@ -562,12 +828,12 @@ class RagRecallEvaluationTest {
                     continue;
                 }
 
-                float[] embedding = ragService.embed(buildChunkEmbeddingText(title, section.getContent()));
+                float[] embedding = ragService.embed(buildChunkEmbeddingText(section.getContentPath(), title, section.getContent()));
                 ChunkBgeM3 chunk = ChunkBgeM3.builder()
                         .kbId(kbId)
                         .docId(documentId)
                         .content(section.getContent() != null ? section.getContent() : "")
-                        .metadata(buildChunkMetadata(title, i))
+                        .metadata(buildChunkMetadata(title, section.getContentPath(), sourceType, sourceName, i))
                         .embedding(embedding)
                         .createdAt(now)
                         .updatedAt(now)
@@ -577,18 +843,30 @@ class RagRecallEvaluationTest {
         }
     }
 
-    private String buildChunkMetadata(String title, int sectionIndex) throws JsonProcessingException {
+    private String buildChunkMetadata(
+            String title,
+            String contentPath,
+            String sourceType,
+            String sourceName,
+            int sectionIndex
+    ) throws JsonProcessingException {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("title", title);
+        metadata.put("retrievableTitle", title);
+        metadata.put("retrievableTitleSearchText", RetrievableTitleLexicalizer.buildSearchText(title, title, contentPath, sourceName));
+        metadata.put("contentPath", contentPath);
+        metadata.put("sourceType", sourceType);
+        metadata.put("sourceName", sourceName);
         metadata.put("sectionIndex", sectionIndex);
         return objectMapper.writeValueAsString(metadata);
     }
 
-    private String buildChunkEmbeddingText(String title, String content) {
+    private String buildChunkEmbeddingText(String contentPath, String title, String content) {
+        String effectiveTitle = StringUtils.hasText(contentPath) ? contentPath.trim() : title;
         if (!StringUtils.hasText(content)) {
-            return title;
+            return effectiveTitle;
         }
-        return title + "\n" + title + "\n" + content.trim();
+        return effectiveTitle + "\n" + title + "\n" + content.trim();
     }
 
     private KnowledgeBase createKnowledgeBase(String name, String description) throws JsonProcessingException {
@@ -687,6 +965,39 @@ class RagRecallEvaluationTest {
         } catch (JsonProcessingException e) {
             return -1;
         }
+    }
+
+    private String extractRetrievableTitle(String metadata) {
+        if (!StringUtils.hasText(metadata)) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(metadata);
+            JsonNode titleNode = root.get("retrievableTitle");
+            if (titleNode == null || !titleNode.isTextual()) {
+                titleNode = root.get("title");
+            }
+            return titleNode != null && titleNode.isTextual() ? titleNode.asText() : "";
+        } catch (JsonProcessingException e) {
+            return "";
+        }
+    }
+
+    private String extractMetadataText(String metadata, String fieldName) {
+        if (!StringUtils.hasText(metadata)) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(metadata);
+            JsonNode node = root.get(fieldName);
+            return node != null && node.isTextual() ? node.asText() : "";
+        } catch (JsonProcessingException e) {
+            return "";
+        }
+    }
+
+    private String normalizeTitle(String title) {
+        return RetrievableTitleLexicalizer.normalize(title);
     }
 
     private String excludedReason(String queryStyle, String query, GoldResolution goldResolution) {
@@ -932,6 +1243,7 @@ class RagRecallEvaluationTest {
             String queryStyle,
             String kbId,
             String query,
+            RagRetrievalContext context,
             List<String> goldChunkIds,
             String goldResolutionMode,
             int goldCandidateCount,
@@ -1052,5 +1364,12 @@ class RagRecallEvaluationTest {
         public void transferTo(Path dest) throws IOException {
             Files.write(dest, content);
         }
+    }
+
+    private record RealDocumentSnapshot(
+            String filename,
+            String filetype,
+            byte[] bytes
+    ) {
     }
 }

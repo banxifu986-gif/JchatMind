@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -70,6 +71,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             if (node instanceof Heading) {
                 Heading heading = (Heading) node;
                 String title = extractHeadingText(heading);
+                String contentPath = buildHeadingPath(topLevelNodes, i, heading.getLevel(), title);
                 
                 if (title == null || title.trim().isEmpty()) {
                     continue;
@@ -96,9 +98,38 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
                 }
                 
                 String content = contentBuilder.toString().trim();
-                sections.add(new MarkdownSection(title, content));
+                sections.add(new MarkdownSection(title, content, contentPath));
             }
         }
+    }
+
+    private String buildHeadingPath(List<Node> topLevelNodes, int currentIndex, int currentLevel, String currentTitle) {
+        List<String> pathSegments = new ArrayList<>();
+        for (int i = 0; i < currentIndex; i++) {
+            Node node = topLevelNodes.get(i);
+            if (!(node instanceof Heading previousHeading)) {
+                continue;
+            }
+            if (previousHeading.getLevel() >= currentLevel) {
+                continue;
+            }
+
+            String previousTitle = extractHeadingText(previousHeading);
+            if (previousTitle == null || previousTitle.trim().isEmpty()) {
+                continue;
+            }
+
+            while (pathSegments.size() >= previousHeading.getLevel()) {
+                pathSegments.remove(pathSegments.size() - 1);
+            }
+            pathSegments.add(previousTitle.trim());
+        }
+
+        while (pathSegments.size() >= currentLevel) {
+            pathSegments.remove(pathSegments.size() - 1);
+        }
+        pathSegments.add(currentTitle.trim());
+        return pathSegments.stream().collect(Collectors.joining(" > "));
     }
 
     /**

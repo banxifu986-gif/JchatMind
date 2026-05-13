@@ -35,9 +35,29 @@ public interface ChunkBgeM3Mapper {
             @Param("limit") int limit
     );
 
+    List<RagRetrievalResult> similaritySearchDetailedWithContext(
+            @Param("kbId") String kbId,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
+
     List<RagRetrievalResult> searchByTitleExact(
             @Param("kbId") String kbId,
             @Param("normalizedTitle") String normalizedTitle,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleExactWithContext(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
             @Param("limit") int limit
     );
 
@@ -61,6 +81,10 @@ public interface ChunkBgeM3Mapper {
             @Param("minScore") double minScore,
             @Param("limit") int limit
     );
+
+    List<RagRetrievalResult> selectLexicalCandidatesByKbId(@Param("kbId") String kbId);
+
+    List<RagRetrievalResult> selectTitlePathCandidatesByKbId(@Param("kbId") String kbId);
 
     List<ChunkBgeM3> selectByDocId(@Param("docId") String docId);
 }

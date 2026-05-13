@@ -26,5 +26,18 @@ public class ChunkBgeM3DTO {
 
     @Data
     public static class MetaData {
+        private String title;
+
+        private String retrievableTitle;
+
+        private String retrievableTitleSearchText;
+
+        private String contentPath;
+
+        private String sourceType;
+
+        private String sourceName;
+
+        private Integer sectionIndex;
     }
 }
