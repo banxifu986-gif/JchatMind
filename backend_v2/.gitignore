@@ -19,6 +19,10 @@ target/
 *.iml
 *.ipr
 
+/data
+/sql
+
+
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
@@ -37,4 +41,4 @@ src/main/resources/application-dev.yaml
 .env.*
 !.env.example
 
-/data
+
