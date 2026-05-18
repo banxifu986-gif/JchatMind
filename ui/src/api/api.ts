@@ -1,7 +1,6 @@
 import { get, post, patch, del, BASE_URL } from "./http.ts";
 import type { ChatMessageVO, MessageType } from "../types";
 
-// 类型定义
 export interface ChatOptions {
   temperature?: number;
   topP?: number;
@@ -51,32 +50,20 @@ export interface GetAgentsResponse {
   agents: AgentVO[];
 }
 
-/**
- * 获取所有 agents
- */
 export async function getAgents(): Promise<GetAgentsResponse> {
   return get<GetAgentsResponse>("/agents");
 }
 
-/**
- * 创建 agent
- */
 export async function createAgent(
   request: CreateAgentRequest,
 ): Promise<CreateAgentResponse> {
   return post<CreateAgentResponse>("/agents", request);
 }
 
-/**
- * 删除 agent
- */
 export async function deleteAgent(agentId: string): Promise<void> {
   return del<void>(`/agents/${agentId}`);
 }
 
-/**
- * 更新 agent
- */
 export async function updateAgent(
   agentId: string,
   request: UpdateAgentRequest,
@@ -84,10 +71,8 @@ export async function updateAgent(
   return patch<void>(`/agents/${agentId}`, request);
 }
 
-/**
- * 创建聊天会话
- */
 export interface CreateChatSessionRequest {
+  userId: string;
   agentId: string;
   title?: string;
   metadata?: ChatSessionMetadata;
@@ -103,11 +88,9 @@ export async function createChatSession(
   return post<CreateChatSessionResponse>("/chat-sessions", request);
 }
 
-/**
- * 聊天会话相关类型和接口
- */
 export interface ChatSessionVO {
   id: string;
+  userId: string;
   agentId: string;
   title?: string;
   metadata?: ChatSessionMetadata;
@@ -136,51 +119,45 @@ export interface ChatSessionMetadata {
   retrievalContext?: RagRetrievalContext;
 }
 
-/**
- * 获取所有聊天会话
- */
-export async function getChatSessions(): Promise<GetChatSessionsResponse> {
-  return get<GetChatSessionsResponse>("/chat-sessions");
+export async function getChatSessions(
+  userId: string,
+): Promise<GetChatSessionsResponse> {
+  return get<GetChatSessionsResponse>("/chat-sessions", { userId });
 }
 
-/**
- * 获取单个聊天会话
- */
 export async function getChatSession(
+  userId: string,
   chatSessionId: string,
 ): Promise<GetChatSessionResponse> {
-  return get<GetChatSessionResponse>(`/chat-sessions/${chatSessionId}`);
+  return get<GetChatSessionResponse>(`/chat-sessions/${chatSessionId}`, {
+    userId,
+  });
 }
 
-/**
- * 根据 agentId 获取聊天会话
- */
 export async function getChatSessionsByAgentId(
+  userId: string,
   agentId: string,
 ): Promise<GetChatSessionsResponse> {
-  return get<GetChatSessionsResponse>(`/chat-sessions/agent/${agentId}`);
+  return get<GetChatSessionsResponse>(`/chat-sessions/agent/${agentId}`, {
+    userId,
+  });
 }
 
-/**
- * 更新聊天会话
- */
 export async function updateChatSession(
+  userId: string,
   chatSessionId: string,
   request: UpdateChatSessionRequest,
 ): Promise<void> {
-  return patch<void>(`/chat-sessions/${chatSessionId}`, request);
+  return patch<void>(`/chat-sessions/${chatSessionId}?userId=${encodeURIComponent(userId)}`, request);
 }
 
-/**
- * 删除聊天会话
- */
-export async function deleteChatSession(chatSessionId: string): Promise<void> {
-  return del<void>(`/chat-sessions/${chatSessionId}`);
+export async function deleteChatSession(
+  userId: string,
+  chatSessionId: string,
+): Promise<void> {
+  return del<void>(`/chat-sessions/${chatSessionId}`, { userId });
 }
 
-/**
- * 聊天消息相关类型和接口
- */
 export interface MetaData {
   [key: string]: unknown;
 }
@@ -190,6 +167,7 @@ export interface GetChatMessagesResponse {
 }
 
 export interface CreateChatMessageRequest {
+  userId: string;
   agentId: string;
   sessionId: string;
   role: MessageType;
@@ -206,44 +184,36 @@ export interface UpdateChatMessageRequest {
   metadata?: MetaData;
 }
 
-/**
- * 根据 sessionId 获取聊天消息
- */
 export async function getChatMessagesBySessionId(
+  userId: string,
   sessionId: string,
 ): Promise<GetChatMessagesResponse> {
-  return get<GetChatMessagesResponse>(`/chat-messages/session/${sessionId}`);
+  return get<GetChatMessagesResponse>(`/chat-messages/session/${sessionId}`, {
+    userId,
+  });
 }
 
-/**
- * 创建聊天消息
- */
 export async function createChatMessage(
   request: CreateChatMessageRequest,
 ): Promise<CreateChatMessageResponse> {
   return post<CreateChatMessageResponse>("/chat-messages", request);
 }
 
-/**
- * 更新聊天消息
- */
 export async function updateChatMessage(
+  userId: string,
   chatMessageId: string,
   request: UpdateChatMessageRequest,
 ): Promise<void> {
-  return patch<void>(`/chat-messages/${chatMessageId}`, request);
+  return patch<void>(`/chat-messages/${chatMessageId}?userId=${encodeURIComponent(userId)}`, request);
 }
 
-/**
- * 删除聊天消息
- */
-export async function deleteChatMessage(chatMessageId: string): Promise<void> {
-  return del<void>(`/chat-messages/${chatMessageId}`);
+export async function deleteChatMessage(
+  userId: string,
+  chatMessageId: string,
+): Promise<void> {
+  return del<void>(`/chat-messages/${chatMessageId}`, { userId });
 }
 
-/**
- * 知识库相关类型和接口
- */
 export interface KnowledgeBaseVO {
   id: string;
   name: string;
@@ -268,34 +238,22 @@ export interface CreateKnowledgeBaseResponse {
   knowledgeBaseId: string;
 }
 
-/**
- * 获取所有知识库
- */
 export async function getKnowledgeBases(): Promise<GetKnowledgeBasesResponse> {
   return get<GetKnowledgeBasesResponse>("/knowledge-bases");
 }
 
-/**
- * 创建知识库
- */
 export async function createKnowledgeBase(
   request: CreateKnowledgeBaseRequest,
 ): Promise<CreateKnowledgeBaseResponse> {
   return post<CreateKnowledgeBaseResponse>("/knowledge-bases", request);
 }
 
-/**
- * 删除知识库
- */
 export async function deleteKnowledgeBase(
   knowledgeBaseId: string,
 ): Promise<void> {
   return del<void>(`/knowledge-bases/${knowledgeBaseId}`);
 }
 
-/**
- * 更新知识库
- */
 export async function updateKnowledgeBase(
   knowledgeBaseId: string,
   request: UpdateKnowledgeBaseRequest,
@@ -303,9 +261,6 @@ export async function updateKnowledgeBase(
   return patch<void>(`/knowledge-bases/${knowledgeBaseId}`, request);
 }
 
-/**
- * 文档相关类型和接口
- */
 export interface DocumentVO {
   id: string;
   kbId: string;
@@ -322,18 +277,12 @@ export interface CreateDocumentResponse {
   documentId: string;
 }
 
-/**
- * 根据知识库 ID 获取文档列表
- */
 export async function getDocumentsByKbId(
   kbId: string,
 ): Promise<GetDocumentsResponse> {
   return get<GetDocumentsResponse>(`/documents/kb/${kbId}`);
 }
 
-/**
- * 上传文档
- */
 export async function uploadDocument(
   kbId: string,
   file: File,
@@ -359,16 +308,10 @@ export async function uploadDocument(
   return apiResponse.data;
 }
 
-/**
- * 删除文档
- */
 export async function deleteDocument(documentId: string): Promise<void> {
   return del<void>(`/documents/${documentId}`);
 }
 
-/**
- * 工具相关类型和接口
- */
 export type ToolType = "FIXED" | "OPTIONAL";
 
 export interface ToolVO {
@@ -381,10 +324,62 @@ export interface GetOptionalToolsResponse {
   tools: ToolVO[];
 }
 
-/**
- * 获取可选工具列表
- */
 export async function getOptionalTools(): Promise<GetOptionalToolsResponse> {
   const tools = await get<ToolVO[]>("/tools");
   return { tools };
+}
+
+export interface UserMemoryVO {
+  id: string;
+  userId: string;
+  sessionId?: string;
+  memoryType: string;
+  content: string;
+}
+
+export interface UserMemoryCandidateVO {
+  id: string;
+  userId: string;
+  sessionId?: string;
+  memoryType: string;
+  content: string;
+  evidence?: string;
+}
+
+export interface GetUserMemoriesResponse {
+  memories: UserMemoryVO[];
+}
+
+export interface GetUserMemoryCandidatesResponse {
+  candidates: UserMemoryCandidateVO[];
+}
+
+export async function getUserMemories(
+  userId: string,
+): Promise<GetUserMemoriesResponse> {
+  return get<GetUserMemoriesResponse>(`/users/${encodeURIComponent(userId)}/memories`);
+}
+
+export async function getUserMemoryCandidates(
+  userId: string,
+): Promise<GetUserMemoryCandidatesResponse> {
+  return get<GetUserMemoryCandidatesResponse>(
+    `/users/${encodeURIComponent(userId)}/memory-candidates`,
+  );
+}
+
+export async function confirmUserMemoryCandidate(
+  userId: string,
+  candidateId: string,
+): Promise<void> {
+  return post<void>(
+    `/users/${encodeURIComponent(userId)}/memory-candidates/${candidateId}/confirm`,
+  );
+}
+
+export async function deleteUserMemory(
+  userId: string,
+  memoryId: string,
+): Promise<void> {
+  return del<void>(`/users/${encodeURIComponent(userId)}/memories/${memoryId}`);
 }

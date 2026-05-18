@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.UserMemoryMapper">
+
+    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.UserMemory">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="userId" column="user_id" jdbcType="VARCHAR"/>
+        <result property="sessionId" column="session_id" jdbcType="VARCHAR"/>
+        <result property="memoryType" column="memory_type" jdbcType="VARCHAR"/>
+        <result property="content" column="content" jdbcType="VARCHAR"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.UserMemory"
+            keyColumn="id" keyProperty="id" useGeneratedKeys="true">
+        INSERT INTO user_memory
+        (
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            #{userId},
+            <choose>
+                <when test="sessionId != null">CAST(#{sessionId} AS uuid)</when>
+                <otherwise>null</otherwise>
+            </choose>,
+            #{memoryType},
+            #{content},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <select id="selectByIdAndUserId" resultMap="BaseResultMap">
+        SELECT
+            id,
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            created_at,
+            updated_at
+        FROM user_memory
+        WHERE id = CAST(#{id} AS uuid)
+          AND user_id = #{userId}
+    </select>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT
+            id,
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            created_at,
+            updated_at
+        FROM user_memory
+        WHERE user_id = #{userId}
+        ORDER BY updated_at DESC
+    </select>
+
+    <select id="selectByUserIdAndContent" resultMap="BaseResultMap">
+        SELECT
+            id,
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            created_at,
+            updated_at
+        FROM user_memory
+        WHERE user_id = #{userId}
+          AND content = #{content}
+        ORDER BY updated_at DESC
+        LIMIT 1
+    </select>
+
+    <delete id="deleteById">
+        DELETE FROM user_memory
+        WHERE id = CAST(#{id} AS uuid)
+    </delete>
+</mapper>

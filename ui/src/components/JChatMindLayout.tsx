@@ -5,6 +5,7 @@ import SideMenu from "./SideMenu.tsx";
 import Content from "../layout/Content.tsx";
 import AgentChatView from "./views/AgentChatView.tsx";
 import KnowledgeBaseView from "./views/KnowledgeBaseView.tsx";
+import UserMemoryView from "./views/UserMemoryView.tsx";
 
 export default function JChatMindLayout() {
   return (
@@ -18,6 +19,7 @@ export default function JChatMindLayout() {
           <Route path="/agent" element={<AgentChatView />} />
           <Route path="/chat" element={<AgentChatView />} />
           <Route path="/chat/:chatSessionId" element={<AgentChatView />} />
+          <Route path="/user-memory" element={<UserMemoryView />} />
           <Route path="/knowledge-base" element={<KnowledgeBaseView />} />
           <Route
             path="/knowledge-base/:knowledgeBaseId"

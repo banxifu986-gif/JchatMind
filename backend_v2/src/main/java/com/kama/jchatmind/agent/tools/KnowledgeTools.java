@@ -1,11 +1,11 @@
 package com.kama.jchatmind.agent.tools;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -16,23 +16,22 @@ public class KnowledgeTools implements Tool {
 
     private final RagService ragService;
     private final ChatSessionFacadeService chatSessionFacadeService;
-    private final String chatSessionId;
+    private String userId;
+    private String chatSessionId;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public KnowledgeTools(RagService ragService, ChatSessionFacadeService chatSessionFacadeService) {
-        this(ragService, chatSessionFacadeService, null);
-    }
-
-    private KnowledgeTools(RagService ragService,
-                           ChatSessionFacadeService chatSessionFacadeService,
-                           String chatSessionId) {
         this.ragService = ragService;
         this.chatSessionFacadeService = chatSessionFacadeService;
-        this.chatSessionId = chatSessionId;
+        this.userId = null;
+        this.chatSessionId = null;
     }
 
-    public KnowledgeTools fork(String chatSessionId) {
-        return new KnowledgeTools(ragService, chatSessionFacadeService, chatSessionId);
+    public KnowledgeTools fork(String userId, String chatSessionId) {
+        KnowledgeTools tool = new KnowledgeTools(ragService, chatSessionFacadeService);
+        tool.userId = userId;
+        tool.chatSessionId = chatSessionId;
+        return tool;
     }
 
     @Override
@@ -42,7 +41,7 @@ public class KnowledgeTools implements Tool {
 
     @Override
     public String getDescription() {
-        return "用于从知识库执行语义检索（RAG）。输入知识库 ID 和查询文本，返回与查询最相关的内容片段。";
+        return "用于从知识库执行语义检索（RAG）。输入知识库 ID 和查询文本，返回最相关的内容片段。";
     }
 
     @Override
@@ -52,7 +51,7 @@ public class KnowledgeTools implements Tool {
 
     @org.springframework.ai.tool.annotation.Tool(
             name = "KnowledgeTool",
-            description = "从指定知识库中执行相似性检索（RAG）。参数为知识库 ID（kbsId）和查询文本（query），返回与查询最相关的知识片段。"
+            description = "从指定知识库中执行相似检索（RAG）。参数为知识库 ID（kbsId）和查询文本（query），返回最相关的知识片段。"
     )
     public String knowledgeQuery(String kbsId, String query) {
         RagRetrievalContext retrievalContext = loadRetrievalContext();
@@ -60,27 +59,25 @@ public class KnowledgeTools implements Tool {
         updateRetrievalContext(results);
         return results.stream()
                 .map(RagRetrievalResult::getContent)
-                .toList()
-                .stream()
                 .filter(StringUtils::hasText)
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("");
     }
 
     private RagRetrievalContext loadRetrievalContext() {
-        if (!StringUtils.hasText(chatSessionId)) {
+        if (!StringUtils.hasText(chatSessionId) || !StringUtils.hasText(userId)) {
             return null;
         }
-        return chatSessionFacadeService.getRetrievalContext(chatSessionId);
+        return chatSessionFacadeService.getRetrievalContext(userId, chatSessionId);
     }
 
     private void updateRetrievalContext(List<RagRetrievalResult> results) {
-        if (!StringUtils.hasText(chatSessionId) || results == null || results.isEmpty()) {
+        if (!StringUtils.hasText(chatSessionId) || !StringUtils.hasText(userId) || results == null || results.isEmpty()) {
             return;
         }
         RagRetrievalContext context = buildContextFromTopResult(results.get(0));
         if (context != null && context.hasContext()) {
-            chatSessionFacadeService.updateRetrievalContext(chatSessionId, context);
+            chatSessionFacadeService.updateRetrievalContext(userId, chatSessionId, context);
         }
     }
 

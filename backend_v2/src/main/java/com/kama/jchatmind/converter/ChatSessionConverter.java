@@ -22,6 +22,7 @@ public class ChatSessionConverter {
 
         return ChatSession.builder()
                 .id(chatSessionDTO.getId())
+                .userId(chatSessionDTO.getUserId())
                 .agentId(chatSessionDTO.getAgentId())
                 .title(chatSessionDTO.getTitle())
                 .metadata(chatSessionDTO.getMetadata() != null 
@@ -37,6 +38,7 @@ public class ChatSessionConverter {
 
         return ChatSessionDTO.builder()
                 .id(chatSession.getId())
+                .userId(chatSession.getUserId())
                 .agentId(chatSession.getAgentId())
                 .title(chatSession.getTitle())
                 .metadata(chatSession.getMetadata() != null 
@@ -50,6 +52,7 @@ public class ChatSessionConverter {
     public ChatSessionVO toVO(ChatSessionDTO dto) {
         return ChatSessionVO.builder()
                 .id(dto.getId())
+                .userId(dto.getUserId())
                 .agentId(dto.getAgentId())
                 .title(dto.getTitle())
                 .metadata(dto.getMetadata())
@@ -62,9 +65,11 @@ public class ChatSessionConverter {
 
     public ChatSessionDTO toDTO(CreateChatSessionRequest request) {
         Assert.notNull(request, "CreateChatSessionRequest cannot be null");
+        Assert.notNull(request.getUserId(), "UserId cannot be null");
         Assert.notNull(request.getAgentId(), "AgentId cannot be null");
 
         return ChatSessionDTO.builder()
+                .userId(request.getUserId())
                 .agentId(request.getAgentId())
                 .title(request.getTitle())
                 .metadata(request.getMetadata())

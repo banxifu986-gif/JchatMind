@@ -16,29 +16,32 @@ public class ChatMessageController {
 
     private final ChatMessageFacadeService chatMessageFacadeService;
 
-    // 根据 sessionId 查询聊天消息
     @GetMapping("/chat-messages/session/{sessionId}")
-    public ApiResponse<GetChatMessagesResponse> getChatMessagesBySessionId(@PathVariable String sessionId) {
-        return ApiResponse.success(chatMessageFacadeService.getChatMessagesBySessionId(sessionId));
+    public ApiResponse<GetChatMessagesResponse> getChatMessagesBySessionId(
+            @RequestParam String userId,
+            @PathVariable String sessionId
+    ) {
+        return ApiResponse.success(chatMessageFacadeService.getChatMessagesBySessionId(userId, sessionId));
     }
 
-    // 创建聊天消息
     @PostMapping("/chat-messages")
     public ApiResponse<CreateChatMessageResponse> createChatMessage(@RequestBody CreateChatMessageRequest request) {
         return ApiResponse.success(chatMessageFacadeService.createChatMessage(request));
     }
 
-    // 删除聊天消息
     @DeleteMapping("/chat-messages/{chatMessageId}")
-    public ApiResponse<Void> deleteChatMessage(@PathVariable String chatMessageId) {
-        chatMessageFacadeService.deleteChatMessage(chatMessageId);
+    public ApiResponse<Void> deleteChatMessage(@RequestParam String userId, @PathVariable String chatMessageId) {
+        chatMessageFacadeService.deleteChatMessage(userId, chatMessageId);
         return ApiResponse.success();
     }
 
-    // 更新聊天消息
     @PatchMapping("/chat-messages/{chatMessageId}")
-    public ApiResponse<Void> updateChatMessage(@PathVariable String chatMessageId, @RequestBody UpdateChatMessageRequest request) {
-        chatMessageFacadeService.updateChatMessage(chatMessageId, request);
+    public ApiResponse<Void> updateChatMessage(
+            @RequestParam String userId,
+            @PathVariable String chatMessageId,
+            @RequestBody UpdateChatMessageRequest request
+    ) {
+        chatMessageFacadeService.updateChatMessage(userId, chatMessageId, request);
         return ApiResponse.success();
     }
 }

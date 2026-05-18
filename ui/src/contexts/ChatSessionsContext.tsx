@@ -1,43 +1,35 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
-  type ChatSessionVO,
   getChatSessions,
   deleteChatSession,
 } from "../api/api.ts";
-
-interface ChatSessionsContextType {
-  chatSessions: ChatSessionVO[];
-  loading: boolean;
-  refreshChatSessions: () => Promise<void>;
-  deleteChatSession: (chatSessionId: string) => Promise<void>;
-}
-
-const ChatSessionsContext = createContext<ChatSessionsContextType | undefined>(
-  undefined
-);
+import { ChatSessionsContext } from "./ChatSessionsContextBase.ts";
+import { useUser } from "../hooks/useUser.ts";
+import type { ChatSessionVO } from "../api/api.ts";
 
 export function ChatSessionsProvider({ children }: { children: React.ReactNode }) {
   const [chatSessions, setChatSessions] = useState<ChatSessionVO[]>([]);
   const [loading, setLoading] = useState(false);
+  const { userId } = useUser();
 
   const fetchChatSessions = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await getChatSessions();
+      const resp = await getChatSessions(userId);
       setChatSessions(resp.chatSessions);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     fetchChatSessions();
   }, [fetchChatSessions]);
 
   const deleteChatSessionHandle = useCallback(async (chatSessionId: string) => {
-    await deleteChatSession(chatSessionId);
+    await deleteChatSession(userId, chatSessionId);
     await fetchChatSessions();
-  }, [fetchChatSessions]);
+  }, [fetchChatSessions, userId]);
 
   return (
     <ChatSessionsContext.Provider
@@ -51,15 +43,5 @@ export function ChatSessionsProvider({ children }: { children: React.ReactNode }
       {children}
     </ChatSessionsContext.Provider>
   );
-}
-
-export function useChatSessionsContext() {
-  const context = useContext(ChatSessionsContext);
-  if (context === undefined) {
-    throw new Error(
-      "useChatSessionsContext must be used within a ChatSessionsProvider"
-    );
-  }
-  return context;
 }
 

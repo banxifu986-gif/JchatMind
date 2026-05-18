@@ -22,7 +22,7 @@ class KnowledgeToolsTest {
                 .build();
 
         RecordingRagService ragService = new RecordingRagService();
-        KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork("session-1");
+        KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork("user-1", "session-1");
 
         tools.knowledgeQuery("kb-1", "如何回答");
 
@@ -67,27 +67,17 @@ class KnowledgeToolsTest {
         private RagRetrievalContext updatedContext;
 
         @Override
-        public RagRetrievalContext getRetrievalContext(String chatSessionId) {
-            return context;
-        }
-
-        @Override
-        public void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext) {
-            this.updatedContext = retrievalContext;
-        }
-
-        @Override
-        public com.kama.jchatmind.model.response.GetChatSessionsResponse getChatSessions() {
+        public com.kama.jchatmind.model.response.GetChatSessionsResponse getChatSessions(String userId) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public com.kama.jchatmind.model.response.GetChatSessionResponse getChatSession(String chatSessionId) {
+        public com.kama.jchatmind.model.response.GetChatSessionResponse getChatSession(String userId, String chatSessionId) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public com.kama.jchatmind.model.response.GetChatSessionsResponse getChatSessionsByAgentId(String agentId) {
+        public com.kama.jchatmind.model.response.GetChatSessionsResponse getChatSessionsByAgentId(String userId, String agentId) {
             throw new UnsupportedOperationException();
         }
 
@@ -97,13 +87,23 @@ class KnowledgeToolsTest {
         }
 
         @Override
-        public void deleteChatSession(String chatSessionId) {
+        public void deleteChatSession(String userId, String chatSessionId) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public void updateChatSession(String chatSessionId, com.kama.jchatmind.model.request.UpdateChatSessionRequest request) {
+        public void updateChatSession(String userId, String chatSessionId, com.kama.jchatmind.model.request.UpdateChatSessionRequest request) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public RagRetrievalContext getRetrievalContext(String userId, String chatSessionId) {
+            return context;
+        }
+
+        @Override
+        public void updateRetrievalContext(String userId, String chatSessionId, RagRetrievalContext retrievalContext) {
+            this.updatedContext = retrievalContext;
         }
     }
 }
