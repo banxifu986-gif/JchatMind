@@ -96,10 +96,10 @@ class RagSessionOnlineE2eEvaluationTest {
         for (SessionQueryCase queryCase : cases) {
             String chatSessionId = createEvaluationChatSession();
             try {
-                KnowledgeTools sessionKnowledgeTools = knowledgeTools.fork(chatSessionId);
+                KnowledgeTools sessionKnowledgeTools = knowledgeTools.fork("rag-eval-user", chatSessionId);
                 sessionKnowledgeTools.knowledgeQuery(realKbId, queryCase.seedQuery());
 
-                RagRetrievalContext sessionContext = chatSessionFacadeService.getRetrievalContext(chatSessionId);
+                RagRetrievalContext sessionContext = chatSessionFacadeService.getRetrievalContext("rag-eval-user", chatSessionId);
                 List<RetrievedChunk> statelessTopChunks = ragService.retrieve(realKbId, queryCase.followUpQuery(), ONLINE_TOP_K).stream()
                         .map(this::toRetrievedChunk)
                         .toList();
@@ -290,6 +290,7 @@ class RagSessionOnlineE2eEvaluationTest {
 
     private String createEvaluationChatSession() {
         ChatSession chatSession = ChatSession.builder()
+                .userId("rag-eval-user")
                 .agentId(null)
                 .title("rag-session-eval")
                 .metadata(null)

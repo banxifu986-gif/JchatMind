@@ -9,19 +9,19 @@ import com.kama.jchatmind.model.response.GetChatMessagesResponse;
 import java.util.List;
 
 public interface ChatMessageFacadeService {
-    GetChatMessagesResponse getChatMessagesBySessionId(String sessionId);
+    GetChatMessagesResponse getChatMessagesBySessionId(String userId, String sessionId);
 
-    List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit);
+    List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String userId, String sessionId, int limit);
 
     CreateChatMessageResponse createChatMessage(CreateChatMessageRequest request);
 
-    CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO);
+    CreateChatMessageResponse createChatMessage(String userId, ChatMessageDTO chatMessageDTO);
 
     CreateChatMessageResponse agentCreateChatMessage(CreateChatMessageRequest request);
 
-    CreateChatMessageResponse appendChatMessage(String chatMessageId, String appendContent);
+    CreateChatMessageResponse appendChatMessage(String userId, String chatMessageId, String appendContent);
 
-    void deleteChatMessage(String chatMessageId);
+    void deleteChatMessage(String userId, String chatMessageId);
 
-    void updateChatMessage(String chatMessageId, UpdateChatMessageRequest request);
+    void updateChatMessage(String userId, String chatMessageId, UpdateChatMessageRequest request);
 }

@@ -70,17 +70,29 @@
     </select>
 
     <select id="selectBySessionIdRecently" resultMap="BaseResultMap">
-        SELECT id,
-               session_id,
-               role,
-               content,
-               metadata::text AS metadata,
-               created_at,
-               updated_at
-        FROM chat_message
-        WHERE session_id = CAST(#{sessionId} AS uuid)
-        ORDER BY created_at
-        LIMIT #{limit}
+        SELECT
+            recent.id,
+            recent.session_id,
+            recent.role,
+            recent.content,
+            recent.metadata::text AS metadata,
+            recent.created_at,
+            recent.updated_at
+        FROM (
+            SELECT
+                id,
+                session_id,
+                role,
+                content,
+                metadata,
+                created_at,
+                updated_at
+            FROM chat_message
+            WHERE session_id = CAST(#{sessionId} AS uuid)
+            ORDER BY created_at DESC
+            LIMIT #{limit}
+        ) recent
+        ORDER BY recent.created_at ASC
     </select>
 
     <delete id="deleteById">

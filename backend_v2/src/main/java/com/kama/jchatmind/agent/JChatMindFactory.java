@@ -14,9 +14,11 @@ import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.entity.Agent;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.model.entity.UserMemory;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
 import com.kama.jchatmind.service.SseService;
 import com.kama.jchatmind.service.ToolFacadeService;
+import com.kama.jchatmind.service.UserMemoryFacadeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -44,8 +46,8 @@ public class JChatMindFactory {
     private final ToolFacadeService toolFacadeService;
     private final ChatMessageFacadeService chatMessageFacadeService;
     private final ChatMessageConverter chatMessageConverter;
+    private final UserMemoryFacadeService userMemoryFacadeService;
 
-    // 运行时 Agent 配置
     private AgentDTO agentConfig;
 
     public JChatMindFactory(
@@ -57,7 +59,8 @@ public class JChatMindFactory {
             KnowledgeBaseConverter knowledgeBaseConverter,
             ToolFacadeService toolFacadeService,
             ChatMessageFacadeService chatMessageFacadeService,
-            ChatMessageConverter chatMessageConverter
+            ChatMessageConverter chatMessageConverter,
+            UserMemoryFacadeService userMemoryFacadeService
     ) {
         this.chatClientRegistry = chatClientRegistry;
         this.sseService = sseService;
@@ -68,52 +71,67 @@ public class JChatMindFactory {
         this.toolFacadeService = toolFacadeService;
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.chatMessageConverter = chatMessageConverter;
+        this.userMemoryFacadeService = userMemoryFacadeService;
     }
 
     private Agent loadAgent(String agentId) {
         return agentMapper.selectById(agentId);
     }
 
-    /**
-     * 将数据库中存储的记忆恢复成 List<Message> 结构
-     */
-    private List<Message> loadMemory(String chatSessionId) {
+    private List<Message> loadMemory(String userId, String chatSessionId) {
         int messageLength = agentConfig.getChatOptions().getMessageLength();
-        List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(chatSessionId, messageLength);
         List<Message> memory = new ArrayList<>();
+        memory.addAll(loadLongTermMemory(userId));
+
+        List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
+                userId,
+                chatSessionId,
+                messageLength
+        );
         for (ChatMessageDTO chatMessageDTO : chatMessages) {
             switch (chatMessageDTO.getRole()) {
-                case SYSTEM:
-                    if (!StringUtils.hasLength(chatMessageDTO.getContent())) continue;
-                    memory.add(0, new SystemMessage(chatMessageDTO.getContent()));
-                    break;
-                case USER:
-                    if (!StringUtils.hasLength(chatMessageDTO.getContent())) continue;
-                    memory.add(new UserMessage(chatMessageDTO.getContent()));
-                    break;
-                case ASSISTANT:
-                    memory.add(AssistantMessage.builder()
-                            .content(chatMessageDTO.getContent())
-                            .toolCalls(chatMessageDTO.getMetadata()
-                                    .getToolCalls())
-                            .build());
-                    break;
-                case TOOL:
-                    memory.add(ToolResponseMessage.builder()
-                            .responses(List.of(chatMessageDTO
-                                    .getMetadata()
-                                    .getToolResponse()))
-                            .build());
-                    break;
-                default:
-                    log.error("不支持的 Message 类型: {}, content = {}",
-                            chatMessageDTO.getRole().getRole(),
-                            chatMessageDTO.getContent()
-                    );
-                    throw new IllegalStateException("不支持的 Message 类型");
+                case SYSTEM -> {
+                    if (StringUtils.hasLength(chatMessageDTO.getContent())) {
+                        memory.add(new SystemMessage(chatMessageDTO.getContent()));
+                    }
+                }
+                case USER -> {
+                    if (StringUtils.hasLength(chatMessageDTO.getContent())) {
+                        memory.add(new UserMessage(chatMessageDTO.getContent()));
+                    }
+                }
+                case ASSISTANT -> memory.add(AssistantMessage.builder()
+                        .content(chatMessageDTO.getContent())
+                        .toolCalls(chatMessageDTO.getMetadata() != null
+                                ? chatMessageDTO.getMetadata().getToolCalls()
+                                : null)
+                        .build());
+                case TOOL -> {
+                    if (chatMessageDTO.getMetadata() != null && chatMessageDTO.getMetadata().getToolResponse() != null) {
+                        memory.add(ToolResponseMessage.builder()
+                                .responses(List.of(chatMessageDTO.getMetadata().getToolResponse()))
+                                .build());
+                    }
+                }
+                default -> {
+                    log.error("Unsupported message role: {}", chatMessageDTO.getRole().getRole());
+                    throw new IllegalStateException("Unsupported message role");
+                }
             }
         }
         return memory;
+    }
+
+    private List<Message> loadLongTermMemory(String userId) {
+        List<UserMemory> memories = userMemoryFacadeService.getConfirmedMemories(userId);
+        if (memories.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        String content = memories.stream()
+                .map(memory -> "- [" + memory.getMemoryType() + "] " + memory.getContent())
+                .collect(Collectors.joining("\n"));
+        return List.of(new SystemMessage("以下是用户已确认的长期记忆，请在后续回答中遵守和利用：\n" + content));
     }
 
     private AgentDTO toAgentConfig(Agent agent) {
@@ -135,11 +153,11 @@ public class JChatMindFactory {
         if (knowledgeBases.isEmpty()) {
             return Collections.emptyList();
         }
+
         List<KnowledgeBaseDTO> kbDTOs = new ArrayList<>();
         try {
             for (KnowledgeBase knowledgeBase : knowledgeBases) {
-                KnowledgeBaseDTO kbDTO = knowledgeBaseConverter.toDTO(knowledgeBase);
-                kbDTOs.add(kbDTO);
+                kbDTOs.add(knowledgeBaseConverter.toDTO(knowledgeBase));
             }
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
@@ -148,10 +166,7 @@ public class JChatMindFactory {
     }
 
     private List<Tool> resolveRuntimeTools(AgentDTO agentConfig) {
-        // 固定工具（系统强制）
         List<Tool> runtimeTools = new ArrayList<>(toolFacadeService.getFixedTools());
-
-        // 可选工具（按 Agent 配置）
         List<String> allowedToolNames = agentConfig.getAllowedTools();
         if (allowedToolNames == null || allowedToolNames.isEmpty()) {
             return runtimeTools;
@@ -170,11 +185,11 @@ public class JChatMindFactory {
         return runtimeTools;
     }
 
-    private List<Tool> bindRuntimeToolContext(List<Tool> runtimeTools, String chatSessionId) {
+    private List<Tool> bindRuntimeToolContext(List<Tool> runtimeTools, String userId, String chatSessionId) {
         List<Tool> boundTools = new ArrayList<>();
         for (Tool tool : runtimeTools) {
             if (tool instanceof KnowledgeTools knowledgeTools) {
-                boundTools.add(knowledgeTools.fork(chatSessionId));
+                boundTools.add(knowledgeTools.fork(userId, chatSessionId));
                 continue;
             }
             boundTools.add(tool);
@@ -201,12 +216,12 @@ public class JChatMindFactory {
                     ? AopUtils.getTargetClass(tool)
                     : tool;
         } catch (Exception e) {
-            throw new IllegalStateException(
-                    "解析工具目标对象失败: " + tool.getName(), e);
+            throw new IllegalStateException("解析工具目标对象失败: " + tool.getName(), e);
         }
     }
 
     private JChatMind buildAgentRuntime(
+            String userId,
             Agent agent,
             List<Message> memory,
             List<KnowledgeBaseDTO> knowledgeBases,
@@ -218,6 +233,7 @@ public class JChatMindFactory {
             throw new IllegalStateException("未找到对应的 ChatClient: " + agent.getModel());
         }
         return new JChatMind(
+                userId,
                 agent.getId(),
                 agent.getName(),
                 agent.getDescription(),
@@ -234,23 +250,17 @@ public class JChatMindFactory {
         );
     }
 
-    /**
-     * 创建一个 JChatMind 实例
-     */
-    public JChatMind create(String agentId, String chatSessionId) {
+    public JChatMind create(String userId, String agentId, String chatSessionId) {
         Agent agent = loadAgent(agentId);
-        AgentDTO agentConfig = toAgentConfig(agent);
-        List<Message> memory = loadMemory(chatSessionId);
-
-        // 解析 agent 的支持的知识库
-        List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(agentConfig);
-        // 解析 agent 支持的工具调用
-        List<Tool> runtimeTools = resolveRuntimeTools(agentConfig);
-        runtimeTools = bindRuntimeToolContext(runtimeTools, chatSessionId);
-        // 将工具调用转换成 ToolCallback 的形式
+        AgentDTO currentAgentConfig = toAgentConfig(agent);
+        List<Message> memory = loadMemory(userId, chatSessionId);
+        List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(currentAgentConfig);
+        List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
+        runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId);
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);
 
         return buildAgentRuntime(
+                userId,
                 agent,
                 memory,
                 knowledgeBases,

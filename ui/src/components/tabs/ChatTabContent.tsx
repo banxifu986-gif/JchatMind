@@ -14,7 +14,6 @@ const ChatTabContent: React.FC = () => {
   const { chatSessions, loading, deleteChatSession } = useChatSessions();
   const { agents } = useAgents();
 
-  // 创建 agentId 到 agent 的映射
   const agentMap = useMemo(() => {
     const map = new Map<string, string>();
     agents.forEach((agent) => {
@@ -35,13 +34,12 @@ const ChatTabContent: React.FC = () => {
     await deleteChatSession(chatSessionId);
   };
 
-  // 格式化标题显示
   const getDisplayTitle = (session: { title?: string; agentId: string }) => {
     if (session.title) {
       return session.title;
     }
     const agentName = agentMap.get(session.agentId);
-    return agentName ? `与 ${agentName} 的对话` : "新对话";
+    return agentName ? `${agentName} 的对话` : "新对话";
   };
 
   return (
@@ -53,7 +51,7 @@ const ChatTabContent: React.FC = () => {
         onClick={handleCreateNewChat}
         className="w-full"
       >
-        新聊天
+        新建聊天
       </Button>
       <Divider />
       <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50 rounded-lg">
@@ -65,7 +63,7 @@ const ChatTabContent: React.FC = () => {
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
             <MessageOutlined className="text-4xl mb-2" />
             <p className="text-sm">暂无聊天记录</p>
-            <p className="text-xs mt-1">点击上方按钮创建新聊天</p>
+            <p className="text-xs mt-1">点击上方按钮创建新会话</p>
           </div>
         ) : (
           <div className="space-y-1.5 p-1.5">
@@ -86,10 +84,10 @@ const ChatTabContent: React.FC = () => {
                   </div>
                   <div onClick={(e) => e.stopPropagation()}>
                     <Popconfirm
-                      title="确定要删除这条聊天记录吗？"
-                      description="删除后将无法恢复"
+                      title="确认删除这条聊天记录？"
+                      description="删除后无法恢复"
                       onConfirm={() => handleDeleteChatSession(session.id)}
-                      okText="确定"
+                      okText="确认"
                       cancelText="取消"
                     >
                       <Button

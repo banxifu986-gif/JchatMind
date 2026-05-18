@@ -8,6 +8,7 @@ import lombok.Data;
 @Builder
 public class ChatSessionVO {
     private String id;
+    private String userId;
     private String agentId;
     private String title;
     private ChatSessionDTO.MetaData metadata;
