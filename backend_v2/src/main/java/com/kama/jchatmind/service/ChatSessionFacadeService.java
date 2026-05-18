@@ -1,5 +1,6 @@
 package com.kama.jchatmind.service;
 
+import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.request.CreateChatSessionRequest;
 import com.kama.jchatmind.model.request.UpdateChatSessionRequest;
 import com.kama.jchatmind.model.response.CreateChatSessionResponse;
@@ -18,4 +19,8 @@ public interface ChatSessionFacadeService {
     void deleteChatSession(String chatSessionId);
 
     void updateChatSession(String chatSessionId, UpdateChatSessionRequest request);
+
+    RagRetrievalContext getRetrievalContext(String chatSessionId);
+
+    void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext);
 }

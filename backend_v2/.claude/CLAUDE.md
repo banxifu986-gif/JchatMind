@@ -1,46 +1,39 @@
-# JChatMind 项目规则
+# backend_v2 模块说明
 
-## 项目简介
+- 先遵循仓库根目录 `AGENTS.md`
+- 本文件只补充 `backend_v2` 的后端模块上下文，不重复通用沟通、边界和安全规则
 
-JChatMind 是一个 Java AI Agent 系统，基于 Spring AI 框架构建，实现了 Think-Execute 循环、工具调用、RAG 知识库检索和多模型切换等核心能力，并通过 SSE 将执行过程实时推送给前端。
+## 模块定位
 
-## 项目结构
+- `backend_v2` 是 Spring Boot 后端，负责 Agent 编排、工具调用、知识库检索、消息持久化和 SSE 推送
+- 前端相关约束以仓库根目录规则为准，本文件不再重复 UI 技术栈
 
-```
-jchatmind/   # 后端 Spring Boot 项目
-ui/          # 前端 React 项目
-```
+## 后端技术栈
 
-## 技术栈
+- Java 17
+- Spring Boot 3.5.8
+- Spring AI 1.1.0
+- MyBatis
+- PostgreSQL + pgvector
+- Lombok
+- Spring Mail
+- SSE
 
-### 后端（jchatmind/）
+## 后端核心架构
 
-- **Java 17（JDK 17）** + **Spring Boot 3.5.8**
-- **Spring AI 1.1.0** — AI 模型集成、工具调用、RAG
-- **MyBatis** — 数据库 ORM
-- **PostgreSQL 14 + pgvector** — 结构化数据 + 向量存储（通过 Docker 部署）
-- **Lombok** — 减少样板代码
-- **Spring Mail** — 邮件服务
-- **SSE（Server-Sent Events）** — 实时推送执行状态
-- 支持模型：**DeepSeek**、**智谱 AI（ZhipuAI）**、**Ollama**（本地模型）
+- Agent 运行主线是 Think-Execute 循环，围绕状态流转和工具执行展开
+- 模型接入使用 `ChatClientRegistry` 注册表模式，支持多模型切换
+- 工具系统区分固定工具和可选工具，并手动接管 Spring AI 工具执行流程
+- RAG 链路包含 Markdown 解析、分块、Embedding 入库和 pgvector 检索
+- SSE 负责把执行过程和结果实时推送给前端
 
-## 基础设施
+## 代码关注点
 
-- **Docker** — 部署 pgvector，快速启动 PostgreSQL 14
+- 重点目录通常包括 `controller`、`service`、`model`、`converter`、`agent`、`config`
+- 涉及模型、工具、知识库、SSE 的改动时，优先先看已有链路，不要只在单点打补丁
+- 需要改 Spring Bean 装配、模型注册或工具注册时，先确认影响范围再动手
 
-### 前端（ui/）
+## 当前已知事项
 
-- **React 19** + **TypeScript**
-- **Node.js 24.14.0**
-- **Vite（rolldown-vite）** — 构建工具
-- **Ant Design 6 + @ant-design/x** — UI 组件库
-- **Tailwind CSS 4** — 样式
-- **React Router 7** — 路由
-
-## 核心架构
-
-- **Agent Loop**：Think-Execute 循环 + 状态机（THINKING / EXECUTING / DONE / ERROR）
-- **工具系统**：固定工具 + 可选工具，自动注册，手动接管 Spring AI 工具执行流程
-- **RAG 链路**：Markdown 解析分块 → Embedding 入库 → pgvector 相似度检索
-- **多模型注册表**：`ChatClientRegistry` 模式，支持模型动态切换
-- **SSE 推送**：执行状态实时可视化
+- 测试依赖完整应用上下文，缺少模型相关配置时容易在启动阶段失败
+- 当前已知一类失败原因是模型配置缺失导致 `ApplicationContext` 无法启动

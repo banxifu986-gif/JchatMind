@@ -1,5 +1,6 @@
 package com.kama.jchatmind.mapper;
 
+import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -27,4 +28,63 @@ public interface ChunkBgeM3Mapper {
             @Param("vectorLiteral") String vectorLiteral,
             @Param("limit") int limit
     );
+
+    List<RagRetrievalResult> similaritySearchDetailed(
+            @Param("kbId") String kbId,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> similaritySearchDetailedWithContext(
+            @Param("kbId") String kbId,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleExact(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleExactWithContext(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleContains(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("containsPattern") String containsPattern,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleKeywords(
+            @Param("kbId") String kbId,
+            @Param("keywords") List<String> keywords,
+            @Param("queryLength") int queryLength,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleTrigram(
+            @Param("kbId") String kbId,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("minScore") double minScore,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> selectLexicalCandidatesByKbId(@Param("kbId") String kbId);
+
+    List<RagRetrievalResult> selectTitlePathCandidatesByKbId(@Param("kbId") String kbId);
+
+    List<ChunkBgeM3> selectByDocId(@Param("docId") String docId);
 }

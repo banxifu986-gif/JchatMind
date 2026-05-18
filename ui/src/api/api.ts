@@ -90,6 +90,7 @@ export async function updateAgent(
 export interface CreateChatSessionRequest {
   agentId: string;
   title?: string;
+  metadata?: ChatSessionMetadata;
 }
 
 export interface CreateChatSessionResponse {
@@ -109,6 +110,7 @@ export interface ChatSessionVO {
   id: string;
   agentId: string;
   title?: string;
+  metadata?: ChatSessionMetadata;
 }
 
 export interface GetChatSessionsResponse {
@@ -121,6 +123,17 @@ export interface GetChatSessionResponse {
 
 export interface UpdateChatSessionRequest {
   title?: string;
+  metadata?: ChatSessionMetadata;
+}
+
+export interface RagRetrievalContext {
+  sourceType?: string;
+  sourceName?: string;
+  contentPath?: string;
+}
+
+export interface ChatSessionMetadata {
+  retrievalContext?: RagRetrievalContext;
 }
 
 /**
