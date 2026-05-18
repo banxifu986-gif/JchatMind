@@ -1,6 +1,7 @@
 package com.kama.jchatmind.agent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.agent.tools.KnowledgeTools;
 import com.kama.jchatmind.agent.tools.Tool;
 import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.converter.AgentConverter;
@@ -169,6 +170,18 @@ public class JChatMindFactory {
         return runtimeTools;
     }
 
+    private List<Tool> bindRuntimeToolContext(List<Tool> runtimeTools, String chatSessionId) {
+        List<Tool> boundTools = new ArrayList<>();
+        for (Tool tool : runtimeTools) {
+            if (tool instanceof KnowledgeTools knowledgeTools) {
+                boundTools.add(knowledgeTools.fork(chatSessionId));
+                continue;
+            }
+            boundTools.add(tool);
+        }
+        return boundTools;
+    }
+
     private List<ToolCallback> buildToolCallbacks(List<Tool> runtimeTools) {
         List<ToolCallback> callbacks = new ArrayList<>();
         for (Tool tool : runtimeTools) {
@@ -233,6 +246,7 @@ public class JChatMindFactory {
         List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(agentConfig);
         // 解析 agent 支持的工具调用
         List<Tool> runtimeTools = resolveRuntimeTools(agentConfig);
+        runtimeTools = bindRuntimeToolContext(runtimeTools, chatSessionId);
         // 将工具调用转换成 ToolCallback 的形式
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);
 

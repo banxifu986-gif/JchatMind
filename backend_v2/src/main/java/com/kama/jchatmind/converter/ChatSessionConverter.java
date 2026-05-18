@@ -52,6 +52,7 @@ public class ChatSessionConverter {
                 .id(dto.getId())
                 .agentId(dto.getAgentId())
                 .title(dto.getTitle())
+                .metadata(dto.getMetadata())
                 .build();
     }
 
@@ -66,6 +67,7 @@ public class ChatSessionConverter {
         return ChatSessionDTO.builder()
                 .agentId(request.getAgentId())
                 .title(request.getTitle())
+                .metadata(request.getMetadata())
                 .build();
     }
 
@@ -75,6 +77,9 @@ public class ChatSessionConverter {
 
         if (request.getTitle() != null) {
             dto.setTitle(request.getTitle());
+        }
+        if (request.getMetadata() != null) {
+            dto.setMetadata(request.getMetadata());
         }
     }
 }

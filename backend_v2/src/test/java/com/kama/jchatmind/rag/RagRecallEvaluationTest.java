@@ -20,6 +20,7 @@ import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.DocumentStorageServiceImpl;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
+import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.RetrievableTitleLexicalizer;
 import org.junit.jupiter.api.Assumptions;
@@ -1229,6 +1230,7 @@ class RagRecallEvaluationTest {
             KnowledgeBaseConverter.class,
             DocumentStorageServiceImpl.class,
             MarkdownParserServiceImpl.class,
+            QueryRewriteServiceImpl.class,
             RagServiceImpl.class
     })
     static class RagEvalTestConfig {

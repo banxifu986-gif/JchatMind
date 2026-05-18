@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.RagService;
+import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -250,7 +251,10 @@ class RagOnlineE2eEvaluationTest {
             MybatisAutoConfiguration.class
     })
     @MapperScan("com.kama.jchatmind.mapper")
-    @Import(RagServiceImpl.class)
+    @Import({
+            QueryRewriteServiceImpl.class,
+            RagServiceImpl.class
+    })
     static class RagOnlineE2eTestConfig {
         @Bean
         ObjectMapper objectMapper() {

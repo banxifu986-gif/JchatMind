@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.kama.jchatmind.converter.ChatSessionConverter;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.ChatSessionMapper;
+import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.ChatSessionDTO;
 import com.kama.jchatmind.model.entity.ChatSession;
 import com.kama.jchatmind.model.request.CreateChatSessionRequest;
@@ -15,6 +16,7 @@ import com.kama.jchatmind.model.vo.ChatSessionVO;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -151,5 +153,70 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
         } catch (JsonProcessingException e) {
             throw new BizException("更新聊天会话时发生序列化错误: " + e.getMessage());
         }
+    }
+
+    @Override
+    public RagRetrievalContext getRetrievalContext(String chatSessionId) {
+        try {
+            ChatSession existingChatSession = chatSessionMapper.selectById(chatSessionId);
+            if (existingChatSession == null) {
+                throw new BizException("聊天会话不存在: " + chatSessionId);
+            }
+            ChatSessionDTO chatSessionDTO = chatSessionConverter.toDTO(existingChatSession);
+            if (chatSessionDTO.getMetadata() == null) {
+                return null;
+            }
+            return chatSessionDTO.getMetadata().getRetrievalContext();
+        } catch (JsonProcessingException e) {
+            throw new BizException("读取聊天会话上下文时发生序列化错误: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext) {
+        try {
+            ChatSession existingChatSession = chatSessionMapper.selectById(chatSessionId);
+            if (existingChatSession == null) {
+                throw new BizException("聊天会话不存在: " + chatSessionId);
+            }
+
+            ChatSessionDTO chatSessionDTO = chatSessionConverter.toDTO(existingChatSession);
+            ChatSessionDTO.MetaData metadata = chatSessionDTO.getMetadata();
+            if (metadata == null) {
+                metadata = new ChatSessionDTO.MetaData();
+                chatSessionDTO.setMetadata(metadata);
+            }
+
+            metadata.setRetrievalContext(normalizeRetrievalContext(retrievalContext));
+
+            ChatSession updatedChatSession = chatSessionConverter.toEntity(chatSessionDTO);
+            updatedChatSession.setId(existingChatSession.getId());
+            updatedChatSession.setAgentId(existingChatSession.getAgentId());
+            updatedChatSession.setCreatedAt(existingChatSession.getCreatedAt());
+            updatedChatSession.setUpdatedAt(LocalDateTime.now());
+
+            int result = chatSessionMapper.updateById(updatedChatSession);
+            if (result <= 0) {
+                throw new BizException("更新聊天会话检索上下文失败");
+            }
+        } catch (JsonProcessingException e) {
+            throw new BizException("更新聊天会话上下文时发生序列化错误: " + e.getMessage());
+        }
+    }
+
+    private RagRetrievalContext normalizeRetrievalContext(RagRetrievalContext retrievalContext) {
+        if (retrievalContext == null) {
+            return null;
+        }
+        RagRetrievalContext normalized = RagRetrievalContext.builder()
+                .sourceType(trimToNull(retrievalContext.getSourceType()))
+                .sourceName(trimToNull(retrievalContext.getSourceName()))
+                .contentPath(trimToNull(retrievalContext.getContentPath()))
+                .build();
+        return normalized.hasContext() ? normalized : null;
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 }

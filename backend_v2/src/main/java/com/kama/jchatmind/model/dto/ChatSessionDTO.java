@@ -22,5 +22,6 @@ public class ChatSessionDTO {
 
     @Data
     public static class MetaData {
+        private RagRetrievalContext retrievalContext;
     }
 }

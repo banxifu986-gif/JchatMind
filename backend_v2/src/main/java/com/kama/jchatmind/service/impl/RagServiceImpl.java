@@ -4,8 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
+import com.kama.jchatmind.model.dto.QueryRewriteResult;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.service.QueryRewriteService;
 import com.kama.jchatmind.service.RagService;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +20,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,28 +40,25 @@ public class RagServiceImpl implements RagService {
     private static final double TITLE_TRIGRAM_MIN_SCORE = 0.18D;
     private static final int MIN_CONTENT_SUBSTRING_LENGTH = 8;
     private static final int MIN_PATH_SUBSTRING_LENGTH = 4;
-    private static final int TITLE_LOOKUP_MAX_QUERY_LENGTH = 80;
     private static final int TITLE_CONTAINS_MIN_QUERY_LENGTH = 2;
     private static final int TITLE_KEYWORD_MIN_LENGTH = 2;
     private static final int TITLE_KEYWORD_MAX_COUNT = 6;
-    private static final double AUTO_CONTEXT_MIN_SCORE = 0.52D;
-    private static final double AUTO_CONTEXT_MIN_SCORE_GAP = 0.12D;
-    private static final double AUTO_CONTEXT_TITLE_WEIGHT = 0.55D;
-    private static final double AUTO_CONTEXT_PATH_WEIGHT = 0.30D;
-    private static final double AUTO_CONTEXT_SOURCE_WEIGHT = 0.15D;
 
     private final WebClient webClient;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
+    private final QueryRewriteService queryRewriteService;
     private final String embeddingModel;
     private final boolean rerankDebug;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public RagServiceImpl(WebClient.Builder builder, ChunkBgeM3Mapper chunkBgeM3Mapper,
+                          QueryRewriteService queryRewriteService,
                           @Value("${ollama.base-url}") String ollamaBaseUrl,
                           @Value("${ollama.embedding-model}") String embeddingModel,
                           @Value("${rag.rerank.debug:false}") boolean rerankDebug) {
         this.webClient = builder.baseUrl(ollamaBaseUrl).build();
         this.chunkBgeM3Mapper = chunkBgeM3Mapper;
+        this.queryRewriteService = queryRewriteService;
         this.embeddingModel = embeddingModel;
         this.rerankDebug = rerankDebug;
     }
@@ -106,22 +104,33 @@ public class RagServiceImpl implements RagService {
         if (limit <= 0) {
             return List.of();
         }
-        RetrievalPlan plan = buildRetrievalPlan(kbId, query, context);
-        return retrieveWithPlan(kbId, query, plan, limit);
+        QueryRewriteResult rewritten = queryRewriteService.rewrite(kbId, query, context);
+        return retrieveWithPlan(kbId, rewritten, limit);
     }
 
-    private List<RagRetrievalResult> retrieveWithPlan(String kbId, String query, RetrievalPlan plan, int limit) {
+    private List<RagRetrievalResult> retrieveWithPlan(String kbId, QueryRewriteResult rewritten, int limit) {
+        String query = rewritten.getQuery();
         String normalizedQuery = normalize(query);
         String queryEmbedding = toPgVector(doEmbed(query));
         int candidateLimit = Math.max(limit, RERANK_CANDIDATE_LIMIT);
 
-        RetrievalContext normalizedContext = plan.context();
+        RetrievalContext normalizedContext = normalizeContext(rewritten.getContext());
         List<RagRetrievalResult> vectorCandidates = findVectorCandidates(kbId, queryEmbedding, normalizedContext, candidateLimit);
-        List<RagRetrievalResult> titleCandidates = findTitleExactCandidates(kbId, normalizedQuery, queryEmbedding, normalizedContext);
-        List<RagRetrievalResult> titleContainsCandidates = findTitleContainsCandidates(kbId, normalizedQuery);
-        List<RagRetrievalResult> titleKeywordCandidates = findTitleKeywordCandidates(kbId, normalizedQuery);
-        List<RagRetrievalResult> titleTrigramCandidates = findTitleTrigramCandidates(kbId, normalizedQuery);
-        List<RagRetrievalResult> titleBm25Candidates = findTitleBm25Candidates(kbId, normalizedQuery);
+        List<RagRetrievalResult> titleCandidates = rewritten.isTitleQuery()
+                ? findTitleExactCandidates(kbId, normalizedQuery, queryEmbedding, normalizedContext)
+                : List.of();
+        List<RagRetrievalResult> titleContainsCandidates = rewritten.isTitleQuery()
+                ? findTitleContainsCandidates(kbId, normalizedQuery)
+                : List.of();
+        List<RagRetrievalResult> titleKeywordCandidates = rewritten.isTitleQuery()
+                ? findTitleKeywordCandidates(kbId, normalizedQuery)
+                : List.of();
+        List<RagRetrievalResult> titleTrigramCandidates = rewritten.isTitleQuery()
+                ? findTitleTrigramCandidates(kbId, normalizedQuery)
+                : List.of();
+        List<RagRetrievalResult> titleBm25Candidates = rewritten.isTitleQuery()
+                ? findTitleBm25Candidates(kbId, normalizedQuery)
+                : List.of();
 
         List<RagRetrievalResult> candidates = mergeCandidates(titleCandidates, vectorCandidates);
         candidates = mergeCandidates(candidates, titleContainsCandidates);
@@ -133,121 +142,6 @@ public class RagServiceImpl implements RagService {
         return rerank(normalizedQuery, normalizedContext, candidates).stream()
                 .limit(limit)
                 .toList();
-    }
-
-    private RetrievalPlan buildRetrievalPlan(String kbId, String query, RagRetrievalContext context) {
-        RetrievalContext explicitContext = normalizeContext(context);
-        if (explicitContext.hasContext()) {
-            return new RetrievalPlan(explicitContext, true, null);
-        }
-
-        RetrievalContext selectedContext = selectContextFromTitlePathCandidates(kbId, query);
-        return new RetrievalPlan(selectedContext, false, null);
-    }
-
-    private RetrievalContext selectContextFromTitlePathCandidates(String kbId, String query) {
-        String normalizedQuery = normalize(query);
-        if (!StringUtils.hasText(normalizedQuery) || normalizedQuery.length() > TITLE_LOOKUP_MAX_QUERY_LENGTH) {
-            return RetrievalContext.empty();
-        }
-        if (!shouldTryAutoContextSelection(normalizedQuery)) {
-            return RetrievalContext.empty();
-        }
-
-        Set<String> queryTerms = terms(normalizedQuery);
-        if (queryTerms.isEmpty()) {
-            return RetrievalContext.empty();
-        }
-
-        List<RagRetrievalResult> candidates = chunkBgeM3Mapper.selectTitlePathCandidatesByKbId(kbId);
-        if (candidates.isEmpty()) {
-            return RetrievalContext.empty();
-        }
-
-        Map<String, ScoredContextCandidate> bestCandidateByContext = new LinkedHashMap<>();
-        for (RagRetrievalResult candidate : candidates) {
-            ScoredContextCandidate scoredCandidate = scoreContextCandidate(normalizedQuery, queryTerms, candidate);
-            if (scoredCandidate.score() <= 0D || !scoredCandidate.context().hasContext()) {
-                continue;
-            }
-            String contextKey = contextKey(scoredCandidate.context());
-            ScoredContextCandidate current = bestCandidateByContext.get(contextKey);
-            if (current == null || scoredCandidate.score() > current.score()) {
-                bestCandidateByContext.put(contextKey, scoredCandidate);
-            }
-        }
-
-        List<ScoredContextCandidate> scoredCandidates = bestCandidateByContext.values().stream()
-                .sorted(Comparator
-                        .comparingDouble(ScoredContextCandidate::score)
-                        .reversed()
-                        .thenComparing(candidate -> candidate.context().contentPath()))
-                .toList();
-        if (scoredCandidates.isEmpty()) {
-            return RetrievalContext.empty();
-        }
-
-        ScoredContextCandidate best = scoredCandidates.get(0);
-        double nextScore = scoredCandidates.size() > 1 ? scoredCandidates.get(1).score() : 0D;
-        if (best.score() < AUTO_CONTEXT_MIN_SCORE || best.score() - nextScore < AUTO_CONTEXT_MIN_SCORE_GAP) {
-            return RetrievalContext.empty();
-        }
-        return best.context();
-    }
-
-    private boolean shouldTryAutoContextSelection(String normalizedQuery) {
-        if (!StringUtils.hasText(normalizedQuery)) {
-            return false;
-        }
-        return isPathAwareQuery(normalizedQuery)
-                || normalizedQuery.contains(".md")
-                || normalizedQuery.contains(".markdown");
-    }
-
-    private String contextKey(RetrievalContext context) {
-        return String.join(
-                "|",
-                context.sourceType() == null ? "" : context.sourceType(),
-                context.sourceName() == null ? "" : context.sourceName(),
-                context.contentPathPrefix() == null ? "" : context.contentPathPrefix()
-        );
-    }
-
-    private ScoredContextCandidate scoreContextCandidate(
-            String normalizedQuery,
-            Set<String> queryTerms,
-            RagRetrievalResult candidate
-    ) {
-        String metadata = candidate.getMetadata();
-        String title = normalize(extractRetrievableTitle(metadata));
-        String contentPath = extractMetadataText(metadata, "contentPath");
-        String normalizedContentPath = normalize(contentPath);
-        String parentContentPath = parentContentPath(contentPath);
-        String normalizedParentContentPath = normalize(parentContentPath);
-        String sourceName = extractMetadataText(metadata, "sourceName");
-        String normalizedSourceName = normalize(sourceName);
-        String sourceType = extractMetadataText(metadata, "sourceType");
-
-        double titleScore = title.equals(normalizedQuery)
-                ? 1D
-                : overlapRatio(queryTerms, terms(title));
-        double pathScore = Math.max(
-                overlapRatio(queryTerms, terms(normalizedContentPath)),
-                overlapRatio(queryTerms, terms(normalizedParentContentPath))
-        );
-        double sourceScore = overlapRatio(queryTerms, terms(normalizedSourceName));
-        double score = titleScore * AUTO_CONTEXT_TITLE_WEIGHT
-                + pathScore * AUTO_CONTEXT_PATH_WEIGHT
-                + sourceScore * AUTO_CONTEXT_SOURCE_WEIGHT;
-
-        RetrievalContext context = new RetrievalContext(
-                StringUtils.hasText(sourceType) ? sourceType : null,
-                StringUtils.hasText(sourceName) ? sourceName : null,
-                StringUtils.hasText(normalizedSourceName) ? normalizedSourceName : null,
-                StringUtils.hasText(parentContentPath) ? parentContentPath : contentPath,
-                StringUtils.hasText(normalizedParentContentPath) ? normalizedParentContentPath : normalizedContentPath
-        );
-        return new ScoredContextCandidate(context, score);
     }
 
     private List<RagRetrievalResult> findVectorCandidates(
@@ -429,13 +323,7 @@ public class RagServiceImpl implements RagService {
         if (!StringUtils.hasText(normalizedQuery)) {
             return false;
         }
-        if (normalizedQuery.length() > TITLE_LOOKUP_MAX_QUERY_LENGTH) {
-            return false;
-        }
-        return !normalizedQuery.contains("?")
-                && !normalizedQuery.contains("\uFF1F")
-                && !normalizedQuery.contains("\u3002")
-                && !normalizedQuery.contains("\uFF01");
+        return true;
     }
 
     private boolean shouldTryTitleContainsLookup(String normalizedQuery) {
@@ -825,19 +713,6 @@ public class RagServiceImpl implements RagService {
     private record ScoredLexicalCandidate(
             RagRetrievalResult result,
             double score
-    ) {
-    }
-
-    private record ScoredContextCandidate(
-            RetrievalContext context,
-            double score
-    ) {
-    }
-
-    private record RetrievalPlan(
-            RetrievalContext context,
-            boolean explicitContext,
-            String selectedReason
     ) {
     }
 
