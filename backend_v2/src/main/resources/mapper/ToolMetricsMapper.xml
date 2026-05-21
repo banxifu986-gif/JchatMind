@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.ToolMetricsMapper">
+
+    <!-- 工具调用频率分布 -->
+    <select id="toolInvocationFrequency" resultType="java.util.HashMap">
+        SELECT
+            metadata ->> 'toolResponse' ->> 'name' AS tool_name,
+            COUNT(*) AS invocation_count
+        FROM chat_message
+        WHERE role = 'tool'
+          AND metadata ->> 'toolResponse' ->> 'name' IS NOT NULL
+        GROUP BY tool_name
+        ORDER BY invocation_count DESC
+    </select>
+
+    <!-- 单次会话工具调用步数分布 -->
+    <select id="stepsPerSession" resultType="java.util.HashMap">
+        SELECT
+            session_id,
+            COUNT(*) AS tool_steps
+        FROM chat_message
+        WHERE role = 'assistant'
+          AND metadata ->> 'toolCalls' IS NOT NULL
+          AND metadata ->> 'toolCalls' != '[]'
+        GROUP BY session_id
+        ORDER BY tool_steps DESC
+    </select>
+
+    <!-- terminate 工具调用率 -->
+    <select id="terminateCallRate" resultType="java.util.HashMap">
+        SELECT
+            COUNT(DISTINCT CASE WHEN metadata ->> 'toolResponse' ->> 'name' = 'terminate'
+                           THEN session_id END) AS sessions_with_terminate,
+            COUNT(DISTINCT session_id) AS total_sessions,
+            CASE WHEN COUNT(DISTINCT session_id) > 0
+                 THEN ROUND(
+                     COUNT(DISTINCT CASE WHEN metadata ->> 'toolResponse' ->> 'name' = 'terminate'
+                                    THEN session_id END
+                 ) * 100.0 / COUNT(DISTINCT session_id), 1)
+                 ELSE 0
+            END AS terminate_rate_percent
+        FROM chat_message
+        WHERE role = 'tool'
+    </select>
+
+    <!-- 工具调用成功率：比较 assistant 中的 toolCalls 数量与 tool 角色响应数量 -->
+    <select id="toolCallSuccessRate" resultType="java.util.HashMap">
+        SELECT
+            COALESCE(SUM(total_calls), 0) AS total_tool_calls,
+            COALESCE(SUM(successful_responses), 0) AS successful_tool_responses,
+            CASE WHEN COALESCE(SUM(total_calls), 0) > 0
+                 THEN ROUND(
+                     COALESCE(SUM(successful_responses), 0) * 100.0
+                     / COALESCE(SUM(total_calls), 0), 1)
+                 ELSE 100.0
+            END AS success_rate_percent
+        FROM (
+            SELECT
+                session_id,
+                jsonb_array_length(metadata -> 'toolCalls') AS total_calls,
+                0 AS successful_responses
+            FROM chat_message
+            WHERE role = 'assistant'
+              AND metadata ->> 'toolCalls' IS NOT NULL
+              AND metadata ->> 'toolCalls' != '[]'
+
+            UNION ALL
+
+            SELECT
+                session_id,
+                0 AS total_calls,
+                COUNT(*) AS successful_responses
+            FROM chat_message
+            WHERE role = 'tool'
+              AND metadata ->> 'toolResponse' ->> 'name' IS NOT NULL
+            GROUP BY session_id
+        ) sub
+    </select>
+
+    <!-- 最近 100 次工具调用的平均步数 -->
+    <select id="averageStepsRecent" resultType="java.util.HashMap">
+        SELECT
+            ROUND(AVG(tool_steps), 1) AS avg_steps,
+            MAX(tool_steps) AS max_steps,
+            MIN(tool_steps) AS min_steps,
+            COUNT(*) AS session_count
+        FROM (
+            SELECT
+                session_id,
+                COUNT(*) AS tool_steps
+            FROM chat_message
+            WHERE role = 'assistant'
+              AND metadata ->> 'toolCalls' IS NOT NULL
+              AND metadata ->> 'toolCalls' != '[]'
+              AND created_at >= NOW() - INTERVAL '7 days'
+            GROUP BY session_id
+        ) recent
+    </select>
+
+</mapper>

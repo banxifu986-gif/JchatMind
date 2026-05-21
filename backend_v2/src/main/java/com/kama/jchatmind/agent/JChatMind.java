@@ -12,7 +12,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
-import org.springframework.ai.chat.messages.*;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -25,6 +29,8 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -45,6 +51,7 @@ public class JChatMind {
 
     private static final Integer MAX_STEPS = 20;
     private static final Integer DEFAULT_MAX_MESSAGES = 20;
+    private static final Integer DEFAULT_TOOL_TIMEOUT_SECONDS = 30;
 
     private ChatOptions chatOptions;
     private SseService sseService;
@@ -52,8 +59,11 @@ public class JChatMind {
     private ChatMessageFacadeService chatMessageFacadeService;
     private ChatResponse lastChatResponse;
     private final List<ChatMessageDTO> pendingChatMessages = new ArrayList<>();
+    private final Integer toolTimeoutSeconds;
+    private String previousToolCallSignature;
 
     public JChatMind() {
+        this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
     }
 
     public JChatMind(
@@ -94,6 +104,9 @@ public class JChatMind {
             this.chatMemory.add(chatSessionId, new SystemMessage(systemPrompt));
         }
         this.chatMemory.add(chatSessionId, memory);
+
+        this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
+        this.previousToolCallSignature = null;
 
         this.chatOptions = DefaultToolCallingChatOptions.builder()
                 .internalToolExecutionEnabled(false)
@@ -169,14 +182,7 @@ public class JChatMind {
     }
 
     private boolean think() {
-        String thinkPrompt = """
-                现在你是负责当前回合决策的 Agent。
-                请根据当前对话上下文决定下一步动作。
-
-                【额外信息】
-                - 你当前可访问的知识库如下：%s
-                - 若上下文不足，优先从知识库检索
-                """.formatted(this.availableKbs);
+        String thinkPrompt = buildThinkPrompt();
 
         Prompt prompt = Prompt.builder()
                 .chatOptions(this.chatOptions)
@@ -196,11 +202,44 @@ public class JChatMind {
         AssistantMessage output = this.lastChatResponse.getResult().getOutput();
         List<AssistantMessage.ToolCall> toolCalls = output.getToolCalls();
 
+        this.chatMemory.add(this.chatSessionId, output);
         saveMessage(output);
         refreshPendingMessages();
         logToolCalls(toolCalls);
 
         return !toolCalls.isEmpty();
+    }
+
+    private String buildThinkPrompt() {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("""
+                现在你是负责当前回合决策的 Agent。
+                请根据当前对话上下文决定下一步动作。
+
+                【额外信息】
+                - 你当前可访问的知识库：%s
+                - 如果上下文不足，优先从知识库检索
+                - 调用 KnowledgeTool 时，可以显式传入 kbIds 指定搜索范围；如果不传 kbIds，默认搜索当前 Agent 全部可访问知识库
+                """.formatted(formatKbSummary()));
+
+        if (previousToolCallSignature != null) {
+            prompt.append("""
+
+                    【重要提醒】
+                    上一轮你已调用过工具（%s），请检查返回结果，避免重复相同的工具调用。如果结果已满足需求，请直接回答或调用 terminate。
+                    """.formatted(previousToolCallSignature));
+        }
+
+        return prompt.toString();
+    }
+
+    private String formatKbSummary() {
+        if (availableKbs == null || availableKbs.isEmpty()) {
+            return "无";
+        }
+        return availableKbs.stream()
+                .map(kb -> kb.getName() + "(" + kb.getId() + ")")
+                .collect(Collectors.joining("、"));
     }
 
     private void execute() {
@@ -209,19 +248,20 @@ public class JChatMind {
             return;
         }
 
+        List<AssistantMessage.ToolCall> toolCalls = this.lastChatResponse.getResult().getOutput().getToolCalls();
+        updateDuplicateSignature(toolCalls);
+
         Prompt prompt = Prompt.builder()
                 .messages(this.chatMemory.get(this.chatSessionId))
                 .chatOptions(this.chatOptions)
                 .build();
 
-        ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, this.lastChatResponse);
+        long startNanos = System.nanoTime();
+        ToolResponseMessage toolResponseMessage = executeWithTimeout(prompt);
+        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+        log.info("工具执行耗时: {} ms", elapsedMs);
 
-        this.chatMemory.clear(this.chatSessionId);
-        this.chatMemory.add(this.chatSessionId, toolExecutionResult.conversationHistory());
-
-        ToolResponseMessage toolResponseMessage = (ToolResponseMessage) toolExecutionResult
-                .conversationHistory()
-                .get(toolExecutionResult.conversationHistory().size() - 1);
+        this.chatMemory.add(this.chatSessionId, toolResponseMessage);
 
         String collect = toolResponseMessage.getResponses()
                 .stream()
@@ -236,6 +276,52 @@ public class JChatMind {
             this.agentState = AgentState.FINISHED;
             log.info("任务结束");
         }
+    }
+
+    private void updateDuplicateSignature(List<AssistantMessage.ToolCall> toolCalls) {
+        if (toolCalls.isEmpty()) {
+            previousToolCallSignature = null;
+            return;
+        }
+        previousToolCallSignature = toolCalls.stream()
+                .map(tc -> tc.name() + "(" + tc.arguments() + ")")
+                .collect(Collectors.joining("; "));
+    }
+
+    private ToolResponseMessage executeWithTimeout(Prompt prompt) {
+        try {
+            ToolExecutionResult result = CompletableFuture
+                    .supplyAsync(() -> toolCallingManager.executeToolCalls(prompt, this.lastChatResponse))
+                    .orTimeout(toolTimeoutSeconds, TimeUnit.SECONDS)
+                    .join();
+            return extractToolResponse(result);
+        } catch (Exception e) {
+            log.error("工具执行异常（疑似调用了不存在的工具或超时）: {}", e.getMessage());
+            return buildErrorResponse(e.getMessage());
+        }
+    }
+
+    private ToolResponseMessage extractToolResponse(ToolExecutionResult result) {
+        List<Message> history = result.conversationHistory();
+        return (ToolResponseMessage) history.get(history.size() - 1);
+    }
+
+    private ToolResponseMessage buildErrorResponse(String errorMessage) {
+        AssistantMessage output = this.lastChatResponse.getResult().getOutput();
+        List<AssistantMessage.ToolCall> toolCalls = output.getToolCalls();
+
+        List<ToolResponseMessage.ToolResponse> errorResponses = new ArrayList<>();
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            errorResponses.add(new ToolResponseMessage.ToolResponse(
+                    toolCall.id(),
+                    toolCall.name(),
+                    "错误：" + errorMessage
+            ));
+        }
+
+        return ToolResponseMessage.builder()
+                .responses(errorResponses)
+                .build();
     }
 
     private void step() {
