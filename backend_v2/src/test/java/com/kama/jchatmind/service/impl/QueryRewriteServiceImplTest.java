@@ -21,36 +21,45 @@ class QueryRewriteServiceImplTest {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
 
         RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
                 .sourceName("resume.md")
                 .contentPath("面试 > 回答")
                 .build();
 
-        QueryRewriteResult result = service.rewrite("kb-1", "回答 面试怎么回答", context);
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "回答 面试怎么回答", context);
 
         assertEquals("回答 面试怎么回答", result.getQuery());
         assertNotNull(result.getContext());
+        assertEquals("kb-1", result.getContext().getKbId());
         assertEquals("resume.md", result.getContext().getSourceName());
         assertEquals("面试 > 回答", result.getContext().getContentPath());
         assertTrue(result.isTitleQuery());
     }
 
     @Test
-    void shouldAutoSelectParentPathForPathAwareQuery() {
+    void shouldAutoSelectParentPathForPathAwareQueryAcrossKbs() {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of(
                 candidate(
                         "chunk-1",
+                        "kb-1",
                         "{\"retrievableTitle\":\"回答 面试怎么回答\",\"contentPath\":\"面试 > 行为面试 > 回答 面试怎么回答\",\"sourceName\":\"resume.md\",\"sourceType\":\"md\"}"
                 ),
                 candidate(
                         "chunk-2",
+                        "kb-2",
                         "{\"retrievableTitle\":\"回答 面试怎么回答\",\"contentPath\":\"其他 > 路径 > 回答 面试怎么回答\",\"sourceName\":\"other.md\",\"sourceType\":\"md\"}"
                 )
         )));
 
-        QueryRewriteResult result = service.rewrite("kb-1", "面试 > 行为面试 > 回答 面试怎么回答", null);
+        QueryRewriteResult result = service.rewrite(
+                List.of("kb-1", "kb-2"),
+                "面试 > 行为面试 > 回答 面试怎么回答",
+                null
+        );
 
         assertTrue(result.isTitleQuery());
         assertNotNull(result.getContext());
+        assertEquals("kb-1", result.getContext().getKbId());
         assertEquals("resume.md", result.getContext().getSourceName());
         assertEquals("md", result.getContext().getSourceType());
         assertEquals("面试 > 行为面试", result.getContext().getContentPath());
@@ -60,7 +69,7 @@ class QueryRewriteServiceImplTest {
     void shouldNotTreatNaturalQuestionAsTitleQuery() {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
 
-        QueryRewriteResult result = service.rewrite("kb-1", "面试时如何回答自己的优缺点？", null);
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "面试时如何回答自己的优缺点？", null);
 
         assertEquals("面试时如何回答自己的优缺点？", result.getQuery());
         assertFalse(result.isTitleQuery());
@@ -69,9 +78,10 @@ class QueryRewriteServiceImplTest {
         assertNull(result.getContext().getContentPath());
     }
 
-    private static RagRetrievalResult candidate(String chunkId, String metadata) {
+    private static RagRetrievalResult candidate(String chunkId, String kbId, String metadata) {
         RagRetrievalResult result = new RagRetrievalResult();
         result.setChunkId(chunkId);
+        result.setKbId(kbId);
         result.setMetadata(metadata);
         return result;
     }
@@ -84,7 +94,7 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
-        public List<RagRetrievalResult> selectTitlePathCandidatesByKbId(String kbId) {
+        public List<RagRetrievalResult> selectTitlePathCandidatesByKbIds(List<String> kbIds) {
             return titlePathCandidates;
         }
 
@@ -109,18 +119,18 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
-        public List<com.kama.jchatmind.model.entity.ChunkBgeM3> similaritySearch(String kbId, String vectorLiteral, int limit) {
+        public List<com.kama.jchatmind.model.entity.ChunkBgeM3> similaritySearch(List<String> kbIds, String vectorLiteral, int limit) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public List<RagRetrievalResult> similaritySearchDetailed(String kbId, String vectorLiteral, int limit) {
+        public List<RagRetrievalResult> similaritySearchDetailed(List<String> kbIds, String vectorLiteral, int limit) {
             throw new UnsupportedOperationException();
         }
 
         @Override
         public List<RagRetrievalResult> similaritySearchDetailedWithContext(
-                String kbId,
+                List<String> kbIds,
                 String vectorLiteral,
                 String sourceName,
                 String sourceType,
@@ -131,13 +141,13 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
-        public List<RagRetrievalResult> searchByTitleExact(String kbId, String normalizedTitle, String vectorLiteral, int limit) {
+        public List<RagRetrievalResult> searchByTitleExact(List<String> kbIds, String normalizedTitle, String vectorLiteral, int limit) {
             throw new UnsupportedOperationException();
         }
 
         @Override
         public List<RagRetrievalResult> searchByTitleExactWithContext(
-                String kbId,
+                List<String> kbIds,
                 String normalizedTitle,
                 String vectorLiteral,
                 String sourceName,
@@ -149,22 +159,22 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
-        public List<RagRetrievalResult> searchByTitleContains(String kbId, String normalizedTitle, String containsPattern, int limit) {
+        public List<RagRetrievalResult> searchByTitleContains(List<String> kbIds, String normalizedTitle, String containsPattern, int limit) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public List<RagRetrievalResult> searchByTitleKeywords(String kbId, List<String> keywords, int queryLength, int limit) {
+        public List<RagRetrievalResult> searchByTitleKeywords(List<String> kbIds, List<String> keywords, int queryLength, int limit) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public List<RagRetrievalResult> searchByTitleTrigram(String kbId, String normalizedTitle, double minScore, int limit) {
+        public List<RagRetrievalResult> searchByTitleTrigram(List<String> kbIds, String normalizedTitle, double minScore, int limit) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public List<RagRetrievalResult> selectLexicalCandidatesByKbId(String kbId) {
+        public List<RagRetrievalResult> selectLexicalCandidatesByKbIds(List<String> kbIds) {
             throw new UnsupportedOperationException();
         }
 

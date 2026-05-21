@@ -9,6 +9,7 @@ import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.QueryRewriteService;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
@@ -38,7 +39,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     }
 
     @Override
-    public QueryRewriteResult rewrite(String kbId, String query, RagRetrievalContext context) {
+    public QueryRewriteResult rewrite(List<String> kbIds, String query, RagRetrievalContext context) {
         String sanitizedQuery = sanitizeQuery(query);
         RagRetrievalContext normalizedContext = normalizeContext(context);
         if (!StringUtils.hasText(sanitizedQuery)) {
@@ -53,7 +54,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             return buildResult(sanitizedQuery, normalizedContext);
         }
 
-        RagRetrievalContext selectedContext = selectContextFromTitlePathCandidates(kbId, sanitizedQuery);
+        RagRetrievalContext selectedContext = selectContextFromTitlePathCandidates(kbIds, sanitizedQuery);
         return buildResult(sanitizedQuery, selectedContext);
     }
 
@@ -65,9 +66,9 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 .build();
     }
 
-    private RagRetrievalContext selectContextFromTitlePathCandidates(String kbId, String query) {
+    private RagRetrievalContext selectContextFromTitlePathCandidates(List<String> kbIds, String query) {
         String normalizedQuery = normalize(query);
-        if (!StringUtils.hasText(kbId)
+        if (CollectionUtils.isEmpty(kbIds)
                 || !StringUtils.hasText(normalizedQuery)
                 || normalizedQuery.length() > TITLE_LOOKUP_MAX_QUERY_LENGTH
                 || !shouldTryAutoContextSelection(normalizedQuery)) {
@@ -79,7 +80,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             return emptyContext();
         }
 
-        List<RagRetrievalResult> candidates = chunkBgeM3Mapper.selectTitlePathCandidatesByKbId(kbId);
+        List<RagRetrievalResult> candidates = chunkBgeM3Mapper.selectTitlePathCandidatesByKbIds(kbIds);
         if (candidates.isEmpty()) {
             return emptyContext();
         }
@@ -141,6 +142,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 + sourceScore * AUTO_CONTEXT_SOURCE_WEIGHT;
 
         RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId(StringUtils.hasText(candidate.getKbId()) ? candidate.getKbId() : null)
                 .sourceType(StringUtils.hasText(sourceType) ? sourceType : null)
                 .sourceName(StringUtils.hasText(sourceName) ? sourceName : null)
                 .contentPath(StringUtils.hasText(parentContentPath) ? parentContentPath : contentPath)
@@ -230,6 +232,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             return emptyContext();
         }
         return RagRetrievalContext.builder()
+                .kbId(trimToNull(context.getKbId()))
                 .sourceType(trimToNull(context.getSourceType()))
                 .sourceName(trimToNull(context.getSourceName()))
                 .contentPath(trimToNull(context.getContentPath()))
@@ -247,6 +250,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     private String contextKey(RagRetrievalContext context) {
         return String.join(
                 "|",
+                context.getKbId() == null ? "" : context.getKbId(),
                 context.getSourceType() == null ? "" : context.getSourceType(),
                 context.getSourceName() == null ? "" : context.getSourceName(),
                 context.getContentPath() == null ? "" : normalize(context.getContentPath())

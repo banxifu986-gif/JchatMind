@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -34,6 +35,7 @@ public class RagServiceImpl implements RagService {
     private static final int TITLE_KEYWORD_CANDIDATE_LIMIT = 10;
     private static final int TITLE_TRIGRAM_CANDIDATE_LIMIT = 10;
     private static final int TITLE_FULL_TEXT_CANDIDATE_LIMIT = 10;
+    private static final int MAX_SCOPE_MULTIPLIER = 5;
     private static final double BM25_K1 = 1.2D;
     private static final double BM25_B = 0.75D;
     private static final double RERANK_RANK_PENALTY = 0.03D;
@@ -51,11 +53,14 @@ public class RagServiceImpl implements RagService {
     private final boolean rerankDebug;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public RagServiceImpl(WebClient.Builder builder, ChunkBgeM3Mapper chunkBgeM3Mapper,
-                          QueryRewriteService queryRewriteService,
-                          @Value("${ollama.base-url}") String ollamaBaseUrl,
-                          @Value("${ollama.embedding-model}") String embeddingModel,
-                          @Value("${rag.rerank.debug:false}") boolean rerankDebug) {
+    public RagServiceImpl(
+            WebClient.Builder builder,
+            ChunkBgeM3Mapper chunkBgeM3Mapper,
+            QueryRewriteService queryRewriteService,
+            @Value("${ollama.base-url}") String ollamaBaseUrl,
+            @Value("${ollama.embedding-model}") String embeddingModel,
+            @Value("${rag.rerank.debug:false}") boolean rerankDebug
+    ) {
         this.webClient = builder.baseUrl(ollamaBaseUrl).build();
         this.chunkBgeM3Mapper = chunkBgeM3Mapper;
         this.queryRewriteService = queryRewriteService;
@@ -88,48 +93,70 @@ public class RagServiceImpl implements RagService {
     }
 
     @Override
-    public List<String> similaritySearch(String kbId, String title) {
-        return retrieve(kbId, title, 3).stream()
+    public List<String> similaritySearch(List<String> kbIds, String title) {
+        return retrieve(kbIds, title, 3).stream()
                 .map(RagRetrievalResult::getContent)
                 .toList();
     }
 
     @Override
-    public List<RagRetrievalResult> retrieve(String kbId, String query, int limit) {
-        return retrieve(kbId, query, null, limit);
+    public List<RagRetrievalResult> retrieve(List<String> kbIds, String query, int limit) {
+        return retrieve(kbIds, query, null, limit);
     }
 
     @Override
-    public List<RagRetrievalResult> retrieve(String kbId, String query, RagRetrievalContext context, int limit) {
+    public List<RagRetrievalResult> retrieve(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
         if (limit <= 0) {
             return List.of();
         }
-        QueryRewriteResult rewritten = queryRewriteService.rewrite(kbId, query, context);
-        return retrieveWithPlan(kbId, rewritten, limit);
+
+        List<String> effectiveKbIds = sanitizeKbIds(kbIds);
+        if (effectiveKbIds.isEmpty()) {
+            return List.of();
+        }
+
+        QueryRewriteResult rewritten = queryRewriteService.rewrite(effectiveKbIds, query, context);
+        return retrieveWithPlan(effectiveKbIds, rewritten, limit);
     }
 
-    private List<RagRetrievalResult> retrieveWithPlan(String kbId, QueryRewriteResult rewritten, int limit) {
+    private List<RagRetrievalResult> retrieveWithPlan(List<String> kbIds, QueryRewriteResult rewritten, int limit) {
         String query = rewritten.getQuery();
         String normalizedQuery = normalize(query);
         String queryEmbedding = toPgVector(doEmbed(query));
-        int candidateLimit = Math.max(limit, RERANK_CANDIDATE_LIMIT);
+        int scopeMultiplier = scopeMultiplier(kbIds.size());
+        int vectorCandidateLimit = scaledCandidateLimit(Math.max(limit, RERANK_CANDIDATE_LIMIT), scopeMultiplier);
+        int titleMatchCandidateLimit = scaledCandidateLimit(TITLE_MATCH_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleContainsCandidateLimit = scaledCandidateLimit(TITLE_CONTAINS_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleKeywordCandidateLimit = scaledCandidateLimit(TITLE_KEYWORD_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleTrigramCandidateLimit = scaledCandidateLimit(TITLE_TRIGRAM_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleFullTextCandidateLimit = scaledCandidateLimit(TITLE_FULL_TEXT_CANDIDATE_LIMIT, scopeMultiplier);
 
         RetrievalContext normalizedContext = normalizeContext(rewritten.getContext());
-        List<RagRetrievalResult> vectorCandidates = findVectorCandidates(kbId, queryEmbedding, normalizedContext, candidateLimit);
+        List<RagRetrievalResult> vectorCandidates = findVectorCandidates(
+                kbIds,
+                queryEmbedding,
+                normalizedContext,
+                vectorCandidateLimit
+        );
         List<RagRetrievalResult> titleCandidates = rewritten.isTitleQuery()
-                ? findTitleExactCandidates(kbId, normalizedQuery, queryEmbedding, normalizedContext)
+                ? findTitleExactCandidates(kbIds, normalizedQuery, queryEmbedding, normalizedContext, titleMatchCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleContainsCandidates = rewritten.isTitleQuery()
-                ? findTitleContainsCandidates(kbId, normalizedQuery)
+                ? findTitleContainsCandidates(kbIds, normalizedQuery, titleContainsCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleKeywordCandidates = rewritten.isTitleQuery()
-                ? findTitleKeywordCandidates(kbId, normalizedQuery)
+                ? findTitleKeywordCandidates(kbIds, normalizedQuery, titleKeywordCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleTrigramCandidates = rewritten.isTitleQuery()
-                ? findTitleTrigramCandidates(kbId, normalizedQuery)
+                ? findTitleTrigramCandidates(kbIds, normalizedQuery, titleTrigramCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleBm25Candidates = rewritten.isTitleQuery()
-                ? findTitleBm25Candidates(kbId, normalizedQuery)
+                ? findTitleBm25Candidates(kbIds, normalizedQuery, titleFullTextCandidateLimit)
                 : List.of();
 
         List<RagRetrievalResult> candidates = mergeCandidates(titleCandidates, vectorCandidates);
@@ -145,14 +172,14 @@ public class RagServiceImpl implements RagService {
     }
 
     private List<RagRetrievalResult> findVectorCandidates(
-            String kbId,
+            List<String> kbIds,
             String queryEmbedding,
             RetrievalContext context,
             int candidateLimit
     ) {
         if (context.hasContext()) {
             return chunkBgeM3Mapper.similaritySearchDetailedWithContext(
-                    kbId,
+                    kbIds,
                     queryEmbedding,
                     context.sourceName(),
                     context.sourceType(),
@@ -160,46 +187,55 @@ public class RagServiceImpl implements RagService {
                     candidateLimit
             );
         }
-        return chunkBgeM3Mapper.similaritySearchDetailed(kbId, queryEmbedding, candidateLimit);
+        return chunkBgeM3Mapper.similaritySearchDetailed(kbIds, queryEmbedding, candidateLimit);
     }
 
     private List<RagRetrievalResult> findTitleExactCandidates(
-            String kbId,
+            List<String> kbIds,
             String normalizedQuery,
             String queryEmbedding,
-            RetrievalContext context
+            RetrievalContext context,
+            int candidateLimit
     ) {
         if (!shouldTryTitleExactLookup(normalizedQuery)) {
             return List.of();
         }
         if (context.hasContext()) {
             return chunkBgeM3Mapper.searchByTitleExactWithContext(
-                    kbId,
+                    kbIds,
                     normalizedQuery,
                     queryEmbedding,
                     context.sourceName(),
                     context.sourceType(),
                     context.contentPathPrefix(),
-                    TITLE_MATCH_CANDIDATE_LIMIT
+                    candidateLimit
             );
         }
-        return chunkBgeM3Mapper.searchByTitleExact(kbId, normalizedQuery, queryEmbedding, TITLE_MATCH_CANDIDATE_LIMIT);
+        return chunkBgeM3Mapper.searchByTitleExact(kbIds, normalizedQuery, queryEmbedding, candidateLimit);
     }
 
-    private List<RagRetrievalResult> findTitleContainsCandidates(String kbId, String normalizedQuery) {
+    private List<RagRetrievalResult> findTitleContainsCandidates(
+            List<String> kbIds,
+            String normalizedQuery,
+            int candidateLimit
+    ) {
         if (!shouldTryTitleContainsLookup(normalizedQuery)) {
             return List.of();
         }
         String containsPattern = "%" + normalizedQuery + "%";
         return chunkBgeM3Mapper.searchByTitleContains(
-                kbId,
+                kbIds,
                 normalizedQuery,
                 containsPattern,
-                TITLE_CONTAINS_CANDIDATE_LIMIT
+                candidateLimit
         );
     }
 
-    private List<RagRetrievalResult> findTitleKeywordCandidates(String kbId, String normalizedQuery) {
+    private List<RagRetrievalResult> findTitleKeywordCandidates(
+            List<String> kbIds,
+            String normalizedQuery,
+            int candidateLimit
+    ) {
         if (!shouldTryTitleKeywordLookup(normalizedQuery)) {
             return List.of();
         }
@@ -208,26 +244,34 @@ public class RagServiceImpl implements RagService {
             return List.of();
         }
         return chunkBgeM3Mapper.searchByTitleKeywords(
-                kbId,
+                kbIds,
                 keywords,
                 normalizedQuery.length(),
-                TITLE_KEYWORD_CANDIDATE_LIMIT
+                candidateLimit
         );
     }
 
-    private List<RagRetrievalResult> findTitleTrigramCandidates(String kbId, String normalizedQuery) {
+    private List<RagRetrievalResult> findTitleTrigramCandidates(
+            List<String> kbIds,
+            String normalizedQuery,
+            int candidateLimit
+    ) {
         if (!shouldTryTitleTrigramLookup(normalizedQuery)) {
             return List.of();
         }
         return chunkBgeM3Mapper.searchByTitleTrigram(
-                kbId,
+                kbIds,
                 normalizedQuery,
                 TITLE_TRIGRAM_MIN_SCORE,
-                TITLE_TRIGRAM_CANDIDATE_LIMIT
+                candidateLimit
         );
     }
 
-    private List<RagRetrievalResult> findTitleBm25Candidates(String kbId, String normalizedQuery) {
+    private List<RagRetrievalResult> findTitleBm25Candidates(
+            List<String> kbIds,
+            String normalizedQuery,
+            int candidateLimit
+    ) {
         if (!shouldTryTitleFullTextLookup(normalizedQuery)) {
             return List.of();
         }
@@ -237,7 +281,7 @@ public class RagServiceImpl implements RagService {
             return List.of();
         }
 
-        List<RagRetrievalResult> lexicalCandidates = chunkBgeM3Mapper.selectLexicalCandidatesByKbId(kbId);
+        List<RagRetrievalResult> lexicalCandidates = chunkBgeM3Mapper.selectLexicalCandidatesByKbIds(kbIds);
         if (lexicalCandidates.isEmpty()) {
             return List.of();
         }
@@ -306,7 +350,7 @@ public class RagServiceImpl implements RagService {
                         .reversed()
                         .thenComparing(item -> extractRetrievableTitle(item.result().getMetadata()))
                         .thenComparing(item -> item.result().getChunkId()))
-                .limit(TITLE_FULL_TEXT_CANDIDATE_LIMIT)
+                .limit(candidateLimit)
                 .map(ScoredLexicalCandidate::result)
                 .toList();
 
@@ -320,10 +364,7 @@ public class RagServiceImpl implements RagService {
     }
 
     private boolean shouldTryTitleExactLookup(String normalizedQuery) {
-        if (!StringUtils.hasText(normalizedQuery)) {
-            return false;
-        }
-        return true;
+        return StringUtils.hasText(normalizedQuery);
     }
 
     private boolean shouldTryTitleContainsLookup(String normalizedQuery) {
@@ -397,6 +438,10 @@ public class RagServiceImpl implements RagService {
     }
 
     private boolean matchesContext(RagRetrievalResult result, RetrievalContext context) {
+        if (StringUtils.hasText(context.kbId()) && !context.kbId().equals(result.getKbId())) {
+            return false;
+        }
+
         String metadata = result.getMetadata();
         if (StringUtils.hasText(context.sourceType())
                 && !context.sourceType().equals(extractMetadataText(metadata, "sourceType"))) {
@@ -413,7 +458,11 @@ public class RagServiceImpl implements RagService {
         return true;
     }
 
-    private List<RagRetrievalResult> rerank(String normalizedQuery, RetrievalContext context, List<RagRetrievalResult> candidates) {
+    private List<RagRetrievalResult> rerank(
+            String normalizedQuery,
+            RetrievalContext context,
+            List<RagRetrievalResult> candidates
+    ) {
         if (candidates.size() <= 1 || !StringUtils.hasText(normalizedQuery)) {
             return candidates;
         }
@@ -484,7 +533,7 @@ public class RagServiceImpl implements RagService {
             contentOverlapScore = overlapRatio(queryTerms, terms(content)) * 0.16D;
         }
 
-        double contentPathScore = contentPathScore(normalizedQuery, context, contentPath, sourceName, queryTerms);
+        double contentPathScore = contentPathScore(normalizedQuery, context, contentPath, sourceName, queryTerms, result.getKbId());
 
         return new RerankScore(
                 titleExactScore,
@@ -502,7 +551,8 @@ public class RagServiceImpl implements RagService {
             RetrievalContext context,
             String contentPath,
             String sourceName,
-            Set<String> queryTerms
+            Set<String> queryTerms,
+            String kbId
     ) {
         if (!isPathAwareQuery(normalizedQuery) && !context.hasContext()) {
             return 0D;
@@ -510,7 +560,7 @@ public class RagServiceImpl implements RagService {
 
         double score = 0D;
         if (context.hasContext()) {
-            score += contextMatchScore(context, contentPath, sourceName);
+            score += contextMatchScore(context, contentPath, sourceName, kbId);
         }
         if (StringUtils.hasText(contentPath)) {
             if (containsMeaningfulPath(contentPath, normalizedQuery) || containsMeaningfulPath(normalizedQuery, contentPath)) {
@@ -527,8 +577,11 @@ public class RagServiceImpl implements RagService {
         return Math.min(score, 0.32D);
     }
 
-    private double contextMatchScore(RetrievalContext context, String contentPath, String sourceName) {
+    private double contextMatchScore(RetrievalContext context, String contentPath, String sourceName, String kbId) {
         double score = 0D;
+        if (StringUtils.hasText(context.kbId()) && context.kbId().equals(kbId)) {
+            score += 0.08D;
+        }
         if (StringUtils.hasText(context.normalizedSourceName()) && context.normalizedSourceName().equals(normalize(sourceName))) {
             score += 0.12D;
         }
@@ -667,12 +720,14 @@ public class RagServiceImpl implements RagService {
         if (context == null || !context.hasContext()) {
             return RetrievalContext.empty();
         }
+        String kbId = StringUtils.hasText(context.getKbId()) ? context.getKbId().trim() : null;
         String sourceType = StringUtils.hasText(context.getSourceType()) ? context.getSourceType().trim() : null;
         String sourceName = StringUtils.hasText(context.getSourceName()) ? context.getSourceName().trim() : null;
         String normalizedSourceName = normalize(sourceName);
         String contentPath = StringUtils.hasText(context.getContentPath()) ? context.getContentPath().trim() : null;
         String contentPathPrefix = normalize(contentPath);
         return new RetrievalContext(
+                kbId,
                 sourceType,
                 sourceName,
                 StringUtils.hasText(normalizedSourceName) ? normalizedSourceName : null,
@@ -681,27 +736,35 @@ public class RagServiceImpl implements RagService {
         );
     }
 
-    private String parentContentPath(String contentPath) {
-        if (!StringUtils.hasText(contentPath)) {
-            return null;
-        }
-        int separatorIndex = contentPath.lastIndexOf(" > ");
-        if (separatorIndex <= 0) {
-            return contentPath;
-        }
-        return contentPath.substring(0, separatorIndex);
-    }
-
-    private String toPgVector(float[] v) {
+    private String toPgVector(float[] vector) {
         StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < v.length; i++) {
-            sb.append(v[i]);
-            if (i < v.length - 1) {
+        for (int i = 0; i < vector.length; i++) {
+            sb.append(vector[i]);
+            if (i < vector.length - 1) {
                 sb.append(",");
             }
         }
         sb.append("]");
         return sb.toString();
+    }
+
+    private List<String> sanitizeKbIds(List<String> kbIds) {
+        if (CollectionUtils.isEmpty(kbIds)) {
+            return List.of();
+        }
+        return kbIds.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+    }
+
+    private int scopeMultiplier(int kbCount) {
+        return Math.min(Math.max(kbCount, 1), MAX_SCOPE_MULTIPLIER);
+    }
+
+    private int scaledCandidateLimit(int baseLimit, int scopeMultiplier) {
+        return Math.max(baseLimit, 1) * scopeMultiplier;
     }
 
     private record ScoredRagResult(
@@ -717,6 +780,7 @@ public class RagServiceImpl implements RagService {
     }
 
     private record RetrievalContext(
+            String kbId,
             String sourceType,
             String sourceName,
             String normalizedSourceName,
@@ -724,11 +788,12 @@ public class RagServiceImpl implements RagService {
             String contentPathPrefix
     ) {
         static RetrievalContext empty() {
-            return new RetrievalContext(null, null, null, null, null);
+            return new RetrievalContext(null, null, null, null, null, null);
         }
 
         boolean hasContext() {
-            return StringUtils.hasText(sourceType)
+            return StringUtils.hasText(kbId)
+                    || StringUtils.hasText(sourceType)
                     || StringUtils.hasText(sourceName)
                     || StringUtils.hasText(contentPathPrefix);
         }

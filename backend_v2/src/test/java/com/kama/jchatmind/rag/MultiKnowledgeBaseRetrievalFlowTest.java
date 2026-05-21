@@ -1,5 +1,7 @@
-package com.kama.jchatmind.agent.tools;
+package com.kama.jchatmind.rag;
 
+import com.kama.jchatmind.agent.tools.KnowledgeTools;
+import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
@@ -7,20 +9,21 @@ import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class KnowledgeToolsTest {
+class MultiKnowledgeBaseRetrievalFlowTest {
 
     @Test
-    void shouldReadAndWriteSessionRetrievalContext() {
+    void shouldDefaultToSessionScopedKbWhenNoKbIdsSpecified() {
         RecordingChatSessionFacadeService chatSessionFacadeService = new RecordingChatSessionFacadeService();
         chatSessionFacadeService.context = RagRetrievalContext.builder()
-                .kbId("kb-1")
-                .sourceName("resume.md")
+                .kbId("kb-a")
+                .sourceName("resume-a.md")
                 .contentPath("面试 > 自我介绍")
                 .build();
 
@@ -28,53 +31,55 @@ class KnowledgeToolsTest {
         KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork(
                 "user-1",
                 "session-1",
-                List.of(kb("kb-1", "简历库"), kb("kb-2", "八股库"))
+                List.of(kb("kb-a", "简历库A"), kb("kb-b", "简历库B"))
         );
 
-        String result = tools.knowledgeQuery("如何回答", null);
+        String result = tools.knowledgeQuery("这一段怎么讲", null);
 
-        assertEquals(List.of("kb-1"), ragService.lastKbIds);
-        assertNotNull(ragService.lastContext);
-        assertEquals("kb-1", ragService.lastContext.getKbId());
-        assertEquals("resume.md", ragService.lastContext.getSourceName());
-        assertEquals("面试 > 自我介绍", ragService.lastContext.getContentPath());
+        assertEquals(List.of("kb-a"), ragService.calls.get(0).kbIds());
+        assertEquals("kb-a", ragService.calls.get(0).context().getKbId());
+        assertTrue(result.contains("知识库: 简历库A"));
+    }
+
+    @Test
+    void shouldRestrictToExplicitSubsetWhenKbIdsProvided() {
+        RecordingChatSessionFacadeService chatSessionFacadeService = new RecordingChatSessionFacadeService();
+        chatSessionFacadeService.context = RagRetrievalContext.builder()
+                .kbId("kb-a")
+                .sourceName("resume-a.md")
+                .contentPath("面试 > 自我介绍")
+                .build();
+
+        RecordingRagService ragService = new RecordingRagService();
+        KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork(
+                "user-1",
+                "session-1",
+                List.of(kb("kb-a", "简历库A"), kb("kb-b", "简历库B"))
+        );
+
+        String result = tools.knowledgeQuery("Java 内存模型", List.of("kb-b"));
+
+        assertEquals(List.of("kb-b"), ragService.calls.get(0).kbIds());
+        assertEquals(null, ragService.calls.get(0).context());
+        assertTrue(result.contains("知识库: 简历库B"));
+    }
+
+    @Test
+    void shouldPersistTop1KbIntoSessionContext() {
+        RecordingChatSessionFacadeService chatSessionFacadeService = new RecordingChatSessionFacadeService();
+        RecordingRagService ragService = new RecordingRagService();
+        KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork(
+                "user-1",
+                "session-1",
+                List.of(kb("kb-a", "简历库A"), kb("kb-b", "简历库B"))
+        );
+
+        tools.knowledgeQuery("项目亮点", List.of("kb-b"));
+
         assertNotNull(chatSessionFacadeService.updatedContext);
-        assertEquals("kb-1", chatSessionFacadeService.updatedContext.getKbId());
-        assertEquals("resume.md", chatSessionFacadeService.updatedContext.getSourceName());
-        assertEquals("面试 > 自我介绍", chatSessionFacadeService.updatedContext.getContentPath());
-        assertTrue(result.contains("知识库: 简历库"));
-        assertTrue(result.contains("来源: resume.md"));
-    }
-
-    @Test
-    void shouldUseRequestedAuthorizedKbSubset() {
-        RecordingChatSessionFacadeService chatSessionFacadeService = new RecordingChatSessionFacadeService();
-        RecordingRagService ragService = new RecordingRagService();
-        KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork(
-                "user-1",
-                "session-1",
-                List.of(kb("kb-1", "简历库"), kb("kb-2", "八股库"))
-        );
-
-        tools.knowledgeQuery("Java 内存模型", List.of("kb-2", "kb-3"));
-
-        assertEquals(List.of("kb-2"), ragService.lastKbIds);
-    }
-
-    @Test
-    void shouldReturnReadableMessageWhenRequestedKbsAreUnauthorized() {
-        RecordingChatSessionFacadeService chatSessionFacadeService = new RecordingChatSessionFacadeService();
-        RecordingRagService ragService = new RecordingRagService();
-        KnowledgeTools tools = new KnowledgeTools(ragService, chatSessionFacadeService).fork(
-                "user-1",
-                "session-1",
-                List.of(kb("kb-1", "简历库"))
-        );
-
-        String result = tools.knowledgeQuery("Java 内存模型", List.of("kb-2"));
-
-        assertEquals(null, ragService.lastKbIds);
-        assertTrue(result.contains("未找到可检索的知识库"));
+        assertEquals("kb-b", chatSessionFacadeService.updatedContext.getKbId());
+        assertEquals("resume-b.md", chatSessionFacadeService.updatedContext.getSourceName());
+        assertEquals("面试 > 项目亮点", chatSessionFacadeService.updatedContext.getContentPath());
     }
 
     private static KnowledgeBaseDTO kb(String id, String name) {
@@ -84,9 +89,11 @@ class KnowledgeToolsTest {
                 .build();
     }
 
+    private record RetrievalCall(List<String> kbIds, RagRetrievalContext context) {
+    }
+
     private static class RecordingRagService implements RagService {
-        private List<String> lastKbIds;
-        private RagRetrievalContext lastContext;
+        private final List<RetrievalCall> calls = new ArrayList<>();
 
         @Override
         public float[] embed(String text) {
@@ -110,12 +117,15 @@ class KnowledgeToolsTest {
                 RagRetrievalContext context,
                 int limit
         ) {
-            this.lastKbIds = kbIds;
-            this.lastContext = context;
+            calls.add(new RetrievalCall(kbIds, context));
             RagRetrievalResult result = new RagRetrievalResult();
             result.setKbId(kbIds.get(0));
             result.setContent("命中内容");
-            result.setMetadata("{\"sourceType\":\"md\",\"sourceName\":\"resume.md\",\"contentPath\":\"面试 > 自我介绍 > 如何回答\"}");
+            if ("kb-b".equals(kbIds.get(0))) {
+                result.setMetadata("{\"sourceType\":\"md\",\"sourceName\":\"resume-b.md\",\"contentPath\":\"面试 > 项目亮点 > 项目亮点\"}");
+            } else {
+                result.setMetadata("{\"sourceType\":\"md\",\"sourceName\":\"resume-a.md\",\"contentPath\":\"面试 > 自我介绍 > 这一段怎么讲\"}");
+            }
             return List.of(result);
         }
     }

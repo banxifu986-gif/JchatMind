@@ -483,7 +483,7 @@ class RagRecallEvaluationTest {
     }
 
     private List<RagRetrievalResult> retrieveForEvaluation(QueryCase queryCase) {
-        return ragService.retrieve(queryCase.kbId(), queryCase.query(), queryCase.context(), EVAL_RETRIEVAL_LIMIT);
+        return ragService.retrieve(List.of(queryCase.kbId()), queryCase.query(), queryCase.context(), EVAL_RETRIEVAL_LIMIT);
     }
 
     private List<QueryCase> buildQueryCases(

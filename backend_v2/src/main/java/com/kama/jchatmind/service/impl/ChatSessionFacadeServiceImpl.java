@@ -188,6 +188,7 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
             return null;
         }
         RagRetrievalContext normalized = RagRetrievalContext.builder()
+                .kbId(trimToNull(retrievalContext.getKbId()))
                 .sourceType(trimToNull(retrievalContext.getSourceType()))
                 .sourceName(trimToNull(retrievalContext.getSourceName()))
                 .contentPath(trimToNull(retrievalContext.getContentPath()))

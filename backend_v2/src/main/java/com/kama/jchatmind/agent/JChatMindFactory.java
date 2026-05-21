@@ -185,11 +185,16 @@ public class JChatMindFactory {
         return runtimeTools;
     }
 
-    private List<Tool> bindRuntimeToolContext(List<Tool> runtimeTools, String userId, String chatSessionId) {
+    private List<Tool> bindRuntimeToolContext(
+            List<Tool> runtimeTools,
+            String userId,
+            String chatSessionId,
+            List<KnowledgeBaseDTO> knowledgeBases
+    ) {
         List<Tool> boundTools = new ArrayList<>();
         for (Tool tool : runtimeTools) {
             if (tool instanceof KnowledgeTools knowledgeTools) {
-                boundTools.add(knowledgeTools.fork(userId, chatSessionId));
+                boundTools.add(knowledgeTools.fork(userId, chatSessionId, knowledgeBases));
                 continue;
             }
             boundTools.add(tool);
@@ -256,7 +261,7 @@ public class JChatMindFactory {
         List<Message> memory = loadMemory(userId, chatSessionId);
         List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(currentAgentConfig);
         List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
-        runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId);
+        runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases);
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);
 
         return buildAgentRuntime(

@@ -11,6 +11,8 @@ import org.springframework.util.StringUtils;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RagRetrievalContext {
+    private String kbId;
+
     private String sourceType;
 
     private String sourceName;
@@ -18,7 +20,8 @@ public class RagRetrievalContext {
     private String contentPath;
 
     public boolean hasContext() {
-        return StringUtils.hasText(sourceType)
+        return StringUtils.hasText(kbId)
+                || StringUtils.hasText(sourceType)
                 || StringUtils.hasText(sourceName)
                 || StringUtils.hasText(contentPath);
     }

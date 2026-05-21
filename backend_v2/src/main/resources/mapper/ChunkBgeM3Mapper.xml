@@ -21,6 +21,13 @@
         created_at,updated_at
     </sql>
 
+    <sql id="KbIdsWhereClause">
+        kb_id IN
+        <foreach collection="kbIds" item="kbId" open="(" separator="," close=")">
+            CAST(#{kbId} AS uuid)
+        </foreach>
+    </sql>
+
     <resultMap id="RagRetrievalResultMap" type="com.kama.jchatmind.model.dto.RagRetrievalResult">
         <result property="chunkId" column="chunk_id" jdbcType="VARCHAR"/>
         <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
@@ -117,7 +124,10 @@
                created_at,
                updated_at
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE 
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
         ORDER BY embedding <-> #{vectorLiteral}::vector
         LIMIT #{limit}
         ]]>
@@ -133,7 +143,10 @@
                embedding <-> #{vectorLiteral}::vector AS distance,
                ROW_NUMBER() OVER (ORDER BY embedding <-> #{vectorLiteral}::vector) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE 
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
         ORDER BY embedding <-> #{vectorLiteral}::vector
         LIMIT #{limit}
         ]]>
@@ -148,7 +161,8 @@
                embedding &lt;-> #{vectorLiteral}::vector AS distance,
                ROW_NUMBER() OVER (ORDER BY embedding &lt;-> #{vectorLiteral}::vector) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE
+        <include refid="KbIdsWhereClause"/>
         <if test="sourceName != null and sourceName != ''">
           AND metadata->>'sourceName' = #{sourceName}
         </if>
@@ -172,7 +186,10 @@
                embedding <-> #{vectorLiteral}::vector AS distance,
                ROW_NUMBER() OVER (ORDER BY embedding <-> #{vectorLiteral}::vector, created_at ASC, id ASC) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE
+          ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
           AND lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')) = #{normalizedTitle}
         ORDER BY embedding <-> #{vectorLiteral}::vector, created_at ASC, id ASC
         LIMIT #{limit}
@@ -188,7 +205,8 @@
                embedding &lt;-> #{vectorLiteral}::vector AS distance,
                ROW_NUMBER() OVER (ORDER BY embedding &lt;-> #{vectorLiteral}::vector, created_at ASC, id ASC) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE
+        <include refid="KbIdsWhereClause"/>
           AND lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')) = #{normalizedTitle}
         <if test="sourceName != null and sourceName != ''">
           AND metadata->>'sourceName' = #{sourceName}
@@ -234,7 +252,10 @@
                        created_at,
                        lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')) AS normalized_title
                 FROM chunk_bge_m3
-                WHERE kb_id = CAST(#{kbId} AS uuid)
+                WHERE
+                ]]>
+                <include refid="KbIdsWhereClause"/>
+                <![CDATA[
             ) t
             WHERE normalized_title LIKE #{containsPattern}
         ) ranked
@@ -301,7 +322,8 @@
                            ) hit_keywords
                        ) AS keyword_length_sum
                 FROM chunk_bge_m3
-                WHERE kb_id = CAST(#{kbId} AS uuid)
+                WHERE
+                <include refid="KbIdsWhereClause"/>
             ) t
             WHERE keyword_hit_count > 0
         ) ranked
@@ -319,12 +341,15 @@
                (1 - similarity(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)))::double precision AS distance,
                ROW_NUMBER() OVER (
                    ORDER BY similarity(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)) DESC,
-                            ABS(char_length(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g'))) - char_length(CAST(#{normalizedTitle} AS text))) ASC,
-                            created_at ASC,
-                            id ASC
+                           ABS(char_length(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g'))) - char_length(CAST(#{normalizedTitle} AS text))) ASC,
+                           created_at ASC,
+                           id ASC
                ) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE
+          ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
           AND similarity(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)) >= #{minScore}
         ORDER BY similarity(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')), CAST(#{normalizedTitle} AS text)) DESC,
                  ABS(char_length(lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g'))) - char_length(CAST(#{normalizedTitle} AS text))) ASC,
@@ -334,7 +359,7 @@
         ]]>
     </select>
 
-    <select id="selectLexicalCandidatesByKbId" resultMap="RagRetrievalResultMap">
+    <select id="selectLexicalCandidatesByKbIds" resultMap="RagRetrievalResultMap">
         <![CDATA[
         SELECT id AS chunk_id,
                kb_id,
@@ -344,12 +369,15 @@
                3::double precision AS distance,
                ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
           AND COALESCE(metadata->>'retrievableTitleSearchText', '') <> ''
         ]]>
     </select>
 
-    <select id="selectTitlePathCandidatesByKbId" resultMap="RagRetrievalResultMap">
+    <select id="selectTitlePathCandidatesByKbIds" resultMap="RagRetrievalResultMap">
         <![CDATA[
         SELECT id AS chunk_id,
                kb_id,
@@ -359,7 +387,10 @@
                4::double precision AS distance,
                ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS rank
         FROM chunk_bge_m3
-        WHERE kb_id = CAST(#{kbId} AS uuid)
+        WHERE
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
           AND COALESCE(metadata->>'retrievableTitle', metadata->>'title', '') <> ''
           AND COALESCE(metadata->>'contentPath', '') <> ''
         ]]>

@@ -76,7 +76,7 @@ class RagOnlineE2eEvaluationTest {
 
         List<OnlineEvaluatedCase> evaluatedCases = new ArrayList<>();
         for (OnlineQueryCase queryCase : cases) {
-            List<RagRetrievalResult> results = ragService.retrieve(realKbId, queryCase.query(), ONLINE_TOP_K);
+            List<RagRetrievalResult> results = ragService.retrieve(List.of(realKbId), queryCase.query(), ONLINE_TOP_K);
             List<RetrievedChunk> topChunks = results.stream()
                     .map(this::toRetrievedChunk)
                     .toList();
@@ -100,7 +100,7 @@ class RagOnlineE2eEvaluationTest {
     }
 
     private List<SourceChunk> loadSourceChunks(String kbId) {
-        return chunkBgeM3Mapper.selectTitlePathCandidatesByKbId(kbId).stream()
+        return chunkBgeM3Mapper.selectTitlePathCandidatesByKbIds(List.of(kbId)).stream()
                 .map(this::toSourceChunk)
                 .filter(SourceChunk::usable)
                 .toList();

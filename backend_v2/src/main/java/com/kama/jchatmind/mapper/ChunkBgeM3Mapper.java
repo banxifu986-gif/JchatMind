@@ -24,19 +24,19 @@ public interface ChunkBgeM3Mapper {
     int updateById(ChunkBgeM3 chunkBgeM3);
 
     List<ChunkBgeM3> similaritySearch(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("vectorLiteral") String vectorLiteral,
             @Param("limit") int limit
     );
 
     List<RagRetrievalResult> similaritySearchDetailed(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("vectorLiteral") String vectorLiteral,
             @Param("limit") int limit
     );
 
     List<RagRetrievalResult> similaritySearchDetailedWithContext(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("vectorLiteral") String vectorLiteral,
             @Param("sourceName") String sourceName,
             @Param("sourceType") String sourceType,
@@ -45,14 +45,14 @@ public interface ChunkBgeM3Mapper {
     );
 
     List<RagRetrievalResult> searchByTitleExact(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("normalizedTitle") String normalizedTitle,
             @Param("vectorLiteral") String vectorLiteral,
             @Param("limit") int limit
     );
 
     List<RagRetrievalResult> searchByTitleExactWithContext(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("normalizedTitle") String normalizedTitle,
             @Param("vectorLiteral") String vectorLiteral,
             @Param("sourceName") String sourceName,
@@ -62,29 +62,29 @@ public interface ChunkBgeM3Mapper {
     );
 
     List<RagRetrievalResult> searchByTitleContains(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("normalizedTitle") String normalizedTitle,
             @Param("containsPattern") String containsPattern,
             @Param("limit") int limit
     );
 
     List<RagRetrievalResult> searchByTitleKeywords(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("keywords") List<String> keywords,
             @Param("queryLength") int queryLength,
             @Param("limit") int limit
     );
 
     List<RagRetrievalResult> searchByTitleTrigram(
-            @Param("kbId") String kbId,
+            @Param("kbIds") List<String> kbIds,
             @Param("normalizedTitle") String normalizedTitle,
             @Param("minScore") double minScore,
             @Param("limit") int limit
     );
 
-    List<RagRetrievalResult> selectLexicalCandidatesByKbId(@Param("kbId") String kbId);
+    List<RagRetrievalResult> selectLexicalCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
 
-    List<RagRetrievalResult> selectTitlePathCandidatesByKbId(@Param("kbId") String kbId);
+    List<RagRetrievalResult> selectTitlePathCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
 
     List<ChunkBgeM3> selectByDocId(@Param("docId") String docId);
 }

@@ -96,14 +96,18 @@ class RagSessionOnlineE2eEvaluationTest {
         for (SessionQueryCase queryCase : cases) {
             String chatSessionId = createEvaluationChatSession();
             try {
-                KnowledgeTools sessionKnowledgeTools = knowledgeTools.fork("rag-eval-user", chatSessionId);
-                sessionKnowledgeTools.knowledgeQuery(realKbId, queryCase.seedQuery());
+                KnowledgeTools sessionKnowledgeTools = knowledgeTools.fork(
+                        "rag-eval-user",
+                        chatSessionId,
+                        List.of(com.kama.jchatmind.model.dto.KnowledgeBaseDTO.builder().id(realKbId).name(realKbId).build())
+                );
+                sessionKnowledgeTools.knowledgeQuery(queryCase.seedQuery(), List.of(realKbId));
 
                 RagRetrievalContext sessionContext = chatSessionFacadeService.getRetrievalContext("rag-eval-user", chatSessionId);
-                List<RetrievedChunk> statelessTopChunks = ragService.retrieve(realKbId, queryCase.followUpQuery(), ONLINE_TOP_K).stream()
+                List<RetrievedChunk> statelessTopChunks = ragService.retrieve(List.of(realKbId), queryCase.followUpQuery(), ONLINE_TOP_K).stream()
                         .map(this::toRetrievedChunk)
                         .toList();
-                List<RetrievedChunk> contextualTopChunks = ragService.retrieve(realKbId, queryCase.followUpQuery(), sessionContext, ONLINE_TOP_K).stream()
+                List<RetrievedChunk> contextualTopChunks = ragService.retrieve(List.of(realKbId), queryCase.followUpQuery(), sessionContext, ONLINE_TOP_K).stream()
                         .map(this::toRetrievedChunk)
                         .toList();
 
@@ -134,7 +138,7 @@ class RagSessionOnlineE2eEvaluationTest {
     }
 
     private List<SourceChunk> loadSourceChunks(String kbId) {
-        return chunkBgeM3Mapper.selectTitlePathCandidatesByKbId(kbId).stream()
+        return chunkBgeM3Mapper.selectTitlePathCandidatesByKbIds(List.of(kbId)).stream()
                 .map(this::toSourceChunk)
                 .filter(SourceChunk::usableForSessionFollowUp)
                 .toList();
@@ -168,14 +172,14 @@ class RagSessionOnlineE2eEvaluationTest {
                 continue;
             }
 
-            List<RetrievedChunk> seedTopChunks = ragService.retrieve(kbId, seedQuery, ONLINE_TOP_K).stream()
+            List<RetrievedChunk> seedTopChunks = ragService.retrieve(List.of(kbId), seedQuery, ONLINE_TOP_K).stream()
                     .map(this::toRetrievedChunk)
                     .toList();
             if (!hitAt(seedTopChunks, chunk.chunkId(), chunk.contentPath(), 1)) {
                 continue;
             }
 
-            List<RetrievedChunk> statelessFollowUpTopChunks = ragService.retrieve(kbId, FOLLOW_UP_QUERY, ONLINE_TOP_K).stream()
+            List<RetrievedChunk> statelessFollowUpTopChunks = ragService.retrieve(List.of(kbId), FOLLOW_UP_QUERY, ONLINE_TOP_K).stream()
                     .map(this::toRetrievedChunk)
                     .toList();
             if (hitAt(statelessFollowUpTopChunks, chunk.chunkId(), chunk.contentPath(), 1)) {
