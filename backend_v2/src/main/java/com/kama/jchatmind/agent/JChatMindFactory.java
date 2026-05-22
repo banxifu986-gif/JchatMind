@@ -1,6 +1,9 @@
 package com.kama.jchatmind.agent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.agent.harness.HarnessRunner;
+import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.agent.harness.proxy.HarnessToolCallbackProxy;
 import com.kama.jchatmind.agent.tools.KnowledgeTools;
 import com.kama.jchatmind.agent.tools.Tool;
 import com.kama.jchatmind.config.ChatClientRegistry;
@@ -24,8 +27,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -47,6 +50,9 @@ public class JChatMindFactory {
     private final ChatMessageFacadeService chatMessageFacadeService;
     private final ChatMessageConverter chatMessageConverter;
     private final UserMemoryFacadeService userMemoryFacadeService;
+    private final List<ToolCallbackProvider> toolCallbackProviders;
+    private final HarnessRunner harnessRunner;
+    private final HarnessInterceptorChain harnessInterceptorChain;
 
     private AgentDTO agentConfig;
 
@@ -60,7 +66,10 @@ public class JChatMindFactory {
             ToolFacadeService toolFacadeService,
             ChatMessageFacadeService chatMessageFacadeService,
             ChatMessageConverter chatMessageConverter,
-            UserMemoryFacadeService userMemoryFacadeService
+            UserMemoryFacadeService userMemoryFacadeService,
+            List<ToolCallbackProvider> toolCallbackProviders,
+            HarnessRunner harnessRunner,
+            HarnessInterceptorChain harnessInterceptorChain
     ) {
         this.chatClientRegistry = chatClientRegistry;
         this.sseService = sseService;
@@ -72,6 +81,9 @@ public class JChatMindFactory {
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.chatMessageConverter = chatMessageConverter;
         this.userMemoryFacadeService = userMemoryFacadeService;
+        this.toolCallbackProviders = toolCallbackProviders;
+        this.harnessRunner = harnessRunner;
+        this.harnessInterceptorChain = harnessInterceptorChain;
     }
 
     private Agent loadAgent(String agentId) {
@@ -210,19 +222,38 @@ public class JChatMindFactory {
                     .toolObjects(target)
                     .build()
                     .getToolCallbacks();
-            callbacks.addAll(Arrays.asList(toolCallbacks));
+            Arrays.stream(toolCallbacks)
+                    .map(this::wrapToolCallback)
+                    .forEach(callbacks::add);
         }
         return callbacks;
     }
 
+    private List<ToolCallback> buildExternalToolCallbacks(List<ToolCallback> localCallbacks) {
+        Set<String> localNames = localCallbacks.stream()
+                .map(tc -> tc.getToolDefinition().name())
+                .collect(Collectors.toSet());
+        List<ToolCallback> external = new ArrayList<>();
+        for (ToolCallbackProvider provider : toolCallbackProviders) {
+            for (ToolCallback tc : provider.getToolCallbacks()) {
+                if (!localNames.contains(tc.getToolDefinition().name())) {
+                    external.add(wrapToolCallback(tc));
+                }
+            }
+        }
+        return external;
+    }
+
     private Object resolveToolTarget(Tool tool) {
         try {
-            return AopUtils.isAopProxy(tool)
-                    ? AopUtils.getTargetClass(tool)
-                    : tool;
+            return tool;
         } catch (Exception e) {
             throw new IllegalStateException("解析工具目标对象失败: " + tool.getName(), e);
         }
+    }
+
+    private ToolCallback wrapToolCallback(ToolCallback toolCallback) {
+        return new HarnessToolCallbackProxy(toolCallback, harnessInterceptorChain);
     }
 
     private JChatMind buildAgentRuntime(
@@ -251,7 +282,8 @@ public class JChatMindFactory {
                 chatSessionId,
                 sseService,
                 chatMessageFacadeService,
-                chatMessageConverter
+                chatMessageConverter,
+                harnessRunner
         );
     }
 
@@ -263,6 +295,7 @@ public class JChatMindFactory {
         List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
         runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases);
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);
+        toolCallbacks.addAll(buildExternalToolCallbacks(toolCallbacks));
 
         return buildAgentRuntime(
                 userId,

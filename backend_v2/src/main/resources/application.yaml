@@ -46,3 +46,22 @@ document:
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   embedding-model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+
+jchatmind:
+  harness:
+    human-approval:
+      enabled: true
+      tools:
+        - sendEmail
+        - databaseQuery
+      timeout-seconds: 300
+    circuit-breaker:
+      enabled: true
+      tools:
+        - sendEmail
+        - databaseQuery
+      failure-threshold: 3
+      recovery-timeout-seconds: 60
+    audit:
+      enabled: true
+      max-records-per-session: 1000

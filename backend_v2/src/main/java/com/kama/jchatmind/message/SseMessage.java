@@ -21,6 +21,12 @@ public class SseMessage {
         private ChatMessageVO message;
         private String statusText;
         private Boolean done;
+        private String approvalRequestId;
+        private String toolName;
+        private String toolInput;
+        private Integer callCount;
+        private Long expiresAt;
+        private Integer stepNumber;
     }
 
     @Data
@@ -42,5 +48,6 @@ public class SseMessage {
         AI_THINKING,
         AI_EXECUTING,
         AI_DONE,
+        TOOL_APPROVAL_REQUIRED,
     }
 }

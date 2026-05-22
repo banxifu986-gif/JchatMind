@@ -1,5 +1,12 @@
 package com.kama.jchatmind.agent;
 
+import com.kama.jchatmind.agent.harness.HarnessContext;
+import com.kama.jchatmind.agent.harness.HarnessConstants;
+import com.kama.jchatmind.agent.harness.HarnessDecision;
+import com.kama.jchatmind.agent.harness.HarnessResult;
+import com.kama.jchatmind.agent.harness.HarnessRunner;
+import com.kama.jchatmind.agent.harness.approval.ApprovalRequest;
+import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.message.SseMessage;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
@@ -23,12 +30,15 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -61,6 +71,8 @@ public class JChatMind {
     private final List<ChatMessageDTO> pendingChatMessages = new ArrayList<>();
     private final Integer toolTimeoutSeconds;
     private String previousToolCallSignature;
+    private HarnessRunner harnessRunner;
+    private int currentStepNumber;
 
     public JChatMind() {
         this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
@@ -80,7 +92,8 @@ public class JChatMind {
             String chatSessionId,
             SseService sseService,
             ChatMessageFacadeService chatMessageFacadeService,
-            ChatMessageConverter chatMessageConverter
+            ChatMessageConverter chatMessageConverter,
+            HarnessRunner harnessRunner
     ) {
         this.userId = userId;
         this.agentId = agentId;
@@ -94,7 +107,9 @@ public class JChatMind {
         this.sseService = sseService;
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.chatMessageConverter = chatMessageConverter;
+        this.harnessRunner = harnessRunner;
         this.agentState = AgentState.IDLE;
+        this.currentStepNumber = 0;
 
         this.chatMemory = MessageWindowChatMemory.builder()
                 .maxMessages(maxMessages == null ? DEFAULT_MAX_MESSAGES : maxMessages)
@@ -182,6 +197,8 @@ public class JChatMind {
     }
 
     private boolean think() {
+        this.agentState = AgentState.THINKING;
+        sendStatus(SseMessage.Type.AI_THINKING, "思考中...", currentStepNumber);
         String thinkPrompt = buildThinkPrompt();
 
         Prompt prompt = Prompt.builder()
@@ -247,9 +264,36 @@ public class JChatMind {
         if (!this.lastChatResponse.hasToolCalls()) {
             return;
         }
+        this.agentState = AgentState.EXECUTING;
 
         List<AssistantMessage.ToolCall> toolCalls = this.lastChatResponse.getResult().getOutput().getToolCalls();
         updateDuplicateSignature(toolCalls);
+        sendStatus(
+                SseMessage.Type.AI_EXECUTING,
+                "执行工具: " + summarizeToolNames(toolCalls),
+                currentStepNumber
+        );
+
+        HarnessResult harnessResult = harnessRunner.beforeExecution(
+                userId,
+                agentId,
+                chatSessionId,
+                currentStepNumber,
+                toolCalls
+        );
+        if (harnessResult.hasPendingApprovals()) {
+            sendApprovalEvents(harnessResult);
+            harnessRunner.awaitApprovals(harnessResult);
+        }
+
+        List<AssistantMessage.ToolCall> allowedToolCalls = toolCalls.stream()
+                .filter(toolCall -> {
+                    HarnessDecision decision = harnessResult.getDecision(toolCall.id());
+                    return decision == null || decision.getStatus() == HarnessDecision.Status.ALLOW;
+                })
+                .toList();
+
+        List<ToolResponseMessage.ToolResponse> syntheticResponses = buildSyntheticResponses(harnessResult, toolCalls);
 
         Prompt prompt = Prompt.builder()
                 .messages(this.chatMemory.get(this.chatSessionId))
@@ -257,7 +301,19 @@ public class JChatMind {
                 .build();
 
         long startNanos = System.nanoTime();
-        ToolResponseMessage toolResponseMessage = executeWithTimeout(prompt);
+        List<HarnessContext> allowedContexts = allowedToolCalls.stream()
+                .map(toolCall -> harnessResult.getContext(toolCall.id()))
+                .filter(context -> context != null)
+                .toList();
+
+        ToolResponseMessage toolResponseMessage = executeWithTimeout(prompt, allowedToolCalls, allowedContexts);
+        if (!syntheticResponses.isEmpty()) {
+            List<ToolResponseMessage.ToolResponse> mergedResponses = new ArrayList<>(toolResponseMessage.getResponses());
+            mergedResponses.addAll(syntheticResponses);
+            toolResponseMessage = ToolResponseMessage.builder()
+                    .responses(sortResponses(toolCalls, mergedResponses))
+                    .build();
+        }
         long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
         log.info("工具执行耗时: {} ms", elapsedMs);
 
@@ -288,16 +344,42 @@ public class JChatMind {
                 .collect(Collectors.joining("; "));
     }
 
-    private ToolResponseMessage executeWithTimeout(Prompt prompt) {
+    private ToolResponseMessage executeWithTimeout(
+            Prompt prompt,
+            List<AssistantMessage.ToolCall> allowedToolCalls,
+            List<HarnessContext> allowedContexts
+    ) {
+        if (allowedToolCalls.isEmpty()) {
+            return ToolResponseMessage.builder()
+                    .responses(List.of())
+                    .build();
+        }
+
+        ChatResponse responseToExecute = buildFilteredChatResponse(allowedToolCalls);
         try {
             ToolExecutionResult result = CompletableFuture
-                    .supplyAsync(() -> toolCallingManager.executeToolCalls(prompt, this.lastChatResponse))
+                    .supplyAsync(() -> {
+                        HarnessExecutionContextHolder.bind(
+                                allowedContexts,
+                                new HarnessExecutionContextHolder.BatchMetadata(
+                                        chatSessionId,
+                                        agentId,
+                                        userId,
+                                        currentStepNumber
+                                )
+                        );
+                        try {
+                            return toolCallingManager.executeToolCalls(prompt, responseToExecute);
+                        } finally {
+                            HarnessExecutionContextHolder.clear();
+                        }
+                    })
                     .orTimeout(toolTimeoutSeconds, TimeUnit.SECONDS)
                     .join();
             return extractToolResponse(result);
         } catch (Exception e) {
             log.error("工具执行异常（疑似调用了不存在的工具或超时）: {}", e.getMessage());
-            return buildErrorResponse(e.getMessage());
+            return buildErrorResponse(allowedToolCalls, e.getMessage());
         }
     }
 
@@ -306,10 +388,7 @@ public class JChatMind {
         return (ToolResponseMessage) history.get(history.size() - 1);
     }
 
-    private ToolResponseMessage buildErrorResponse(String errorMessage) {
-        AssistantMessage output = this.lastChatResponse.getResult().getOutput();
-        List<AssistantMessage.ToolCall> toolCalls = output.getToolCalls();
-
+    private ToolResponseMessage buildErrorResponse(List<AssistantMessage.ToolCall> toolCalls, String errorMessage) {
         List<ToolResponseMessage.ToolResponse> errorResponses = new ArrayList<>();
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             errorResponses.add(new ToolResponseMessage.ToolResponse(
@@ -338,8 +417,11 @@ public class JChatMind {
         }
 
         try {
+            this.agentState = AgentState.PLANNING;
+            sendStatus(SseMessage.Type.AI_PLANNING, "Agent 正在分析请求...", 0);
             for (int i = 0; i < MAX_STEPS && agentState != AgentState.FINISHED; i++) {
                 int currentStep = i + 1;
+                this.currentStepNumber = currentStep;
                 step();
                 if (currentStep >= MAX_STEPS) {
                     agentState = AgentState.FINISHED;
@@ -347,11 +429,118 @@ public class JChatMind {
                 }
             }
             agentState = AgentState.FINISHED;
+            sendStatus(SseMessage.Type.AI_DONE, "任务完成", currentStepNumber);
         } catch (Exception e) {
             agentState = AgentState.ERROR;
             log.error("Error running agent", e);
+            sendStatus(SseMessage.Type.AI_DONE, "任务结束", currentStepNumber);
             throw new RuntimeException("Error running agent", e);
         }
+    }
+
+    private ChatResponse buildFilteredChatResponse(List<AssistantMessage.ToolCall> allowedToolCalls) {
+        AssistantMessage originalOutput = this.lastChatResponse.getResult().getOutput();
+        AssistantMessage filteredOutput = AssistantMessage.builder()
+                .content(originalOutput.getText())
+                .media(originalOutput.getMedia())
+                .properties(originalOutput.getMetadata())
+                .toolCalls(allowedToolCalls)
+                .build();
+        return ChatResponse.builder()
+                .generations(List.of(new Generation(filteredOutput, this.lastChatResponse.getResult().getMetadata())))
+                .metadata(this.lastChatResponse.getMetadata())
+                .build();
+    }
+
+    private List<ToolResponseMessage.ToolResponse> buildSyntheticResponses(
+            HarnessResult harnessResult,
+            List<AssistantMessage.ToolCall> toolCalls
+    ) {
+        List<ToolResponseMessage.ToolResponse> syntheticResponses = new ArrayList<>();
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            HarnessDecision decision = harnessResult.getDecision(toolCall.id());
+            if (decision == null || decision.getStatus() == HarnessDecision.Status.ALLOW) {
+                continue;
+            }
+            syntheticResponses.add(new ToolResponseMessage.ToolResponse(
+                    toolCall.id(),
+                    toolCall.name(),
+                    decision.getMessage()
+            ));
+            HarnessContext context = harnessResult.getContext(toolCall.id());
+            if (context != null) {
+                harnessRunner.recordSyntheticOutcome(context, decision);
+            }
+        }
+        return syntheticResponses;
+    }
+
+    private List<ToolResponseMessage.ToolResponse> sortResponses(
+            List<AssistantMessage.ToolCall> toolCalls,
+            List<ToolResponseMessage.ToolResponse> responses
+    ) {
+        Map<String, Integer> orderMap = IntStream.range(0, toolCalls.size())
+                .boxed()
+                .collect(Collectors.toMap(index -> toolCalls.get(index).id(), index -> index));
+        return responses.stream()
+                .sorted(Comparator.comparingInt(response -> orderMap.getOrDefault(response.id(), Integer.MAX_VALUE)))
+                .toList();
+    }
+
+    private void sendApprovalEvents(HarnessResult harnessResult) {
+        harnessResult.getPendingContexts().stream()
+                .map(context -> context.getAttributes().get(HarnessConstants.ATTRIBUTE_APPROVAL_REQUEST_ID))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .distinct()
+                .forEach(this::sendApprovalEvent);
+    }
+
+    private void sendApprovalEvent(String requestId) {
+        ApprovalRequest request = harnessRunner.getApprovalRequest(requestId);
+        if (request == null) {
+            return;
+        }
+        SseMessage message = SseMessage.builder()
+                .type(SseMessage.Type.TOOL_APPROVAL_REQUIRED)
+                .payload(SseMessage.Payload.builder()
+                        .statusText("等待审批: " + request.getToolName())
+                        .approvalRequestId(request.getId())
+                        .toolName(request.getToolName())
+                        .toolInput(request.getToolInput())
+                        .callCount(request.getCallCount())
+                        .expiresAt(request.getExpiresAt().toEpochMilli())
+                        .stepNumber(currentStepNumber)
+                        .build())
+                .build();
+        try {
+            sseService.send(this.chatSessionId, message);
+        } catch (Exception e) {
+            log.warn("发送审批 SSE 失败: {}", e.getMessage());
+        }
+    }
+
+    private void sendStatus(SseMessage.Type type, String statusText, Integer stepNumber) {
+        SseMessage message = SseMessage.builder()
+                .type(type)
+                .payload(SseMessage.Payload.builder()
+                        .statusText(statusText)
+                        .done(type == SseMessage.Type.AI_DONE)
+                        .stepNumber(stepNumber)
+                        .build())
+                .build();
+        try {
+            sseService.send(this.chatSessionId, message);
+        } catch (Exception e) {
+            log.warn("发送状态 SSE 失败: {}", e.getMessage());
+        }
+    }
+
+    private String summarizeToolNames(List<AssistantMessage.ToolCall> toolCalls) {
+        return toolCalls.stream()
+                .map(AssistantMessage.ToolCall::name)
+                .distinct()
+                .collect(Collectors.joining("、"));
     }
 
     @Override
