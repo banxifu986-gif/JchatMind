@@ -34,6 +34,21 @@ spring:
       chat:
         options:
           model: ${ZHIPUAI_MODEL:glm-4.6}
+    mcp:
+      server:
+        name: JchatMind MCP Server
+        version: 1.0.0
+        type: SYNC
+      client:
+        connections:
+          notion:
+            type: stdio
+            command: npx
+            args:
+              - "-y"
+              - "@notionhq/notion-mcp-server"
+            env:
+              NOTION_API_KEY: ${NOTION_API_KEY:}
 mybatis:
   type-aliases-package: com.kama.jchatmind.model.entity
   mapper-locations: classpath:mapper/*.xml
@@ -46,6 +61,9 @@ document:
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   embedding-model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+
+mcp:
+  api-key: ${MCP_API_KEY:}
 
 jchatmind:
   harness:
