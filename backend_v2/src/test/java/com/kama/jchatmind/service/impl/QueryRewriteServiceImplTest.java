@@ -17,23 +17,94 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QueryRewriteServiceImplTest {
 
     @Test
-    void shouldKeepExplicitContext() {
+    void shouldKeepExplicitContextAndBuildFollowUpStandaloneQuery() {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
 
         RagRetrievalContext context = RagRetrievalContext.builder()
                 .kbId("kb-1")
                 .sourceName("resume.md")
-                .contentPath("面试 > 回答")
+                .contentPath("interview > answer")
                 .build();
 
-        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "回答 面试怎么回答", context);
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "answer", context);
 
-        assertEquals("回答 面试怎么回答", result.getQuery());
+        assertEquals("answer", result.getQuery());
         assertNotNull(result.getContext());
         assertEquals("kb-1", result.getContext().getKbId());
         assertEquals("resume.md", result.getContext().getSourceName());
-        assertEquals("面试 > 回答", result.getContext().getContentPath());
+        assertEquals("interview > answer", result.getContext().getContentPath());
+        assertEquals(QueryRewriteResult.Intent.FOLLOW_UP, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.HARD, result.getContextApplyMode());
+        assertEquals(List.of("resume.md interview > answer answer", "answer"), result.getRetrievalQueries());
+        assertFalse(result.isTitleQuery());
+    }
+
+    @Test
+    void shouldDowngradeToSoftContextWhenQueryShowsTopicSwitch() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > intro")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "tradeoff auth module", context);
+
+        assertEquals(QueryRewriteResult.Intent.ANALYTICAL, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, result.getContextApplyMode());
+        assertEquals(List.of("tradeoff auth module"), result.getRetrievalQueries());
         assertTrue(result.isTitleQuery());
+        assertNotNull(result.getContext());
+        assertEquals("resume.md", result.getContext().getSourceName());
+        assertNull(result.getContext().getContentPath());
+    }
+
+    @Test
+    void shouldUseSoftContextWhenNavigationQueryClearlyLeavesCurrentContext() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > intro")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "system design > cache", context);
+
+        assertEquals(QueryRewriteResult.Intent.NAVIGATION, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("system design > cache"), result.getRetrievalQueries());
+        assertNotNull(result.getContext());
+        assertEquals("kb-1", result.getContext().getKbId());
+        assertEquals("resume.md", result.getContext().getSourceName());
+        assertNull(result.getContext().getContentPath());
+    }
+
+    @Test
+    void shouldTreatDifferentPathBranchAsTopicSwitchEvenWithSharedTerms() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("notes.md")
+                .contentPath("project > sql tuning > aggregate")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(
+                List.of("kb-1"),
+                "project > sql coverage > strong",
+                context
+        );
+
+        assertEquals(QueryRewriteResult.Intent.NAVIGATION, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("project > sql coverage > strong"), result.getRetrievalQueries());
+        assertNotNull(result.getContext());
+        assertEquals("notes.md", result.getContext().getSourceName());
+        assertNull(result.getContext().getContentPath());
     }
 
     @Test
@@ -42,40 +113,149 @@ class QueryRewriteServiceImplTest {
                 candidate(
                         "chunk-1",
                         "kb-1",
-                        "{\"retrievableTitle\":\"回答 面试怎么回答\",\"contentPath\":\"面试 > 行为面试 > 回答 面试怎么回答\",\"sourceName\":\"resume.md\",\"sourceType\":\"md\"}"
+                        "{\"retrievableTitle\":\"answer how\",\"contentPath\":\"interview > behavior > answer how\",\"sourceName\":\"resume.md\",\"sourceType\":\"md\"}"
                 ),
                 candidate(
                         "chunk-2",
                         "kb-2",
-                        "{\"retrievableTitle\":\"回答 面试怎么回答\",\"contentPath\":\"其他 > 路径 > 回答 面试怎么回答\",\"sourceName\":\"other.md\",\"sourceType\":\"md\"}"
+                        "{\"retrievableTitle\":\"answer how\",\"contentPath\":\"other > path > answer how\",\"sourceName\":\"other.md\",\"sourceType\":\"md\"}"
                 )
         )));
 
         QueryRewriteResult result = service.rewrite(
                 List.of("kb-1", "kb-2"),
-                "面试 > 行为面试 > 回答 面试怎么回答",
+                "interview > behavior > answer how",
                 null
         );
 
         assertTrue(result.isTitleQuery());
+        assertEquals(QueryRewriteResult.Intent.NAVIGATION, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.HARD, result.getContextApplyMode());
         assertNotNull(result.getContext());
         assertEquals("kb-1", result.getContext().getKbId());
         assertEquals("resume.md", result.getContext().getSourceName());
         assertEquals("md", result.getContext().getSourceType());
-        assertEquals("面试 > 行为面试", result.getContext().getContentPath());
+        assertEquals("interview > behavior", result.getContext().getContentPath());
+    }
+
+    @Test
+    void shouldTreatCompactKeywordQueryAsTitleQuery() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "Redis persistence", null);
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.NONE, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("Redis persistence"), result.getRetrievalQueries());
     }
 
     @Test
     void shouldNotTreatNaturalQuestionAsTitleQuery() {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
 
-        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "面试时如何回答自己的优缺点？", null);
+        QueryRewriteResult result = service.rewrite(
+                List.of("kb-1"),
+                "How should I answer strengths and weaknesses?",
+                null
+        );
 
-        assertEquals("面试时如何回答自己的优缺点？", result.getQuery());
+        assertEquals("How should I answer strengths and weaknesses?", result.getQuery());
         assertFalse(result.isTitleQuery());
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.NONE, result.getContextApplyMode());
+        assertEquals(List.of("How should I answer strengths and weaknesses?"), result.getRetrievalQueries());
         assertNotNull(result.getContext());
         assertNull(result.getContext().getSourceName());
         assertNull(result.getContext().getContentPath());
+    }
+
+    @Test
+    void shouldTreatIndexedQuestionHeadingAsTitleQuery() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        QueryRewriteResult result = service.rewrite(
+                List.of("kb-1"),
+                "1. How is auth implemented?",
+                null
+        );
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.NONE, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("1. How is auth implemented?"), result.getRetrievalQueries());
+    }
+
+    @Test
+    void shouldAppendLlmRewriteForHardFollowUpWhenEnabled() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of()),
+                (query, context, intent) -> "resume.md interview strengths 这部分该怎么展开介绍自己的优势",
+                true
+        );
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > strengths")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "这部分该怎么展开", context);
+
+        assertEquals(QueryRewriteResult.Intent.FOLLOW_UP, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.HARD, result.getContextApplyMode());
+        assertEquals(
+                List.of(
+                        "resume.md interview strengths 这部分该怎么展开介绍自己的优势",
+                        "resume.md interview > strengths 这部分该怎么展开",
+                        "这部分该怎么展开"
+                ),
+                result.getRetrievalQueries()
+        );
+    }
+
+    @Test
+    void shouldFallbackToRuleRewriteWhenLlmRewriteFails() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of()),
+                (query, context, intent) -> {
+                    throw new IllegalStateException("boom");
+                },
+                true
+        );
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > strengths")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "这部分该怎么展开", context);
+
+        assertEquals(
+                List.of("resume.md interview > strengths 这部分该怎么展开", "这部分该怎么展开"),
+                result.getRetrievalQueries()
+        );
+    }
+
+    @Test
+    void shouldNotUseLlmRewriteForNavigationQuery() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of()),
+                (query, context, intent) -> "ignored rewrite",
+                true
+        );
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > strengths")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "system design > cache", context);
+
+        assertEquals(QueryRewriteResult.Intent.NAVIGATION, result.getIntent());
+        assertEquals(List.of("system design > cache"), result.getRetrievalQueries());
     }
 
     private static RagRetrievalResult candidate(String chunkId, String kbId, String metadata) {
@@ -175,6 +355,11 @@ class QueryRewriteServiceImplTest {
 
         @Override
         public List<RagRetrievalResult> selectLexicalCandidatesByKbIds(List<String> kbIds) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<RagRetrievalResult> selectContentLexicalCandidatesByKbIds(List<String> kbIds) {
             throw new UnsupportedOperationException();
         }
 

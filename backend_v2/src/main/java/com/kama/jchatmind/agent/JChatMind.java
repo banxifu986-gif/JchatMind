@@ -62,6 +62,8 @@ public class JChatMind {
     private static final Integer MAX_STEPS = 20;
     private static final Integer DEFAULT_MAX_MESSAGES = 20;
     private static final Integer DEFAULT_TOOL_TIMEOUT_SECONDS = 30;
+    private static final int COMPRESSION_CHAR_THRESHOLD = 8000;
+    private static final int KEEP_RECENT_MESSAGES = 8;
 
     private ChatOptions chatOptions;
     private SseService sseService;
@@ -73,6 +75,7 @@ public class JChatMind {
     private String previousToolCallSignature;
     private HarnessRunner harnessRunner;
     private int currentStepNumber;
+    private String conversationSummary;
 
     public JChatMind() {
         this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
@@ -199,6 +202,7 @@ public class JChatMind {
     private boolean think() {
         this.agentState = AgentState.THINKING;
         sendStatus(SseMessage.Type.AI_THINKING, "思考中...", currentStepNumber);
+        compressMemoryIfNeeded();
         String thinkPrompt = buildThinkPrompt();
 
         Prompt prompt = Prompt.builder()
@@ -247,7 +251,96 @@ public class JChatMind {
                     """.formatted(previousToolCallSignature));
         }
 
+        if (conversationSummary != null) {
+            prompt.append("""
+
+                    【对话历史摘要】
+                    以下是对此前对话内容的摘要，供你参考以保持上下文连贯性：
+                    %s
+                    """.formatted(conversationSummary));
+        }
+
         return prompt.toString();
+    }
+
+    private void compressMemoryIfNeeded() {
+        List<Message> allMessages = this.chatMemory.get(this.chatSessionId);
+        int totalChars = allMessages.stream()
+                .mapToInt(m -> messageText(m) != null ? messageText(m).length() : 0)
+                .sum();
+        if (totalChars < COMPRESSION_CHAR_THRESHOLD) {
+            return;
+        }
+
+        int keepFrom = Math.max(1, allMessages.size() - KEEP_RECENT_MESSAGES);
+        if (keepFrom <= 1) {
+            return;
+        }
+
+        try {
+            List<Message> toCompress = new ArrayList<>(allMessages.subList(1, keepFrom));
+            String newSummary = generateSummary(toCompress);
+            if (!StringUtils.hasText(newSummary)) {
+                return;
+            }
+            conversationSummary = (conversationSummary != null)
+                    ? conversationSummary + "\n" + newSummary
+                    : newSummary;
+
+            allMessages.subList(1, keepFrom).clear();
+            allMessages.add(1, new SystemMessage("【对话历史摘要】\n" + conversationSummary));
+            log.info("Memory compressed: {} messages summarized, total chars before: {}", toCompress.size(), totalChars);
+        } catch (Exception e) {
+            log.warn("Failed to compress memory", e);
+        }
+    }
+
+    private String messageText(Message msg) {
+        if (msg instanceof AssistantMessage am) {
+            return am.getText();
+        }
+        if (msg instanceof UserMessage um) {
+            return um.getText();
+        }
+        if (msg instanceof SystemMessage sm) {
+            return sm.getText();
+        }
+        if (msg instanceof ToolResponseMessage trm) {
+            return trm.getResponses().stream()
+                    .map(ToolResponseMessage.ToolResponse::responseData)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+        }
+        return "";
+    }
+
+    private String generateSummary(List<Message> toSummarize) {
+        StringBuilder messagesText = new StringBuilder();
+        for (Message msg : toSummarize) {
+            String content = messageText(msg);
+            if (content == null || content.isEmpty()) {
+                continue;
+            }
+            if (content.length() > 1000) {
+                content = content.substring(0, 1000) + "...";
+            }
+            messagesText.append(content).append("\n");
+        }
+
+        String summaryPrompt = conversationSummary != null
+                ? "上一轮总结: " + conversationSummary + "\n\n对话:\n" + messagesText
+                : "对话:\n" + messagesText;
+
+        try {
+            String response = this.chatClient.prompt()
+                    .system("将以下对话总结为2-3句话，聚焦关键话题、用户意图和重要决策。只输出总结文本。")
+                    .user(summaryPrompt)
+                    .call()
+                    .content();
+            return response != null ? response.trim() : null;
+        } catch (Exception e) {
+            log.warn("Failed to generate summary", e);
+            return null;
+        }
     }
 
     private String formatKbSummary() {

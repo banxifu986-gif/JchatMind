@@ -84,6 +84,8 @@ public interface ChunkBgeM3Mapper {
 
     List<RagRetrievalResult> selectLexicalCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
 
+    List<RagRetrievalResult> selectContentLexicalCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
+
     List<RagRetrievalResult> selectTitlePathCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
 
     List<ChunkBgeM3> selectByDocId(@Param("docId") String docId);

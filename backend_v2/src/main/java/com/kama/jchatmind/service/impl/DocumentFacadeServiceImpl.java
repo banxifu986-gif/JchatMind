@@ -18,6 +18,7 @@ import com.kama.jchatmind.service.DocumentFacadeService;
 import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
+import com.kama.jchatmind.util.RagChunkSupport;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -216,8 +217,6 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                 // 解析 Markdown 文件
                 List<MarkdownParserService.MarkdownSection> sections = markdownParserService.parseMarkdown(inputStream);
 
-                System.out.println(sections);
-
                 if (sections.isEmpty()) {
                     log.warn("Markdown 文档解析后没有找到任何章节: documentId={}", documentId);
                     return;
@@ -237,14 +236,14 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                         continue;
                     }
 
-                    float[] embedding = ragService.embed(buildChunkEmbeddingText(contentPath, title, content));
+                    float[] embedding = ragService.embed(RagChunkSupport.buildChunkEmbeddingText(section));
 
                     // 创建 ChunkBgeM3 实体
                     ChunkBgeM3 chunk = ChunkBgeM3.builder()
                             .kbId(kbId)
                             .docId(documentId)
                             .content(content != null ? content : "")
-                            .metadata(buildChunkMetadata(title, contentPath, sourceType, sourceName, i))
+                            .metadata(RagChunkSupport.buildChunkMetadataJson(objectMapper, section, sourceType, sourceName, i))
                             .embedding(embedding)
                             .createdAt(now)
                             .updatedAt(now)
@@ -276,43 +275,6 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             return "unknown";
         }
         return filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
-    }
-
-    private String buildChunkMetadata(String title, String contentPath, String sourceType, String sourceName, int sectionIndex) {
-        try {
-            ChunkMetaData chunkMetaData = new ChunkMetaData();
-            chunkMetaData.setTitle(title);
-            chunkMetaData.setRetrievableTitle(title);
-            chunkMetaData.setRetrievableTitleSearchText(
-                    RetrievableTitleLexicalizer.buildSearchText(title, title, contentPath, sourceName)
-            );
-            chunkMetaData.setContentPath(contentPath);
-            chunkMetaData.setSourceType(sourceType);
-            chunkMetaData.setSourceName(sourceName);
-            chunkMetaData.setSectionIndex(sectionIndex);
-            return objectMapper.writeValueAsString(chunkMetaData);
-        } catch (JsonProcessingException e) {
-            throw new BizException("序列化文档 chunk metadata 失败: " + e.getMessage());
-        }
-    }
-
-    private String buildChunkEmbeddingText(String contentPath, String title, String content) {
-        String effectiveTitle = contentPath != null && !contentPath.trim().isEmpty() ? contentPath.trim() : title;
-        if (content == null || content.trim().isEmpty()) {
-            return effectiveTitle;
-        }
-        return effectiveTitle + "\n" + title + "\n" + content.trim();
-    }
-
-    @lombok.Data
-    private static class ChunkMetaData {
-        private String title;
-        private String retrievableTitle;
-        private String retrievableTitleSearchText;
-        private String contentPath;
-        private String sourceType;
-        private String sourceName;
-        private Integer sectionIndex;
     }
 
     @Override

@@ -53,7 +53,7 @@ class RagSessionOnlineE2eEvaluationTest {
     private static final int ONLINE_TOP_K = 3;
     private static final int CASE_LIMIT = 4;
     private static final int MAX_QUERY_LENGTH = 80;
-    private static final String FOLLOW_UP_QUERY = "回答 面试怎么回答";
+    private static final String FOLLOW_UP_QUERY = "这部分该怎么展开";
 
     @Autowired
     private RagService ragService;
@@ -113,6 +113,7 @@ class RagSessionOnlineE2eEvaluationTest {
 
                 evaluatedCases.add(new SessionEvaluatedCase(
                         queryCase.id(),
+                        queryCase.type(),
                         queryCase.seedQuery(),
                         queryCase.followUpQuery(),
                         queryCase.expectedSourceName(),
@@ -140,7 +141,7 @@ class RagSessionOnlineE2eEvaluationTest {
     private List<SourceChunk> loadSourceChunks(String kbId) {
         return chunkBgeM3Mapper.selectTitlePathCandidatesByKbIds(List.of(kbId)).stream()
                 .map(this::toSourceChunk)
-                .filter(SourceChunk::usableForSessionFollowUp)
+                .filter(SourceChunk::usableForSessionEvaluation)
                 .toList();
     }
 
@@ -191,13 +192,14 @@ class RagSessionOnlineE2eEvaluationTest {
                 continue;
             }
 
-            String key = chunk.sourceName() + "|" + chunk.contentPath();
+            String key = "follow|" + chunk.sourceName() + "|" + chunk.contentPath();
             if (!usedKeys.add(key)) {
                 continue;
             }
 
             cases.add(new SessionQueryCase(
                     "session-follow-up-" + usedKeys.size(),
+                    "follow_up_low_info",
                     seedQuery,
                     FOLLOW_UP_QUERY,
                     chunk.sourceName(),
@@ -205,16 +207,47 @@ class RagSessionOnlineE2eEvaluationTest {
                     chunk.chunkId()
             ));
             sourceCounts.put(chunk.sourceName(), sourceCount + 1);
-            if (usedKeys.size() >= CASE_LIMIT) {
-                return cases;
+            if (cases.size() >= Math.max(1, CASE_LIMIT / 2)) {
+                break;
             }
+        }
+
+        for (int i = 0; i < chunks.size() - 1 && cases.size() < CASE_LIMIT; i++) {
+            SourceChunk current = chunks.get(i);
+            SourceChunk next = chunks.get(i + 1);
+            if (current.contentPath().equals(next.contentPath())) {
+                continue;
+            }
+
+            String seedQuery = buildSeedQuery(current.content());
+            String followUpQuery = next.contentPath();
+            if (!StringUtils.hasText(seedQuery) || !StringUtils.hasText(followUpQuery) || followUpQuery.length() > MAX_QUERY_LENGTH) {
+                continue;
+            }
+
+            List<RetrievedChunk> seedTopChunks = ragService.retrieve(List.of(kbId), seedQuery, ONLINE_TOP_K).stream()
+                    .map(this::toRetrievedChunk)
+                    .toList();
+            if (!hitAt(seedTopChunks, current.chunkId(), current.contentPath(), 1)) {
+                continue;
+            }
+
+            cases.add(new SessionQueryCase(
+                    "session-topic-switch-" + (cases.size() + 1),
+                    "topic_switch_after_context",
+                    seedQuery,
+                    followUpQuery,
+                    next.sourceName(),
+                    next.contentPath(),
+                    next.chunkId()
+            ));
         }
         return cases;
     }
 
     private SessionOnlineE2eReport buildReport(List<SessionEvaluatedCase> cases) {
         List<SessionGroupSummary> groups = cases.stream()
-                .collect(Collectors.groupingBy(item -> "session_follow_up", LinkedHashMap::new, Collectors.toList()))
+                .collect(Collectors.groupingBy(SessionEvaluatedCase::type, LinkedHashMap::new, Collectors.toList()))
                 .entrySet()
                 .stream()
                 .map(entry -> new SessionGroupSummary(
@@ -223,7 +256,9 @@ class RagSessionOnlineE2eEvaluationTest {
                         sessionHitRate(entry.getValue(), false, true),
                         sessionHitRate(entry.getValue(), false, false),
                         sessionHitRate(entry.getValue(), true, true),
-                        sessionHitRate(entry.getValue(), true, false)
+                        sessionHitRate(entry.getValue(), true, false),
+                        sessionHitRate(entry.getValue(), true, true) - sessionHitRate(entry.getValue(), false, true),
+                        sessionHitRate(entry.getValue(), true, false) - sessionHitRate(entry.getValue(), false, false)
                 ))
                 .toList();
 
@@ -233,6 +268,8 @@ class RagSessionOnlineE2eEvaluationTest {
                 sessionHitRate(cases, false, false),
                 sessionHitRate(cases, true, true),
                 sessionHitRate(cases, true, false),
+                sessionHitRate(cases, true, true) - sessionHitRate(cases, false, true),
+                sessionHitRate(cases, true, false) - sessionHitRate(cases, false, false),
                 groups,
                 cases
         );
@@ -375,20 +412,20 @@ class RagSessionOnlineE2eEvaluationTest {
             String title,
             String content
     ) {
-        boolean usableForSessionFollowUp() {
+        boolean usableForSessionEvaluation() {
             return StringUtils.hasText(chunkId)
                     && StringUtils.hasText(sourceName)
                     && StringUtils.hasText(contentPath)
                     && StringUtils.hasText(parentContentPath)
                     && StringUtils.hasText(title)
                     && StringUtils.hasText(content)
-                    && contentPath.contains(" > ")
-                    && "回答".equals(title);
+                    && contentPath.contains(" > ");
         }
     }
 
     private record SessionQueryCase(
             String id,
+            String type,
             String seedQuery,
             String followUpQuery,
             String expectedSourceName,
@@ -409,6 +446,7 @@ class RagSessionOnlineE2eEvaluationTest {
 
     private record SessionEvaluatedCase(
             String id,
+            String type,
             String seedQuery,
             String followUpQuery,
             String expectedSourceName,
@@ -430,7 +468,9 @@ class RagSessionOnlineE2eEvaluationTest {
             double statelessHitAt1,
             double statelessHitAtTopK,
             double contextualHitAt1,
-            double contextualHitAtTopK
+            double contextualHitAtTopK,
+            double contextualGainAt1,
+            double contextualGainAtTopK
     ) {
     }
 
@@ -440,6 +480,8 @@ class RagSessionOnlineE2eEvaluationTest {
             double statelessHitAtTopK,
             double contextualHitAt1,
             double contextualHitAtTopK,
+            double contextualGainAt1,
+            double contextualGainAtTopK,
             List<SessionGroupSummary> groups,
             List<SessionEvaluatedCase> cases
     ) {

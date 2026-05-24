@@ -17,12 +17,14 @@ import com.kama.jchatmind.model.entity.Document;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
 import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
+import com.kama.jchatmind.service.QueryRewriteService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.DocumentStorageServiceImpl;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.RetrievableTitleLexicalizer;
+import com.kama.jchatmind.util.RagChunkSupport;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.multipart.MultipartFile;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 
@@ -52,6 +55,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -75,6 +79,16 @@ class RagRecallEvaluationTest {
     private static final String QUERY_STYLE_CONTEXTUAL_TITLE_QUERY = "contextual_title_query";
     private static final String QUERY_STYLE_AUTO_PATH_SELECTION = "auto_path_selection";
     private static final String QUERY_STYLE_REWRITE = "content_rewrite";
+    private static final String QUERY_STYLE_USER_LIKE_QUESTION = "user_like_question";
+    private static final String QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE = "follow_up_contextual_rewrite";
+    private static final String QUERY_STYLE_TOPIC_SWITCH_GUARD = "topic_switch_guard";
+    private static final String DIMENSION_TITLE_RECALL = "title_recall";
+    private static final String DIMENSION_QUERY_REWRITE = "query_rewrite";
+    private static final String DIMENSION_RERANK_QUALITY = "rerank_quality";
+    private static final String DIMENSION_FOLLOW_UP_CONTEXTUAL = "follow_up_contextual";
+    private static final String VARIANT_FULL_CHAIN = "full_chain";
+    private static final String VARIANT_NO_QUERY_EXPANSION = "no_query_expansion";
+    private static final String VARIANT_NO_RERANK = "no_rerank";
     private static final int EVAL_RETRIEVAL_LIMIT = 10;
     private static final int REPORT_CASE_LIMIT = 10;
     private static final int DIFF_CASE_LIMIT = 10;
@@ -92,6 +106,9 @@ class RagRecallEvaluationTest {
 
     @Autowired
     private RagService ragService;
+
+    @Autowired
+    private QueryRewriteService queryRewriteService;
 
     @Autowired
     private ChunkBgeM3Mapper chunkBgeM3Mapper;
@@ -141,11 +158,32 @@ class RagRecallEvaluationTest {
     @Value("${rag.eval.compare-with:}")
     private String compareWithReportPath;
 
+    @Value("${rag.eval.enable-ab-comparison:true}")
+    private boolean enableAbComparison;
+
+    @Value("${rag.eval.ab-sample-size:20}")
+    private int abSampleSize;
+
     @Value("${rag.eval.ensure-pg-trgm:true}")
     private boolean ensurePgTrgm;
 
     @Value("${rag.eval.rebuild-real-kb:false}")
     private boolean rebuildRealKb;
+
+    @Value("${rag.eval.real-max-documents:0}")
+    private int realMaxDocuments;
+
+    @Value("${rag.eval.real-max-cases:0}")
+    private int realMaxCases;
+
+    @Value("${rag.eval.real-document-order:created_desc}")
+    private String realDocumentOrder;
+
+    @Value("${ollama.base-url}")
+    private String ollamaBaseUrl;
+
+    @Value("${ollama.embedding-model}")
+    private String embeddingModel;
 
     @Value("classpath:rag-eval/fixtures/fixture-kb.md")
     private Resource fixtureMarkdown;
@@ -236,8 +274,9 @@ class RagRecallEvaluationTest {
         List<Document> documents = rebuildRealKb
                 ? rebuildRealKnowledgeBase(kbId)
                 : documentMapper.selectByKbId(kbId);
+        List<Document> scopedDocuments = scopeRealDocuments(documents);
 
-        for (Document document : documents) {
+        for (Document document : scopedDocuments) {
             if (!isMarkdown(document.getFiletype())) {
                 addCount(skippedDocumentReasons, SKIPPED_NON_MARKDOWN);
                 continue;
@@ -255,9 +294,32 @@ class RagRecallEvaluationTest {
             List<MarkdownParserService.MarkdownSection> sections = parseMarkdownByDocument(document);
             List<ChunkBgeM3> persistedChunks = chunkBgeM3Mapper.selectByDocId(document.getId());
             queryCases.addAll(buildQueryCases(kbId, document.getId(), sections, persistedChunks, "real"));
+            if (realMaxCases > 0 && queryCases.size() >= realMaxCases) {
+                queryCases = new ArrayList<>(queryCases.subList(0, realMaxCases));
+                break;
+            }
         }
 
         return evaluateCases("real", queryCases, skippedDocumentReasons, previousMissCaseIds);
+    }
+
+    private List<Document> scopeRealDocuments(List<Document> documents) {
+        if (documents.isEmpty()) {
+            return documents;
+        }
+
+        List<Document> scoped = new ArrayList<>(documents);
+        Comparator<Document> comparator = Comparator.comparing(Document::getCreatedAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                .thenComparing(Document::getId, Comparator.nullsLast(String::compareTo));
+        if (!"created_asc".equalsIgnoreCase(realDocumentOrder)) {
+            comparator = comparator.reversed();
+        }
+        scoped.sort(comparator);
+
+        if (realMaxDocuments > 0 && scoped.size() > realMaxDocuments) {
+            return new ArrayList<>(scoped.subList(0, realMaxDocuments));
+        }
+        return scoped;
     }
 
     private List<Document> rebuildRealKnowledgeBase(String kbId) throws Exception {
@@ -302,6 +364,17 @@ class RagRecallEvaluationTest {
             Map<String, Integer> skippedDocumentReasons,
             Map<String, Set<String>> previousMissCaseIds
     ) {
+        return evaluateCases(source, cases, skippedDocumentReasons, previousMissCaseIds, ragService, true);
+    }
+
+    private EvaluationSummary evaluateCases(
+            String source,
+            List<QueryCase> cases,
+            Map<String, Integer> skippedDocumentReasons,
+            Map<String, Set<String>> previousMissCaseIds,
+            RagService retrievalService,
+            boolean includeVariantComparisons
+    ) {
         Map<String, List<QueryCase>> caseGroups = cases.stream()
                 .collect(Collectors.groupingBy(QueryCase::queryStyle, LinkedHashMap::new, Collectors.toList()));
 
@@ -310,7 +383,8 @@ class RagRecallEvaluationTest {
             primaryBreakdown.add(evaluateStyleGroup(
                     source + "/" + queryStyle,
                     caseGroups.getOrDefault(queryStyle, List.of()),
-                    previousMissCaseIds
+                    previousMissCaseIds,
+                    retrievalService
             ));
         }
 
@@ -320,12 +394,16 @@ class RagRecallEvaluationTest {
                 QUERY_STYLE_SOURCE_SCOPED_TITLE,
                 QUERY_STYLE_CONTEXTUAL_TITLE_QUERY,
                 QUERY_STYLE_AUTO_PATH_SELECTION,
-                QUERY_STYLE_TITLE_PATH
+                QUERY_STYLE_TITLE_PATH,
+                QUERY_STYLE_USER_LIKE_QUESTION,
+                QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE,
+                QUERY_STYLE_TOPIC_SWITCH_GUARD
         )) {
             diagnosticBreakdown.add(evaluateStyleGroup(
                     source + "/" + queryStyle,
                     caseGroups.getOrDefault(queryStyle, List.of()),
-                    previousMissCaseIds
+                    previousMissCaseIds,
+                    retrievalService
             ));
         }
 
@@ -362,6 +440,10 @@ class RagRecallEvaluationTest {
                 .toList();
         List<String> newMissCases = newMissCases(source, missCaseIds, previousMissCaseIds);
         List<String> fixedMissCases = fixedMissCases(source, missCaseIds, previousMissCaseIds);
+        List<DimensionSummary> dimensions = buildDimensionSummaries(source, allBreakdown);
+        List<VariantComparison> comparisons = includeVariantComparisons
+                ? buildVariantComparisons(source, cases, skippedDocumentReasons, primaryBreakdown, diagnosticBreakdown)
+                : List.of();
 
         return new EvaluationSummary(
                 source,
@@ -390,14 +472,17 @@ class RagRecallEvaluationTest {
                 missCaseIds,
                 newMissCases,
                 fixedMissCases,
-                allBreakdown
+                dimensions,
+                allBreakdown,
+                comparisons
         );
     }
 
     private EvaluationSummary evaluateStyleGroup(
             String group,
             List<QueryCase> cases,
-            Map<String, Set<String>> previousMissCaseIds
+            Map<String, Set<String>> previousMissCaseIds,
+            RagService retrievalService
     ) {
         List<EvaluatedCase> evaluatedCases = new ArrayList<>();
         Map<String, Integer> excludedReasons = new LinkedHashMap<>();
@@ -408,7 +493,7 @@ class RagRecallEvaluationTest {
                 continue;
             }
 
-            List<RagRetrievalResult> results = retrieveForEvaluation(queryCase);
+            List<RagRetrievalResult> results = retrieveForEvaluation(queryCase, retrievalService);
             List<String> topChunkIds = results.stream()
                     .map(RagRetrievalResult::getChunkId)
                     .toList();
@@ -478,12 +563,338 @@ class RagRecallEvaluationTest {
                 missCaseIds,
                 newMissCases,
                 fixedMissCases,
+                List.of(),
+                List.of(),
                 List.of()
         );
     }
 
-    private List<RagRetrievalResult> retrieveForEvaluation(QueryCase queryCase) {
-        return ragService.retrieve(List.of(queryCase.kbId()), queryCase.query(), queryCase.context(), EVAL_RETRIEVAL_LIMIT);
+    private List<VariantComparison> buildVariantComparisons(
+            String source,
+            List<QueryCase> cases,
+            Map<String, Integer> skippedDocumentReasons,
+            List<EvaluationSummary> primaryBreakdown,
+            List<EvaluationSummary> diagnosticBreakdown
+    ) {
+        if (!enableAbComparison) {
+            return List.of();
+        }
+
+        List<QueryCase> sampledCases = sampleCasesForAb(cases);
+        if (sampledCases.isEmpty()) {
+            return List.of();
+        }
+
+        EvaluationSummary baseline = evaluateCases(
+                source + "#ab_sample",
+                sampledCases,
+                skippedDocumentReasons,
+                Map.of(),
+                ragService,
+                false
+        );
+        EvaluationSummary noQueryExpansion = evaluateCases(
+                source + "#ab_sample",
+                sampledCases,
+                skippedDocumentReasons,
+                Map.of(),
+                buildVariantRagService(true, false),
+                false
+        );
+        EvaluationSummary noRerank = evaluateCases(
+                source + "#ab_sample",
+                sampledCases,
+                skippedDocumentReasons,
+                Map.of(),
+                buildVariantRagService(false, true),
+                false
+        );
+
+        return List.of(
+                buildVariantComparison(
+                        VARIANT_NO_QUERY_EXPANSION,
+                        "关闭 retrievalQueries 扩展，仅保留原始 query，观察 query rewrite / follow-up 补全贡献",
+                        baseline,
+                        noQueryExpansion
+                ),
+                buildVariantComparison(
+                        VARIANT_NO_RERANK,
+                        "关闭 rerank，仅保留候选合并后的原始顺序，观察排序层贡献",
+                        baseline,
+                        noRerank
+                ),
+                buildBottleneckAssessment(source, baseline, noQueryExpansion, noRerank, primaryBreakdown, diagnosticBreakdown)
+        );
+    }
+
+    private VariantComparison buildVariantComparison(
+            String variant,
+            String description,
+            EvaluationSummary baseline,
+            EvaluationSummary compared
+    ) {
+        List<VariantComparisonItem> items = new ArrayList<>();
+        items.add(buildVariantComparisonItem("overall", baseline, compared));
+
+        Map<String, EvaluationSummary> baselineBreakdown = baseline.breakdown().stream()
+                .collect(Collectors.toMap(EvaluationSummary::group, item -> item, (left, right) -> left, LinkedHashMap::new));
+        Map<String, EvaluationSummary> comparedBreakdown = compared.breakdown().stream()
+                .collect(Collectors.toMap(EvaluationSummary::group, item -> item, (left, right) -> left, LinkedHashMap::new));
+
+        for (String group : List.of(
+                baseline.group() + "/" + QUERY_STYLE_TITLE,
+                baseline.group() + "/" + QUERY_STYLE_REWRITE,
+                baseline.group() + "/" + QUERY_STYLE_USER_LIKE_QUESTION,
+                baseline.group() + "/" + QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE
+        )) {
+            EvaluationSummary baselineGroup = baselineBreakdown.get(group);
+            EvaluationSummary comparedGroup = comparedBreakdown.get(group);
+            if (baselineGroup == null || comparedGroup == null || baselineGroup.total() == 0) {
+                continue;
+            }
+            items.add(buildVariantComparisonItem(group, baselineGroup, comparedGroup));
+        }
+
+        Map<String, DimensionSummary> baselineDimensions = baseline.dimensions().stream()
+                .collect(Collectors.toMap(DimensionSummary::name, item -> item, (left, right) -> left, LinkedHashMap::new));
+        Map<String, DimensionSummary> comparedDimensions = compared.dimensions().stream()
+                .collect(Collectors.toMap(DimensionSummary::name, item -> item, (left, right) -> left, LinkedHashMap::new));
+        for (String dimensionName : List.of(
+                DIMENSION_QUERY_REWRITE,
+                DIMENSION_RERANK_QUALITY,
+                DIMENSION_FOLLOW_UP_CONTEXTUAL
+        )) {
+            DimensionSummary baselineDimension = baselineDimensions.get(dimensionName);
+            DimensionSummary comparedDimension = comparedDimensions.get(dimensionName);
+            if (baselineDimension == null || comparedDimension == null || baselineDimension.total() == 0) {
+                continue;
+            }
+            items.add(buildVariantComparisonItem("dimension/" + dimensionName, baselineDimension, comparedDimension));
+        }
+
+        return new VariantComparison(variant, description, items);
+    }
+
+    private List<QueryCase> sampleCasesForAb(List<QueryCase> cases) {
+        List<String> diagnosticStyles = List.of(
+                QUERY_STYLE_TITLE,
+                QUERY_STYLE_REWRITE,
+                QUERY_STYLE_USER_LIKE_QUESTION,
+                QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE,
+                QUERY_STYLE_TOPIC_SWITCH_GUARD,
+                QUERY_STYLE_AUTO_PATH_SELECTION
+        );
+        List<QueryCase> sampled = new ArrayList<>();
+        for (String queryStyle : diagnosticStyles) {
+            sampled.addAll(cases.stream()
+                    .filter(QueryCase::evaluable)
+                    .filter(item -> queryStyle.equals(item.queryStyle()))
+                    .limit(abSampleSize)
+                    .toList());
+        }
+        return sampled;
+    }
+
+    private VariantComparison buildBottleneckAssessment(
+            String source,
+            EvaluationSummary baseline,
+            EvaluationSummary noQueryExpansion,
+            EvaluationSummary noRerank,
+            List<EvaluationSummary> primaryBreakdown,
+            List<EvaluationSummary> diagnosticBreakdown
+    ) {
+        double queryExpansionImpact = baseline.mrrAt3() - noQueryExpansion.mrrAt3();
+        double rerankImpact = baseline.mrrAt3() - noRerank.mrrAt3();
+        String dominantLayer;
+        if (queryExpansionImpact > rerankImpact + 0.02D) {
+            dominantLayer = "query_expansion_dominant";
+        } else if (rerankImpact > queryExpansionImpact + 0.02D) {
+            dominantLayer = "rerank_dominant";
+        } else {
+            dominantLayer = "mixed_or_close";
+        }
+
+        List<VariantComparisonItem> items = List.of(
+                new VariantComparisonItem(
+                        source + "#ab_sample/overall_vs_no_query_expansion",
+                        baseline.recallAt1(),
+                        baseline.recallAt5(),
+                        baseline.mrrAt3(),
+                        noQueryExpansion.recallAt1(),
+                        noQueryExpansion.recallAt5(),
+                        noQueryExpansion.mrrAt3(),
+                        noQueryExpansion.recallAt1() - baseline.recallAt1(),
+                        noQueryExpansion.recallAt5() - baseline.recallAt5(),
+                        noQueryExpansion.mrrAt3() - baseline.mrrAt3()
+                ),
+                new VariantComparisonItem(
+                        source + "#ab_sample/overall_vs_no_rerank",
+                        baseline.recallAt1(),
+                        baseline.recallAt5(),
+                        baseline.mrrAt3(),
+                        noRerank.recallAt1(),
+                        noRerank.recallAt5(),
+                        noRerank.mrrAt3(),
+                        noRerank.recallAt1() - baseline.recallAt1(),
+                        noRerank.recallAt5() - baseline.recallAt5(),
+                        noRerank.mrrAt3() - baseline.mrrAt3()
+                )
+        );
+
+        String description = "sampleSize=" + abSampleSize
+                + ", dominantLayer=" + dominantLayer
+                + ", queryExpansionMrrImpact=" + formatDelta(queryExpansionImpact)
+                + ", rerankMrrImpact=" + formatDelta(rerankImpact)
+                + ", primaryGroups=" + primaryBreakdown.stream().map(EvaluationSummary::group).toList()
+                + ", diagnosticGroups=" + diagnosticBreakdown.stream()
+                .map(EvaluationSummary::group)
+                .filter(group -> group.endsWith("/" + QUERY_STYLE_USER_LIKE_QUESTION)
+                        || group.endsWith("/" + QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE)
+                        || group.endsWith("/" + QUERY_STYLE_TOPIC_SWITCH_GUARD)
+                        || group.endsWith("/" + QUERY_STYLE_AUTO_PATH_SELECTION))
+                .toList();
+        return new VariantComparison("bottleneck_assessment", description, items);
+    }
+
+    private VariantComparisonItem buildVariantComparisonItem(
+            String group,
+            EvaluationSummary baseline,
+            EvaluationSummary compared
+    ) {
+        return new VariantComparisonItem(
+                group,
+                baseline.recallAt1(),
+                baseline.recallAt5(),
+                baseline.mrrAt3(),
+                compared.recallAt1(),
+                compared.recallAt5(),
+                compared.mrrAt3(),
+                compared.recallAt1() - baseline.recallAt1(),
+                compared.recallAt5() - baseline.recallAt5(),
+                compared.mrrAt3() - baseline.mrrAt3()
+        );
+    }
+
+    private VariantComparisonItem buildVariantComparisonItem(
+            String group,
+            DimensionSummary baseline,
+            DimensionSummary compared
+    ) {
+        return new VariantComparisonItem(
+                group,
+                baseline.recallAt1(),
+                baseline.recallAt5(),
+                baseline.mrrAt3(),
+                compared.recallAt1(),
+                compared.recallAt5(),
+                compared.mrrAt3(),
+                compared.recallAt1() - baseline.recallAt1(),
+                compared.recallAt5() - baseline.recallAt5(),
+                compared.mrrAt3() - baseline.mrrAt3()
+        );
+    }
+
+    private List<DimensionSummary> buildDimensionSummaries(String source, List<EvaluationSummary> breakdown) {
+        Map<String, EvaluationSummary> summaryByGroup = breakdown.stream()
+                .collect(Collectors.toMap(EvaluationSummary::group, item -> item, (left, right) -> left, LinkedHashMap::new));
+
+        List<DimensionSummary> dimensions = new ArrayList<>();
+        dimensions.add(buildDimensionSummary(
+                DIMENSION_TITLE_RECALL,
+                "关注标题、路径和上下文定位能力",
+                List.of(
+                        source + "/" + QUERY_STYLE_TITLE,
+                        source + "/" + QUERY_STYLE_TITLE_PATH,
+                        source + "/" + QUERY_STYLE_SOURCE_SCOPED_TITLE,
+                        source + "/" + QUERY_STYLE_CONTEXTUAL_TITLE_QUERY,
+                        source + "/" + QUERY_STYLE_AUTO_PATH_SELECTION
+                ),
+                summaryByGroup
+        ));
+        dimensions.add(buildDimensionSummary(
+                DIMENSION_QUERY_REWRITE,
+                "关注自然问法和内容改写后的召回能力",
+                List.of(
+                        source + "/" + QUERY_STYLE_REWRITE,
+                        source + "/" + QUERY_STYLE_USER_LIKE_QUESTION
+                ),
+                summaryByGroup
+        ));
+        dimensions.add(buildDimensionSummary(
+                DIMENSION_RERANK_QUALITY,
+                "关注排序质量，优先看 Recall@1 和 MRR",
+                List.of(
+                        source + "/" + QUERY_STYLE_TITLE,
+                        source + "/" + QUERY_STYLE_REWRITE,
+                        source + "/" + QUERY_STYLE_TITLE_PATH,
+                        source + "/" + QUERY_STYLE_USER_LIKE_QUESTION
+                ),
+                summaryByGroup
+        ));
+        dimensions.add(buildDimensionSummary(
+                DIMENSION_FOLLOW_UP_CONTEXTUAL,
+                "关注低信息追问和带上下文的主题切换",
+                List.of(
+                        source + "/" + QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE,
+                        source + "/" + QUERY_STYLE_TOPIC_SWITCH_GUARD
+                ),
+                summaryByGroup
+        ));
+        return dimensions.stream()
+                .filter(item -> item.total() > 0)
+                .toList();
+    }
+
+    private DimensionSummary buildDimensionSummary(
+            String name,
+            String description,
+            List<String> groups,
+            Map<String, EvaluationSummary> summaryByGroup
+    ) {
+        List<EvaluationSummary> matched = groups.stream()
+                .map(summaryByGroup::get)
+                .filter(item -> item != null && item.total() > 0)
+                .toList();
+        int total = matched.stream().mapToInt(EvaluationSummary::total).sum();
+        int evaluated = matched.stream().mapToInt(EvaluationSummary::evaluated).sum();
+        int excluded = matched.stream().mapToInt(EvaluationSummary::excluded).sum();
+        int hitAt1Count = matched.stream().mapToInt(EvaluationSummary::hitAt1Count).sum();
+        int hitAt3Count = matched.stream().mapToInt(EvaluationSummary::hitAt3Count).sum();
+        int hitAt5Count = matched.stream().mapToInt(EvaluationSummary::hitAt5Count).sum();
+        int hitAt10Count = matched.stream().mapToInt(EvaluationSummary::hitAt10Count).sum();
+        return new DimensionSummary(
+                name,
+                description,
+                matched.stream().map(EvaluationSummary::group).toList(),
+                total,
+                evaluated,
+                excluded,
+                ratio(evaluated, total),
+                ratio(hitAt1Count, evaluated),
+                ratio(hitAt3Count, evaluated),
+                ratio(hitAt5Count, evaluated),
+                ratio(hitAt10Count, evaluated),
+                weightedAverage(matched, 3),
+                weightedAverage(matched, 10)
+        );
+    }
+
+    private RagService buildVariantRagService(boolean disableQueryExpansion, boolean disableRerank) {
+        return new RagServiceImpl(
+                WebClient.builder(),
+                chunkBgeM3Mapper,
+                queryRewriteService,
+                ollamaBaseUrl,
+                embeddingModel,
+                false,
+                disableQueryExpansion,
+                disableRerank,
+                2048
+        );
+    }
+
+    private List<RagRetrievalResult> retrieveForEvaluation(QueryCase queryCase, RagService retrievalService) {
+        return retrievalService.retrieve(List.of(queryCase.kbId()), queryCase.query(), queryCase.context(), EVAL_RETRIEVAL_LIMIT);
     }
 
     private List<QueryCase> buildQueryCases(
@@ -586,6 +997,49 @@ class RagRecallEvaluationTest {
                     rewriteQuery,
                     contentGoldResolution
             ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_USER_LIKE_QUESTION,
+                    kbId,
+                    docId,
+                    i,
+                    buildUserLikeQuestion(section),
+                    contentGoldResolution
+            ));
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE,
+                    kbId,
+                    docId,
+                    i,
+                    buildFollowUpQuery(section.getTitle()),
+                    RagRetrievalContext.builder()
+                            .sourceName(sourceName)
+                            .sourceType(sourceType)
+                            .contentPath(parentContentPath)
+                            .build(),
+                    contentGoldResolution
+            ));
+
+            String topicSwitchQuery = buildTopicSwitchQuery(sections, i);
+            if (StringUtils.hasText(topicSwitchQuery)) {
+                queryCases.add(createCase(
+                        source,
+                        QUERY_STYLE_TOPIC_SWITCH_GUARD,
+                        kbId,
+                        docId,
+                        i,
+                        topicSwitchQuery,
+                        RagRetrievalContext.builder()
+                                .sourceName(sourceName)
+                                .sourceType(sourceType)
+                                .contentPath(parentContentPath)
+                                .build(),
+                        resolveTitleAnchorGoldChunks(docId, sections.get(i + 1), sortedChunks)
+                ));
+            }
         }
 
         return queryCases;
@@ -741,6 +1195,124 @@ class RagRecallEvaluationTest {
         return parentContentPath + " > " + title;
     }
 
+    private String buildFollowUpQuery(String title) {
+        if (!StringUtils.hasText(title)) {
+            return null;
+        }
+        String normalizedTitle = normalize(title);
+        if (!StringUtils.hasText(normalizedTitle)) {
+            return null;
+        }
+        if (normalizedTitle.contains("回答")) {
+            return "这部分该怎么展开";
+        }
+        if (normalizedTitle.contains("流程")) {
+            return "这一步具体怎么走";
+        }
+        return "这部分该怎么处理";
+    }
+
+    private String buildUserLikeQuestion(MarkdownParserService.MarkdownSection section) {
+        if (section == null) {
+            return null;
+        }
+        String title = normalize(section.getTitle());
+        String focus = buildQuestionFocus(section);
+        if (!StringUtils.hasText(focus)) {
+            return buildRewriteQuery(section.getContent());
+        }
+        if (isGenericQaLeafTitle(title)) {
+            return focus + " 如何使用";
+        }
+        if (!StringUtils.hasText(title)) {
+            return focus + " 如何使用";
+        }
+        if (title.contains("为什么")) {
+            return "为什么" + focus + "的性能好";
+        }
+        if (title.contains("流程")) {
+            return focus + " 如何使用";
+        }
+        if (title.contains("原理")) {
+            return focus + "的原理是什么";
+        }
+        if (title.contains("区别") || title.contains("对比")) {
+            String contrastTarget = buildContrastTarget(section);
+            return contrastTarget == null
+                    ? focus + "有什么区别"
+                    : focus + "和" + contrastTarget + "有什么区别";
+        }
+        if (title.contains("优缺点")) {
+            return "为什么" + focus + "的性能好";
+        }
+        if (title.contains("怎么") || title.contains("如何")) {
+            return focus + " 如何使用";
+        }
+        if (title.contains("总结")) {
+            return focus + "的原理是什么";
+        }
+        if (title.contains("方案")) {
+            return "为什么" + focus + "的性能好";
+        }
+        return focus + " 是什么";
+    }
+
+    private String buildContrastTarget(MarkdownParserService.MarkdownSection section) {
+        String parentContentPath = normalize(section.getParentContentPath());
+        if (!StringUtils.hasText(parentContentPath)) {
+            return null;
+        }
+        int separatorIndex = parentContentPath.lastIndexOf(" > ");
+        if (separatorIndex < 0) {
+            return null;
+        }
+        String siblingOrParent = parentContentPath.substring(separatorIndex + 3).trim();
+        return StringUtils.hasText(siblingOrParent) && !siblingOrParent.equals(normalize(section.getTitle()))
+                ? siblingOrParent
+                : null;
+    }
+
+    private String buildQuestionFocus(MarkdownParserService.MarkdownSection section) {
+        String title = normalize(section.getTitle());
+        String parentContentPath = normalize(section.getParentContentPath());
+        if (isGenericQaLeafTitle(title) && StringUtils.hasText(parentContentPath)) {
+            return lastPathSegment(parentContentPath);
+        }
+        if (StringUtils.hasText(title)) {
+            return title;
+        }
+        if (StringUtils.hasText(parentContentPath)) {
+            return lastPathSegment(parentContentPath);
+        }
+        return null;
+    }
+
+    private boolean isGenericQaLeafTitle(String title) {
+        return "回答".equals(title)
+                || "原理".equals(title)
+                || "总结".equals(title)
+                || "方案".equals(title);
+    }
+
+    private String lastPathSegment(String contentPath) {
+        if (!StringUtils.hasText(contentPath)) {
+            return null;
+        }
+        int separatorIndex = contentPath.lastIndexOf(" > ");
+        if (separatorIndex < 0) {
+            return contentPath;
+        }
+        return contentPath.substring(separatorIndex + 3).trim();
+    }
+
+    private String buildTopicSwitchQuery(List<MarkdownParserService.MarkdownSection> sections, int currentIndex) {
+        if (currentIndex + 1 >= sections.size()) {
+            return null;
+        }
+        MarkdownParserService.MarkdownSection nextSection = sections.get(currentIndex + 1);
+        return nextSection.getContentPath();
+    }
+
     private Document ingestFixtureMarkdown(String kbId, Resource resource) throws Exception {
         byte[] bytes;
         try (InputStream inputStream = resource.getInputStream()) {
@@ -829,12 +1401,12 @@ class RagRecallEvaluationTest {
                     continue;
                 }
 
-                float[] embedding = ragService.embed(buildChunkEmbeddingText(section.getContentPath(), title, section.getContent()));
+                float[] embedding = ragService.embed(RagChunkSupport.buildChunkEmbeddingText(section));
                 ChunkBgeM3 chunk = ChunkBgeM3.builder()
                         .kbId(kbId)
                         .docId(documentId)
                         .content(section.getContent() != null ? section.getContent() : "")
-                        .metadata(buildChunkMetadata(title, section.getContentPath(), sourceType, sourceName, i))
+                        .metadata(RagChunkSupport.buildChunkMetadataJson(objectMapper, section, sourceType, sourceName, i))
                         .embedding(embedding)
                         .createdAt(now)
                         .updatedAt(now)
@@ -842,32 +1414,6 @@ class RagRecallEvaluationTest {
                 chunkBgeM3Mapper.insert(chunk);
             }
         }
-    }
-
-    private String buildChunkMetadata(
-            String title,
-            String contentPath,
-            String sourceType,
-            String sourceName,
-            int sectionIndex
-    ) throws JsonProcessingException {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("title", title);
-        metadata.put("retrievableTitle", title);
-        metadata.put("retrievableTitleSearchText", RetrievableTitleLexicalizer.buildSearchText(title, title, contentPath, sourceName));
-        metadata.put("contentPath", contentPath);
-        metadata.put("sourceType", sourceType);
-        metadata.put("sourceName", sourceName);
-        metadata.put("sectionIndex", sectionIndex);
-        return objectMapper.writeValueAsString(metadata);
-    }
-
-    private String buildChunkEmbeddingText(String contentPath, String title, String content) {
-        String effectiveTitle = StringUtils.hasText(contentPath) ? contentPath.trim() : title;
-        if (!StringUtils.hasText(content)) {
-            return effectiveTitle;
-        }
-        return effectiveTitle + "\n" + title + "\n" + content.trim();
     }
 
     private KnowledgeBase createKnowledgeBase(String name, String description) throws JsonProcessingException {
@@ -1216,6 +1762,10 @@ class RagRecallEvaluationTest {
         }
     }
 
+    private String formatDelta(double value) {
+        return value >= 0 ? String.format("+%.4f", value) : String.format("%.4f", value);
+    }
+
     @Configuration
     @EnableAutoConfiguration
     @ImportAutoConfiguration({
@@ -1293,7 +1843,26 @@ class RagRecallEvaluationTest {
             List<String> missCaseIds,
             List<String> newMissCases,
             List<String> fixedMissCases,
-            List<EvaluationSummary> breakdown
+            List<DimensionSummary> dimensions,
+            List<EvaluationSummary> breakdown,
+            List<VariantComparison> comparisons
+    ) {
+    }
+
+    private record DimensionSummary(
+            String name,
+            String description,
+            List<String> groups,
+            int total,
+            int evaluated,
+            int excluded,
+            double coverage,
+            double recallAt1,
+            double recallAt3,
+            double recallAt5,
+            double recallAt10,
+            double mrrAt3,
+            double mrrAt10
     ) {
     }
 
@@ -1302,6 +1871,27 @@ class RagRecallEvaluationTest {
             int hitAt3Not1,
             int hitAt5Not3,
             int missAt5
+    ) {
+    }
+
+    private record VariantComparison(
+            String variant,
+            String description,
+            List<VariantComparisonItem> items
+    ) {
+    }
+
+    private record VariantComparisonItem(
+            String group,
+            double baselineRecallAt1,
+            double baselineRecallAt5,
+            double baselineMrrAt3,
+            double comparedRecallAt1,
+            double comparedRecallAt5,
+            double comparedMrrAt3,
+            double deltaRecallAt1,
+            double deltaRecallAt5,
+            double deltaMrrAt3
     ) {
     }
 

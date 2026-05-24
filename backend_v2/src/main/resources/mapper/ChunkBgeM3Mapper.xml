@@ -377,6 +377,24 @@
         ]]>
     </select>
 
+    <select id="selectContentLexicalCandidatesByKbIds" resultMap="RagRetrievalResultMap">
+        <![CDATA[
+        SELECT id AS chunk_id,
+               kb_id,
+               doc_id,
+               content,
+               metadata::text AS metadata,
+               5::double precision AS distance,
+               ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS rank
+        FROM chunk_bge_m3
+        WHERE
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
+          AND COALESCE(content, '') <> ''
+        ]]>
+    </select>
+
     <select id="selectTitlePathCandidatesByKbIds" resultMap="RagRetrievalResultMap">
         <![CDATA[
         SELECT id AS chunk_id,

@@ -93,13 +93,19 @@ public class JChatMindFactory {
     private List<Message> loadMemory(String userId, String chatSessionId) {
         int messageLength = agentConfig.getChatOptions().getMessageLength();
         List<Message> memory = new ArrayList<>();
-        memory.addAll(loadLongTermMemory(userId));
 
         List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
                 userId,
                 chatSessionId,
                 messageLength
         );
+
+        String latestUserQuery = chatMessages.stream()
+                .filter(m -> m.getRole() == ChatMessageDTO.RoleType.USER)
+                .map(ChatMessageDTO::getContent)
+                .reduce((first, second) -> second)
+                .orElse(null);
+        memory.addAll(loadLongTermMemory(userId, latestUserQuery));
         for (ChatMessageDTO chatMessageDTO : chatMessages) {
             switch (chatMessageDTO.getRole()) {
                 case SYSTEM -> {
@@ -134,8 +140,16 @@ public class JChatMindFactory {
         return memory;
     }
 
-    private List<Message> loadLongTermMemory(String userId) {
-        List<UserMemory> memories = userMemoryFacadeService.getConfirmedMemories(userId);
+    private List<Message> loadLongTermMemory(String userId, String query) {
+        List<UserMemory> memories;
+        int topK = 5;
+        if (StringUtils.hasText(query)) {
+            memories = userMemoryFacadeService.recallRelevantMemories(userId, query, topK);
+        } else {
+            memories = userMemoryFacadeService.getConfirmedMemories(userId).stream()
+                    .limit(topK)
+                    .toList();
+        }
         if (memories.isEmpty()) {
             return Collections.emptyList();
         }
@@ -143,7 +157,7 @@ public class JChatMindFactory {
         String content = memories.stream()
                 .map(memory -> "- [" + memory.getMemoryType() + "] " + memory.getContent())
                 .collect(Collectors.joining("\n"));
-        return List.of(new SystemMessage("以下是用户已确认的长期记忆，请在后续回答中遵守和利用：\n" + content));
+        return List.of(new SystemMessage("以下是用户相关的长期记忆，请在后续回答中遵守和利用：\n" + content));
     }
 
     private AgentDTO toAgentConfig(Agent agent) {

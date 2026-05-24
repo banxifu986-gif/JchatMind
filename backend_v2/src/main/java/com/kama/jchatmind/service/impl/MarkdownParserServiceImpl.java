@@ -16,7 +16,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -33,16 +32,12 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
     @Override
     public List<MarkdownSection> parseMarkdown(InputStream inputStream) {
         try {
-            // 读取文件内容
             originalMarkdownContent = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-            
-            // 解析 Markdown
             Document document = parser.parse(originalMarkdownContent);
-            
-            // 提取标题和内容
+
             List<MarkdownSection> sections = new ArrayList<>();
             extractSections(document, sections);
-            
+
             log.info("解析 Markdown 完成，共提取 {} 个章节", sections.size());
             return sections;
         } catch (Exception e) {
@@ -51,90 +46,119 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
         }
     }
 
-    /**
-     * 提取标题和内容
-     * 只遍历文档的直接子节点，遇到任何标题就停止收集当前标题的内容
-     */
     private void extractSections(Document document, List<MarkdownSection> sections) {
-        // 收集文档的所有直接子节点（顶层节点）
         List<Node> topLevelNodes = new ArrayList<>();
         Node child = document.getFirstChild();
         while (child != null) {
             topLevelNodes.add(child);
             child = child.getNext();
         }
-        
-        // 遍历顶层节点，找到所有标题
+
+        List<String> currentPathTitles = new ArrayList<>();
+        List<Integer> currentPathLevels = new ArrayList<>();
+
         for (int i = 0; i < topLevelNodes.size(); i++) {
             Node node = topLevelNodes.get(i);
-            
-            if (node instanceof Heading) {
-                Heading heading = (Heading) node;
-                String title = extractHeadingText(heading);
-                String contentPath = buildHeadingPath(topLevelNodes, i, heading.getLevel(), title);
-                
-                if (title == null || title.trim().isEmpty()) {
-                    continue;
-                }
-                
-                // 收集当前标题到下一个标题（任何级别）之间的所有内容
-                StringBuilder contentBuilder = new StringBuilder();
-                for (int j = i + 1; j < topLevelNodes.size(); j++) {
-                    Node nextNode = topLevelNodes.get(j);
-                    
-                    // 如果遇到任何标题，停止收集
-                    if (nextNode instanceof Heading) {
-                        break;
-                    }
-                    
-                    // 提取节点内容
-                    String content = extractNodeContent(nextNode);
-                    if (content != null && !content.trim().isEmpty()) {
-                        if (contentBuilder.length() > 0) {
-                            contentBuilder.append("\n");
-                        }
-                        contentBuilder.append(content);
-                    }
-                }
-                
-                String content = contentBuilder.toString().trim();
-                sections.add(new MarkdownSection(title, content, contentPath));
+            if (!(node instanceof Heading heading)) {
+                continue;
             }
+
+            String title = extractHeadingText(heading);
+            if (title == null || title.trim().isEmpty()) {
+                continue;
+            }
+
+            while (!currentPathLevels.isEmpty()
+                    && currentPathLevels.get(currentPathLevels.size() - 1) >= heading.getLevel()) {
+                currentPathLevels.remove(currentPathLevels.size() - 1);
+                currentPathTitles.remove(currentPathTitles.size() - 1);
+            }
+
+            String normalizedTitle = title.trim();
+            String parentContentPath = currentPathTitles.isEmpty()
+                    ? null
+                    : String.join(" > ", currentPathTitles);
+            String contentPath = parentContentPath == null
+                    ? normalizedTitle
+                    : parentContentPath + " > " + normalizedTitle;
+
+            StringBuilder contentBuilder = new StringBuilder();
+            for (int j = i + 1; j < topLevelNodes.size(); j++) {
+                Node nextNode = topLevelNodes.get(j);
+                if (nextNode instanceof Heading) {
+                    break;
+                }
+
+                String content = extractNodeContent(nextNode);
+                if (content != null && !content.trim().isEmpty()) {
+                    if (contentBuilder.length() > 0) {
+                        contentBuilder.append("\n");
+                    }
+                    contentBuilder.append(content);
+                }
+            }
+
+            String content = contentBuilder.toString().trim();
+            boolean hasChildren = hasChildHeading(topLevelNodes, i, heading.getLevel());
+            sections.add(new MarkdownSection(
+                    normalizedTitle,
+                    content,
+                    contentPath,
+                    parentContentPath,
+                    heading.getLevel(),
+                    hasChildren,
+                    resolveSectionType(normalizedTitle, hasChildren),
+                    pathDepth(contentPath),
+                    content.length()
+            ));
+
+            currentPathLevels.add(heading.getLevel());
+            currentPathTitles.add(normalizedTitle);
         }
     }
 
-    private String buildHeadingPath(List<Node> topLevelNodes, int currentIndex, int currentLevel, String currentTitle) {
-        List<String> pathSegments = new ArrayList<>();
-        for (int i = 0; i < currentIndex; i++) {
-            Node node = topLevelNodes.get(i);
-            if (!(node instanceof Heading previousHeading)) {
+    private boolean hasChildHeading(List<Node> topLevelNodes, int currentIndex, int currentLevel) {
+        for (int i = currentIndex + 1; i < topLevelNodes.size(); i++) {
+            Node nextNode = topLevelNodes.get(i);
+            if (!(nextNode instanceof Heading nextHeading)) {
                 continue;
             }
-            if (previousHeading.getLevel() >= currentLevel) {
-                continue;
+            if (nextHeading.getLevel() <= currentLevel) {
+                return false;
             }
-
-            String previousTitle = extractHeadingText(previousHeading);
-            if (previousTitle == null || previousTitle.trim().isEmpty()) {
-                continue;
-            }
-
-            while (pathSegments.size() >= previousHeading.getLevel()) {
-                pathSegments.remove(pathSegments.size() - 1);
-            }
-            pathSegments.add(previousTitle.trim());
+            return true;
         }
-
-        while (pathSegments.size() >= currentLevel) {
-            pathSegments.remove(pathSegments.size() - 1);
-        }
-        pathSegments.add(currentTitle.trim());
-        return pathSegments.stream().collect(Collectors.joining(" > "));
+        return false;
     }
 
-    /**
-     * 提取标题文本
-     */
+    private MarkdownParserService.SectionType resolveSectionType(String title, boolean hasChildren) {
+        if (hasChildren) {
+            return MarkdownParserService.SectionType.PARENT_OVERVIEW;
+        }
+        if (isQaLeafTitle(title)) {
+            return MarkdownParserService.SectionType.LEAF_QA;
+        }
+        return MarkdownParserService.SectionType.LEAF_CONTENT;
+    }
+
+    private boolean isQaLeafTitle(String title) {
+        if (title == null) {
+            return false;
+        }
+        String normalized = title.trim();
+        return "回答".equals(normalized)
+                || "原理".equals(normalized)
+                || "总结".equals(normalized)
+                || "方案".equals(normalized);
+    }
+
+    private int pathDepth(String contentPath) {
+        if (contentPath == null || contentPath.trim().isEmpty()) {
+            return 0;
+        }
+        return contentPath.split(" > ").length;
+    }
+
     private String extractHeadingText(Heading heading) {
         StringBuilder text = new StringBuilder();
         Node child = heading.getFirstChild();
@@ -151,87 +175,57 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
         return text.toString().trim();
     }
 
-    /**
-     * 提取节点内容（保留格式，特别是表格）
-     */
     private String extractNodeContent(Node node) {
         if (node == null) {
             return null;
         }
-        
-        // 对于表格，保留原始 Markdown 格式
         if (node instanceof TableBlock) {
             return extractTableMarkdown(node);
         }
-        
-        // 对于其他节点，提取文本内容
         return extractPlainText(node);
     }
 
-    /**
-     * 提取表格的原始 Markdown 格式
-     */
     private String extractTableMarkdown(Node tableNode) {
         if (originalMarkdownContent == null) {
             return extractPlainText(tableNode);
         }
-        
+
         try {
-            // 获取表格节点在原始文档中的位置
             BasedSequence chars = tableNode.getChars();
             if (chars != null && chars.length() > 0) {
                 int startOffset = chars.getStartOffset();
                 int endOffset = chars.getEndOffset();
-                
-                // 从原始 Markdown 中提取表格内容
                 if (startOffset >= 0 && endOffset <= originalMarkdownContent.length() && startOffset < endOffset) {
-                    String tableMarkdown = originalMarkdownContent.substring(startOffset, endOffset);
-                    return tableMarkdown.trim();
+                    return originalMarkdownContent.substring(startOffset, endOffset).trim();
                 }
             }
-            
-            // 如果无法从原始内容提取，尝试从节点本身提取
             return extractPlainText(tableNode);
         } catch (Exception e) {
-            log.warn("提取表格 Markdown 失败，使用文本提取: {}", e.getMessage());
+            log.warn("提取表格 Markdown 失败，退回纯文本提取: {}", e.getMessage());
             return extractPlainText(tableNode);
         }
     }
 
-    /**
-     * 提取节点的纯文本内容
-     */
     private String extractPlainText(Node node) {
         if (node == null) {
             return null;
         }
-        
+
         StringBuilder text = new StringBuilder();
         extractTextRecursive(node, text);
         return text.length() > 0 ? text.toString().trim() : null;
     }
 
-    /**
-     * 递归提取文本
-     */
     private void extractTextRecursive(Node node, StringBuilder text) {
-        if (node == null) {
+        if (node == null || node instanceof Heading) {
             return;
         }
-        
-        // 跳过标题节点（标题已经在 extractSections 中单独处理）
-        if (node instanceof Heading) {
-            return;
-        }
-        
-        // 对于有子节点的节点，递归处理子节点
+
         Node child = node.getFirstChild();
         if (child != null) {
-            boolean isFirstChild = true;
+            boolean firstChild = true;
             while (child != null) {
-                // 在子节点之间添加适当的分隔符
-                if (!isFirstChild && text.length() > 0) {
-                    // 检查是否需要换行
+                if (!firstChild && text.length() > 0) {
                     if (child instanceof Block) {
                         if (!text.toString().endsWith("\n")) {
                             text.append("\n");
@@ -242,25 +236,23 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
                 }
                 extractTextRecursive(child, text);
                 child = child.getNext();
-                isFirstChild = false;
+                firstChild = false;
             }
-        } else {
-            // 叶子节点，尝试提取文本
-            try {
-                BasedSequence chars = node.getChars();
-                if (chars != null && chars.length() > 0) {
-                    String nodeText = chars.toString().trim();
-                    if (!nodeText.isEmpty()) {
-                        if (text.length() > 0 && !text.toString().endsWith("\n")) {
-                            text.append(" ");
-                        }
-                        text.append(nodeText);
+            return;
+        }
+
+        try {
+            BasedSequence chars = node.getChars();
+            if (chars != null && chars.length() > 0) {
+                String nodeText = chars.toString().trim();
+                if (!nodeText.isEmpty()) {
+                    if (text.length() > 0 && !text.toString().endsWith("\n")) {
+                        text.append(" ");
                     }
+                    text.append(nodeText);
                 }
-            } catch (Exception e) {
-                // 忽略，继续处理
             }
+        } catch (Exception ignored) {
         }
     }
 }
-

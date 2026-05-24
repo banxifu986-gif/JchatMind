@@ -11,3 +11,14 @@ document:
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   embedding-model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+
+rag:
+  embedding:
+    cache:
+      max-entries: ${RAG_EMBEDDING_CACHE_MAX_ENTRIES:2048}
+  eval:
+    enable-ab-comparison: ${RAG_EVAL_ENABLE_AB_COMPARISON:false}
+    ab-sample-size: ${RAG_EVAL_AB_SAMPLE_SIZE:20}
+    real-max-documents: ${RAG_EVAL_REAL_MAX_DOCUMENTS:0}
+    real-max-cases: ${RAG_EVAL_REAL_MAX_CASES:0}
+    real-document-order: ${RAG_EVAL_REAL_DOCUMENT_ORDER:created_desc}

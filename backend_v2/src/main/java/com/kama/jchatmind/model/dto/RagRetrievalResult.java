@@ -21,4 +21,18 @@ public class RagRetrievalResult {
     private Double distance;
 
     private Integer rank;
+
+    private Double rrfScore;
+
+    private Integer vectorRank;
+
+    private Double vectorDistance;
+
+    private Integer titleBm25Rank;
+
+    private Double titleBm25Score;
+
+    private Integer contentBm25Rank;
+
+    private Double contentBm25Score;
 }

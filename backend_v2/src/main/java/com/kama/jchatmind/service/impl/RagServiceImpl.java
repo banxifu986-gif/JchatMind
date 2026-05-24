@@ -19,12 +19,15 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 @Service
 @Slf4j
@@ -35,7 +38,9 @@ public class RagServiceImpl implements RagService {
     private static final int TITLE_KEYWORD_CANDIDATE_LIMIT = 10;
     private static final int TITLE_TRIGRAM_CANDIDATE_LIMIT = 10;
     private static final int TITLE_FULL_TEXT_CANDIDATE_LIMIT = 10;
+    private static final int CONTENT_FULL_TEXT_CANDIDATE_LIMIT = 20;
     private static final int MAX_SCOPE_MULTIPLIER = 5;
+    private static final int RRF_K = 60;
     private static final double BM25_K1 = 1.2D;
     private static final double BM25_B = 0.75D;
     private static final double RERANK_RANK_PENALTY = 0.03D;
@@ -45,12 +50,16 @@ public class RagServiceImpl implements RagService {
     private static final int TITLE_CONTAINS_MIN_QUERY_LENGTH = 2;
     private static final int TITLE_KEYWORD_MIN_LENGTH = 2;
     private static final int TITLE_KEYWORD_MAX_COUNT = 6;
+    private static final Set<String> GENERIC_LEAF_TITLES = Set.of("回答", "原理", "总结", "方案");
 
     private final WebClient webClient;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
     private final QueryRewriteService queryRewriteService;
     private final String embeddingModel;
     private final boolean rerankDebug;
+    private final boolean disableQueryExpansion;
+    private final boolean disableRerank;
+    private final Map<String, float[]> embeddingCache;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public RagServiceImpl(
@@ -59,13 +68,19 @@ public class RagServiceImpl implements RagService {
             QueryRewriteService queryRewriteService,
             @Value("${ollama.base-url}") String ollamaBaseUrl,
             @Value("${ollama.embedding-model}") String embeddingModel,
-            @Value("${rag.rerank.debug:false}") boolean rerankDebug
+            @Value("${rag.rerank.debug:false}") boolean rerankDebug,
+            @Value("${rag.eval.disable-query-expansion:false}") boolean disableQueryExpansion,
+            @Value("${rag.eval.disable-rerank:false}") boolean disableRerank,
+            @Value("${rag.embedding.cache.max-entries:2048}") int embeddingCacheMaxEntries
     ) {
         this.webClient = builder.baseUrl(ollamaBaseUrl).build();
         this.chunkBgeM3Mapper = chunkBgeM3Mapper;
         this.queryRewriteService = queryRewriteService;
         this.embeddingModel = embeddingModel;
         this.rerankDebug = rerankDebug;
+        this.disableQueryExpansion = disableQueryExpansion;
+        this.disableRerank = disableRerank;
+        this.embeddingCache = createEmbeddingCache(embeddingCacheMaxEntries);
     }
 
     @Data
@@ -73,7 +88,25 @@ public class RagServiceImpl implements RagService {
         private float[] embedding;
     }
 
+    private Map<String, float[]> createEmbeddingCache(int maxEntries) {
+        int cacheSize = Math.max(maxEntries, 0);
+        if (cacheSize == 0) {
+            return Map.of();
+        }
+        return Collections.synchronizedMap(new LinkedHashMap<>(cacheSize, 0.75F, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, float[]> eldest) {
+                return size() > cacheSize;
+            }
+        });
+    }
+
     private float[] doEmbed(String text) {
+        String cacheKey = StringUtils.hasText(text) ? text.trim() : text;
+        if (!CollectionUtils.isEmpty(embeddingCache) && embeddingCache.containsKey(cacheKey)) {
+            return embeddingCache.get(cacheKey).clone();
+        }
+
         EmbeddingResponse resp = webClient.post()
                 .uri("/api/embeddings")
                 .bodyValue(Map.of(
@@ -84,7 +117,13 @@ public class RagServiceImpl implements RagService {
                 .bodyToMono(EmbeddingResponse.class)
                 .block();
         Assert.notNull(resp, "Embedding response cannot be null");
-        return resp.getEmbedding();
+        Assert.notNull(resp.getEmbedding(), "Embedding vector cannot be null");
+
+        float[] embedding = resp.getEmbedding();
+        if (!CollectionUtils.isEmpty(embeddingCache)) {
+            embeddingCache.put(cacheKey, embedding.clone());
+        }
+        return embedding;
     }
 
     @Override
@@ -125,9 +164,15 @@ public class RagServiceImpl implements RagService {
     }
 
     private List<RagRetrievalResult> retrieveWithPlan(List<String> kbIds, QueryRewriteResult rewritten, int limit) {
-        String query = rewritten.getQuery();
-        String normalizedQuery = normalize(query);
-        String queryEmbedding = toPgVector(doEmbed(query));
+        String originalQuery = rewritten.getQuery();
+        String normalizedOriginalQuery = normalize(originalQuery);
+        List<String> retrievalQueries = disableQueryExpansion
+                ? List.of(originalQuery)
+                : rewritten.getRetrievalQueries() == null || rewritten.getRetrievalQueries().isEmpty()
+                ? List.of(originalQuery)
+                : rewritten.getRetrievalQueries();
+        Map<String, String> embeddingLiteralCache = new LinkedHashMap<>();
+
         int scopeMultiplier = scopeMultiplier(kbIds.size());
         int vectorCandidateLimit = scaledCandidateLimit(Math.max(limit, RERANK_CANDIDATE_LIMIT), scopeMultiplier);
         int titleMatchCandidateLimit = scaledCandidateLimit(TITLE_MATCH_CANDIDATE_LIMIT, scopeMultiplier);
@@ -135,38 +180,85 @@ public class RagServiceImpl implements RagService {
         int titleKeywordCandidateLimit = scaledCandidateLimit(TITLE_KEYWORD_CANDIDATE_LIMIT, scopeMultiplier);
         int titleTrigramCandidateLimit = scaledCandidateLimit(TITLE_TRIGRAM_CANDIDATE_LIMIT, scopeMultiplier);
         int titleFullTextCandidateLimit = scaledCandidateLimit(TITLE_FULL_TEXT_CANDIDATE_LIMIT, scopeMultiplier);
+        int contentFullTextCandidateLimit = scaledCandidateLimit(CONTENT_FULL_TEXT_CANDIDATE_LIMIT, scopeMultiplier);
 
-        RetrievalContext normalizedContext = normalizeContext(rewritten.getContext());
-        List<RagRetrievalResult> vectorCandidates = findVectorCandidates(
-                kbIds,
-                queryEmbedding,
-                normalizedContext,
-                vectorCandidateLimit
+        RetrievalContext normalizedContext = normalizeContext(rewritten.getContext(), rewritten.getContextApplyMode());
+        List<RetrievalChannel> channels = new ArrayList<>();
+        for (int i = 0; i < retrievalQueries.size(); i++) {
+            String retrievalQuery = retrievalQueries.get(i);
+            String queryEmbedding = embeddingLiteral(embeddingLiteralCache, retrievalQuery);
+            channels.add(new RetrievalChannel(
+                    "vector_" + i,
+                    annotateVectorCandidates(findVectorCandidates(
+                            kbIds,
+                            queryEmbedding,
+                            normalizedContext,
+                            vectorCandidateLimit
+                    ))
+            ));
+        }
+        String titleQueryEmbedding = embeddingLiteral(
+                embeddingLiteralCache,
+                StringUtils.hasText(originalQuery) ? originalQuery : normalizedOriginalQuery
         );
+
         List<RagRetrievalResult> titleCandidates = rewritten.isTitleQuery()
-                ? findTitleExactCandidates(kbIds, normalizedQuery, queryEmbedding, normalizedContext, titleMatchCandidateLimit)
+                ? findTitleExactCandidates(
+                kbIds,
+                normalizedOriginalQuery,
+                titleQueryEmbedding,
+                normalizedContext,
+                titleMatchCandidateLimit
+        )
                 : List.of();
         List<RagRetrievalResult> titleContainsCandidates = rewritten.isTitleQuery()
-                ? findTitleContainsCandidates(kbIds, normalizedQuery, titleContainsCandidateLimit)
+                ? findTitleContainsCandidates(kbIds, normalizedOriginalQuery, titleContainsCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleKeywordCandidates = rewritten.isTitleQuery()
-                ? findTitleKeywordCandidates(kbIds, normalizedQuery, titleKeywordCandidateLimit)
+                ? findTitleKeywordCandidates(kbIds, normalizedOriginalQuery, titleKeywordCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleTrigramCandidates = rewritten.isTitleQuery()
-                ? findTitleTrigramCandidates(kbIds, normalizedQuery, titleTrigramCandidateLimit)
+                ? findTitleTrigramCandidates(kbIds, normalizedOriginalQuery, titleTrigramCandidateLimit)
                 : List.of();
         List<RagRetrievalResult> titleBm25Candidates = rewritten.isTitleQuery()
-                ? findTitleBm25Candidates(kbIds, normalizedQuery, titleFullTextCandidateLimit)
+                ? findTitleBm25Candidates(kbIds, normalizedOriginalQuery, titleFullTextCandidateLimit)
                 : List.of();
+        List<RagRetrievalResult> contentBm25Candidates = findContentBm25Candidates(
+                kbIds,
+                normalizedOriginalQuery,
+                contentFullTextCandidateLimit
+        );
 
-        List<RagRetrievalResult> candidates = mergeCandidates(titleCandidates, vectorCandidates);
-        candidates = mergeCandidates(candidates, titleContainsCandidates);
-        candidates = mergeCandidates(candidates, titleKeywordCandidates);
-        candidates = mergeCandidates(candidates, titleTrigramCandidates);
-        candidates = mergeCandidates(candidates, titleBm25Candidates);
-        candidates = filterByContext(candidates, normalizedContext);
+        if (!titleCandidates.isEmpty()) {
+            channels.add(new RetrievalChannel("title_exact", titleCandidates));
+        }
+        if (!titleContainsCandidates.isEmpty()) {
+            channels.add(new RetrievalChannel("title_contains", titleContainsCandidates));
+        }
+        if (!titleKeywordCandidates.isEmpty()) {
+            channels.add(new RetrievalChannel("title_keyword", titleKeywordCandidates));
+        }
+        if (!titleTrigramCandidates.isEmpty()) {
+            channels.add(new RetrievalChannel("title_trigram", titleTrigramCandidates));
+        }
+        if (!titleBm25Candidates.isEmpty()) {
+            channels.add(new RetrievalChannel("title_bm25", titleBm25Candidates));
+        }
+        if (!contentBm25Candidates.isEmpty()) {
+            channels.add(new RetrievalChannel("content_bm25", contentBm25Candidates));
+        }
 
-        return rerank(normalizedQuery, normalizedContext, candidates).stream()
+        List<RagRetrievalResult> candidates = rrfFuse(channels);
+
+        if (normalizedContext.applyMode() == QueryRewriteResult.ContextApplyMode.HARD) {
+            candidates = filterByContext(candidates, normalizedContext);
+        }
+
+        List<RagRetrievalResult> finalResults = disableRerank
+                ? candidates
+                : rerank(normalizedOriginalQuery, normalizedContext, candidates);
+
+        return finalResults.stream()
                 .limit(limit)
                 .toList();
     }
@@ -177,7 +269,7 @@ public class RagServiceImpl implements RagService {
             RetrievalContext context,
             int candidateLimit
     ) {
-        if (context.hasContext()) {
+        if (context.applyMode() == QueryRewriteResult.ContextApplyMode.HARD && context.hasContext()) {
             return chunkBgeM3Mapper.similaritySearchDetailedWithContext(
                     kbIds,
                     queryEmbedding,
@@ -197,10 +289,10 @@ public class RagServiceImpl implements RagService {
             RetrievalContext context,
             int candidateLimit
     ) {
-        if (!shouldTryTitleExactLookup(normalizedQuery)) {
+        if (!shouldTryTitleExactLookup(normalizedQuery) || !StringUtils.hasText(queryEmbedding)) {
             return List.of();
         }
-        if (context.hasContext()) {
+        if (context.applyMode() == QueryRewriteResult.ContextApplyMode.HARD && context.hasContext()) {
             return chunkBgeM3Mapper.searchByTitleExactWithContext(
                     kbIds,
                     normalizedQuery,
@@ -211,7 +303,12 @@ public class RagServiceImpl implements RagService {
                     candidateLimit
             );
         }
-        return chunkBgeM3Mapper.searchByTitleExact(kbIds, normalizedQuery, queryEmbedding, candidateLimit);
+        return chunkBgeM3Mapper.searchByTitleExact(
+                kbIds,
+                normalizedQuery,
+                queryEmbedding,
+                candidateLimit
+        );
     }
 
     private List<RagRetrievalResult> findTitleContainsCandidates(
@@ -281,7 +378,50 @@ public class RagServiceImpl implements RagService {
             return List.of();
         }
 
-        List<RagRetrievalResult> lexicalCandidates = chunkBgeM3Mapper.selectLexicalCandidatesByKbIds(kbIds);
+        return findBm25Candidates(
+                chunkBgeM3Mapper.selectLexicalCandidatesByKbIds(kbIds),
+                queryTerms,
+                candidateLimit,
+                candidate -> extractRetrievableTitleSearchText(candidate.getMetadata()),
+                Comparator.comparing((RagRetrievalResult candidate) -> extractRetrievableTitle(candidate.getMetadata()))
+                        .thenComparing(RagRetrievalResult::getChunkId),
+                Bm25Channel.TITLE
+        );
+    }
+
+    private List<RagRetrievalResult> findContentBm25Candidates(
+            List<String> kbIds,
+            String normalizedQuery,
+            int candidateLimit
+    ) {
+        if (!StringUtils.hasText(normalizedQuery)) {
+            return List.of();
+        }
+
+        List<String> queryTerms = RetrievableTitleLexicalizer.tokenize(normalizedQuery);
+        if (queryTerms.isEmpty()) {
+            return List.of();
+        }
+
+        return findBm25Candidates(
+                chunkBgeM3Mapper.selectContentLexicalCandidatesByKbIds(kbIds),
+                queryTerms,
+                candidateLimit,
+                RagRetrievalResult::getContent,
+                Comparator.comparing((RagRetrievalResult candidate) -> normalize(candidate.getContent()))
+                        .thenComparing(RagRetrievalResult::getChunkId),
+                Bm25Channel.CONTENT
+        );
+    }
+
+    private List<RagRetrievalResult> findBm25Candidates(
+            List<RagRetrievalResult> lexicalCandidates,
+            List<String> queryTerms,
+            int candidateLimit,
+            Function<RagRetrievalResult, String> searchTextExtractor,
+            Comparator<RagRetrievalResult> tieBreaker,
+            Bm25Channel channel
+    ) {
         if (lexicalCandidates.isEmpty()) {
             return List.of();
         }
@@ -292,7 +432,7 @@ public class RagServiceImpl implements RagService {
         double totalDocLength = 0D;
 
         for (RagRetrievalResult candidate : lexicalCandidates) {
-            String searchText = extractRetrievableTitleSearchText(candidate.getMetadata());
+            String searchText = searchTextExtractor.apply(candidate);
             List<String> docTerms = RetrievableTitleLexicalizer.tokenizeWithDuplicates(searchText);
             if (docTerms.isEmpty()) {
                 continue;
@@ -348,8 +488,7 @@ public class RagServiceImpl implements RagService {
                 .sorted(Comparator
                         .comparingDouble(ScoredLexicalCandidate::score)
                         .reversed()
-                        .thenComparing(item -> extractRetrievableTitle(item.result().getMetadata()))
-                        .thenComparing(item -> item.result().getChunkId()))
+                        .thenComparing(ScoredLexicalCandidate::result, tieBreaker))
                 .limit(candidateLimit)
                 .map(ScoredLexicalCandidate::result)
                 .toList();
@@ -359,6 +498,13 @@ public class RagServiceImpl implements RagService {
             double score = scoreByChunkId.getOrDefault(result.getChunkId(), 0D);
             result.setDistance(1D / (1D + score));
             result.setRank(i + 1);
+            if (channel == Bm25Channel.TITLE) {
+                result.setTitleBm25Rank(i + 1);
+                result.setTitleBm25Score(score);
+            } else if (channel == Bm25Channel.CONTENT) {
+                result.setContentBm25Rank(i + 1);
+                result.setContentBm25Score(score);
+            }
         }
         return rankedCandidates;
     }
@@ -401,27 +547,122 @@ public class RagServiceImpl implements RagService {
         return keywords;
     }
 
-    private List<RagRetrievalResult> mergeCandidates(
-            List<RagRetrievalResult> primaryCandidates,
-            List<RagRetrievalResult> secondaryCandidates
-    ) {
-        List<RagRetrievalResult> merged = new ArrayList<>();
-        Set<String> seenChunkIds = new LinkedHashSet<>();
+    private String embeddingLiteral(Map<String, String> embeddingLiteralCache, String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        return embeddingLiteralCache.computeIfAbsent(text, key -> toPgVector(doEmbed(key)));
+    }
 
-        for (RagRetrievalResult result : primaryCandidates) {
-            if (seenChunkIds.add(result.getChunkId())) {
-                merged.add(result);
+    private List<RagRetrievalResult> annotateVectorCandidates(List<RagRetrievalResult> candidates) {
+        for (RagRetrievalResult candidate : candidates) {
+            candidate.setVectorRank(candidate.getRank());
+            candidate.setVectorDistance(candidate.getDistance());
+        }
+        return candidates;
+    }
+
+    private List<RagRetrievalResult> rrfFuse(List<RetrievalChannel> channels) {
+        if (channels.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, RagRetrievalResult> mergedByChunkId = new LinkedHashMap<>();
+        for (RetrievalChannel channel : channels) {
+            List<RagRetrievalResult> results = channel.results();
+            for (int i = 0; i < results.size(); i++) {
+                RagRetrievalResult incoming = results.get(i);
+                if (!StringUtils.hasText(incoming.getChunkId())) {
+                    continue;
+                }
+
+                int rank = safeRank(incoming.getRank()) == Integer.MAX_VALUE ? i + 1 : incoming.getRank();
+                double contribution = 1D / (RRF_K + rank);
+                RagRetrievalResult merged = mergedByChunkId.computeIfAbsent(
+                        incoming.getChunkId(),
+                        key -> copyResult(incoming)
+                );
+                mergeSignals(merged, incoming);
+                merged.setRrfScore((merged.getRrfScore() == null ? 0D : merged.getRrfScore()) + contribution);
             }
         }
-        for (RagRetrievalResult result : secondaryCandidates) {
-            if (seenChunkIds.add(result.getChunkId())) {
-                merged.add(result);
-            }
+
+        List<RagRetrievalResult> fused = mergedByChunkId.values().stream()
+                .sorted(Comparator
+                        .comparing((RagRetrievalResult result) -> result.getRrfScore(), Comparator.nullsLast(Double::compareTo))
+                        .reversed()
+                        .thenComparing(this::primaryDistance, Comparator.nullsLast(Double::compareTo))
+                        .thenComparing(result -> result.getChunkId(), Comparator.nullsLast(String::compareTo)))
+                .toList();
+
+        for (int i = 0; i < fused.size(); i++) {
+            fused.get(i).setRank(i + 1);
         }
-        for (int i = 0; i < merged.size(); i++) {
-            merged.get(i).setRank(i + 1);
+        return fused;
+    }
+
+    private RagRetrievalResult copyResult(RagRetrievalResult source) {
+        RagRetrievalResult copy = new RagRetrievalResult();
+        copy.setChunkId(source.getChunkId());
+        copy.setKbId(source.getKbId());
+        copy.setDocId(source.getDocId());
+        copy.setContent(source.getContent());
+        copy.setMetadata(source.getMetadata());
+        copy.setDistance(source.getDistance());
+        copy.setRank(source.getRank());
+        copy.setRrfScore(source.getRrfScore());
+        copy.setVectorRank(source.getVectorRank());
+        copy.setVectorDistance(source.getVectorDistance());
+        copy.setTitleBm25Rank(source.getTitleBm25Rank());
+        copy.setTitleBm25Score(source.getTitleBm25Score());
+        copy.setContentBm25Rank(source.getContentBm25Rank());
+        copy.setContentBm25Score(source.getContentBm25Score());
+        return copy;
+    }
+
+    private void mergeSignals(RagRetrievalResult merged, RagRetrievalResult incoming) {
+        if (!StringUtils.hasText(merged.getContent()) && StringUtils.hasText(incoming.getContent())) {
+            merged.setContent(incoming.getContent());
         }
-        return merged;
+        if (!StringUtils.hasText(merged.getMetadata()) && StringUtils.hasText(incoming.getMetadata())) {
+            merged.setMetadata(incoming.getMetadata());
+        }
+        if (incoming.getVectorRank() != null
+                && (merged.getVectorRank() == null || incoming.getVectorRank() < merged.getVectorRank())) {
+            merged.setVectorRank(incoming.getVectorRank());
+            merged.setVectorDistance(incoming.getVectorDistance());
+            merged.setDistance(incoming.getVectorDistance());
+        }
+        if (incoming.getTitleBm25Rank() != null
+                && (merged.getTitleBm25Rank() == null || incoming.getTitleBm25Rank() < merged.getTitleBm25Rank())) {
+            merged.setTitleBm25Rank(incoming.getTitleBm25Rank());
+            merged.setTitleBm25Score(incoming.getTitleBm25Score());
+        }
+        if (incoming.getContentBm25Rank() != null
+                && (merged.getContentBm25Rank() == null || incoming.getContentBm25Rank() < merged.getContentBm25Rank())) {
+            merged.setContentBm25Rank(incoming.getContentBm25Rank());
+            merged.setContentBm25Score(incoming.getContentBm25Score());
+        }
+        if (isBetterPrimaryDistance(primaryDistance(incoming), primaryDistance(merged))) {
+            merged.setDistance(primaryDistance(incoming));
+        }
+    }
+
+    private Double primaryDistance(RagRetrievalResult result) {
+        if (result.getVectorDistance() != null) {
+            return result.getVectorDistance();
+        }
+        return result.getDistance();
+    }
+
+    private boolean isBetterPrimaryDistance(Double candidate, Double existing) {
+        if (candidate == null) {
+            return false;
+        }
+        if (existing == null) {
+            return true;
+        }
+        return candidate < existing;
     }
 
     private List<RagRetrievalResult> filterByContext(List<RagRetrievalResult> candidates, RetrievalContext context) {
@@ -495,8 +736,12 @@ public class RagServiceImpl implements RagService {
 
     private RerankScore rerankScore(String normalizedQuery, RetrievalContext context, RagRetrievalResult result) {
         RerankScore lexicalScore = lexicalScore(normalizedQuery, context, result);
+        double titleBm25SignalScore = bm25SignalScore(result.getTitleBm25Rank(), result.getTitleBm25Score(), 0.05D, 0.03D);
+        double contentBm25SignalScore = bm25SignalScore(result.getContentBm25Rank(), result.getContentBm25Score(), 0.10D, 0.05D);
+        double vectorSignalScore = vectorSignalScore(result);
         double rankPenalty = (safeRank(result.getRank()) - 1) * RERANK_RANK_PENALTY;
-        return lexicalScore.withRankPenalty(rankPenalty);
+        return lexicalScore.withRetrievalSignals(titleBm25SignalScore, contentBm25SignalScore, vectorSignalScore)
+                .withRankPenalty(rankPenalty);
     }
 
     private RerankScore lexicalScore(String normalizedQuery, RetrievalContext context, RagRetrievalResult result) {
@@ -506,8 +751,12 @@ public class RagServiceImpl implements RagService {
 
         String title = normalize(extractRetrievableTitle(result.getMetadata()));
         String contentPath = normalize(extractMetadataText(result.getMetadata(), "contentPath"));
+        String parentContentPath = normalize(extractMetadataText(result.getMetadata(), "parentContentPath"));
         String sourceName = normalize(extractMetadataText(result.getMetadata(), "sourceName"));
         String content = normalize(result.getContent());
+        String sectionType = extractMetadataText(result.getMetadata(), "sectionType");
+        Integer pathDepth = extractMetadataInt(result.getMetadata(), "pathDepth");
+        Integer localContentLength = extractMetadataInt(result.getMetadata(), "localContentLength");
         Set<String> queryTerms = terms(normalizedQuery);
 
         double titleExactScore = 0D;
@@ -534,7 +783,16 @@ public class RagServiceImpl implements RagService {
         }
 
         double contentPathScore = contentPathScore(normalizedQuery, context, contentPath, sourceName, queryTerms, result.getKbId());
-
+        double structureScore = structureScore(
+                normalizedQuery,
+                queryTerms,
+                title,
+                contentPath,
+                parentContentPath,
+                sectionType,
+                pathDepth,
+                localContentLength
+        );
         return new RerankScore(
                 titleExactScore,
                 titleContainsScore,
@@ -542,8 +800,39 @@ public class RagServiceImpl implements RagService {
                 contentContainsScore,
                 contentOverlapScore,
                 contentPathScore,
+                structureScore,
+                0D,
+                0D,
+                0D,
                 0D
         );
+    }
+
+    private double bm25SignalScore(Integer rank, Double score, double rankWeight, double scoreWeight) {
+        return Math.min(normalizedRankScore(rank) * rankWeight + boundedBm25Score(score) * scoreWeight, rankWeight + scoreWeight);
+    }
+
+    private double vectorSignalScore(RagRetrievalResult result) {
+        double score = normalizedRankScore(result.getVectorRank()) * 0.08D;
+        Double distance = result.getVectorDistance();
+        if (distance != null && !distance.isNaN()) {
+            score += 1D / (1D + Math.max(distance, 0D)) * 0.08D;
+        }
+        return Math.min(score, 0.16D);
+    }
+
+    private double normalizedRankScore(Integer rank) {
+        if (rank == null || rank <= 0 || rank > RERANK_CANDIDATE_LIMIT) {
+            return 0D;
+        }
+        return (double) (RERANK_CANDIDATE_LIMIT - rank + 1) / RERANK_CANDIDATE_LIMIT;
+    }
+
+    private double boundedBm25Score(Double score) {
+        if (score == null || score <= 0D) {
+            return 0D;
+        }
+        return Math.min(score / (1D + score), 1D);
     }
 
     private double contentPathScore(
@@ -590,7 +879,101 @@ public class RagServiceImpl implements RagService {
                 && normalize(contentPath).startsWith(context.contentPathPrefix())) {
             score += 0.20D;
         }
+        if (context.applyMode() == QueryRewriteResult.ContextApplyMode.HARD) {
+            score += 0.05D;
+        }
         return score;
+    }
+
+    private double structureScore(
+            String normalizedQuery,
+            Set<String> queryTerms,
+            String title,
+            String contentPath,
+            String parentContentPath,
+            String sectionType,
+            Integer pathDepth,
+            Integer localContentLength
+    ) {
+        QueryIntentProfile intentProfile = detectQueryIntentProfile(normalizedQuery);
+        if (intentProfile == QueryIntentProfile.NONE) {
+            return 0D;
+        }
+
+        double score = 0D;
+        boolean isLeafQa = "LEAF_QA".equals(sectionType);
+        boolean isLeafContent = "LEAF_CONTENT".equals(sectionType);
+        boolean isParentOverview = "PARENT_OVERVIEW".equals(sectionType);
+
+        if (isLeafQa) {
+            score += 0.08D;
+        } else if (isLeafContent) {
+            score += 0.03D;
+        }
+        if (isParentOverview) {
+            score -= 0.03D;
+        }
+
+        if (StringUtils.hasText(parentContentPath)) {
+            score += overlapRatio(queryTerms, terms(parentContentPath)) * 0.03D;
+        }
+
+        if (StringUtils.hasText(contentPath)) {
+            score += overlapRatio(queryTerms, terms(contentPath)) * 0.02D;
+        }
+
+        if (isParentOverview && (localContentLength == null || localContentLength == 0)) {
+            score -= 0.02D;
+        }
+
+        if (isLeafQa && isGenericLeafTitle(title)) {
+            score += 0.02D;
+        }
+
+        if (intentProfile == QueryIntentProfile.HOW_TO && isLeafQa) {
+            score += 0.03D;
+        }
+        if (intentProfile == QueryIntentProfile.PRINCIPLE && StringUtils.hasText(title) && title.contains("原理")) {
+            score += 0.05D;
+        }
+        if (intentProfile == QueryIntentProfile.DIFFERENCE && StringUtils.hasText(title)
+                && (title.contains("区别") || title.contains("对比"))) {
+            score += 0.05D;
+        }
+        if (intentProfile == QueryIntentProfile.WHY && StringUtils.hasText(title) && title.contains("为什么")) {
+            score += 0.04D;
+        }
+
+        return score;
+    }
+
+    private QueryIntentProfile detectQueryIntentProfile(String normalizedQuery) {
+        if (!StringUtils.hasText(normalizedQuery)) {
+            return QueryIntentProfile.NONE;
+        }
+        if (normalizedQuery.contains("有什么区别") || normalizedQuery.contains("区别") || normalizedQuery.contains("对比")) {
+            return QueryIntentProfile.DIFFERENCE;
+        }
+        if (normalizedQuery.contains("原理")) {
+            return QueryIntentProfile.PRINCIPLE;
+        }
+        if (normalizedQuery.contains("为什么")) {
+            return QueryIntentProfile.WHY;
+        }
+        if (normalizedQuery.contains("如何使用")
+                || normalizedQuery.contains("怎么使用")
+                || normalizedQuery.contains("怎么用")
+                || normalizedQuery.contains("如何用")
+                || normalizedQuery.contains("具体该怎么做")) {
+            return QueryIntentProfile.HOW_TO;
+        }
+        int separatorIndex = normalizedQuery.indexOf(' ');
+        String leadToken = separatorIndex >= 0 ? normalizedQuery.substring(0, separatorIndex) : normalizedQuery;
+        return isGenericLeafTitle(leadToken) ? QueryIntentProfile.GENERIC_LEAF : QueryIntentProfile.NONE;
+    }
+
+    private boolean isGenericLeafTitle(String title) {
+        return StringUtils.hasText(title) && GENERIC_LEAF_TITLES.contains(title.trim());
     }
 
     private boolean isPathAwareQuery(String normalizedQuery) {
@@ -605,7 +988,7 @@ public class RagServiceImpl implements RagService {
             RagRetrievalResult result = item.result();
             RerankScore score = item.score();
             log.info(
-                    "RAG rerank debug: query={}, newRank={}, oldRank={}, chunkId={}, title={}, distance={}, finalScore={}, lexicalScore={}, rankPenalty={}, titleExact={}, titleContains={}, titleOverlap={}, contentContains={}, contentOverlap={}, contentPath={}",
+                    "RAG rerank debug: query={}, newRank={}, oldRank={}, chunkId={}, title={}, distance={}, finalScore={}, lexicalScore={}, rankPenalty={}, titleExact={}, titleContains={}, titleOverlap={}, contentContains={}, contentOverlap={}, titleBm25Signal={}, contentBm25Signal={}, vectorSignal={}, contentPath={}, structure={}",
                     query,
                     i + 1,
                     result.getRank(),
@@ -620,7 +1003,11 @@ public class RagServiceImpl implements RagService {
                     score.titleOverlapScore(),
                     score.contentContainsScore(),
                     score.contentOverlapScore(),
-                    score.contentPathScore()
+                    score.titleBm25SignalScore(),
+                    score.contentBm25SignalScore(),
+                    score.vectorSignalScore(),
+                    score.contentPathScore(),
+                    score.structureScore()
             );
         }
     }
@@ -655,6 +1042,19 @@ public class RagServiceImpl implements RagService {
             return node != null && node.isTextual() ? node.asText() : "";
         } catch (JsonProcessingException e) {
             return "";
+        }
+    }
+
+    private Integer extractMetadataInt(String metadata, String fieldName) {
+        if (!StringUtils.hasText(metadata)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(metadata);
+            JsonNode node = root.get(fieldName);
+            return node != null && node.canConvertToInt() ? node.asInt() : null;
+        } catch (JsonProcessingException e) {
+            return null;
         }
     }
 
@@ -716,9 +1116,12 @@ public class RagServiceImpl implements RagService {
         return RetrievableTitleLexicalizer.normalize(text);
     }
 
-    private RetrievalContext normalizeContext(RagRetrievalContext context) {
+    private RetrievalContext normalizeContext(
+            RagRetrievalContext context,
+            QueryRewriteResult.ContextApplyMode contextApplyMode
+    ) {
         if (context == null || !context.hasContext()) {
-            return RetrievalContext.empty();
+            return RetrievalContext.empty(contextApplyMode == null ? QueryRewriteResult.ContextApplyMode.NONE : contextApplyMode);
         }
         String kbId = StringUtils.hasText(context.getKbId()) ? context.getKbId().trim() : null;
         String sourceType = StringUtils.hasText(context.getSourceType()) ? context.getSourceType().trim() : null;
@@ -732,7 +1135,8 @@ public class RagServiceImpl implements RagService {
                 sourceName,
                 StringUtils.hasText(normalizedSourceName) ? normalizedSourceName : null,
                 contentPath,
-                StringUtils.hasText(contentPathPrefix) ? contentPathPrefix : null
+                StringUtils.hasText(contentPathPrefix) ? contentPathPrefix : null,
+                contextApplyMode == null ? QueryRewriteResult.ContextApplyMode.NONE : contextApplyMode
         );
     }
 
@@ -779,16 +1183,23 @@ public class RagServiceImpl implements RagService {
     ) {
     }
 
+    private record RetrievalChannel(
+            String name,
+            List<RagRetrievalResult> results
+    ) {
+    }
+
     private record RetrievalContext(
             String kbId,
             String sourceType,
             String sourceName,
             String normalizedSourceName,
             String contentPath,
-            String contentPathPrefix
+            String contentPathPrefix,
+            QueryRewriteResult.ContextApplyMode applyMode
     ) {
-        static RetrievalContext empty() {
-            return new RetrievalContext(null, null, null, null, null, null);
+        static RetrievalContext empty(QueryRewriteResult.ContextApplyMode applyMode) {
+            return new RetrievalContext(null, null, null, null, null, null, applyMode);
         }
 
         boolean hasContext() {
@@ -799,6 +1210,20 @@ public class RagServiceImpl implements RagService {
         }
     }
 
+    private enum QueryIntentProfile {
+        NONE,
+        GENERIC_LEAF,
+        DIFFERENCE,
+        PRINCIPLE,
+        WHY,
+        HOW_TO
+    }
+
+    private enum Bm25Channel {
+        TITLE,
+        CONTENT
+    }
+
     private record RerankScore(
             double titleExactScore,
             double titleContainsScore,
@@ -806,10 +1231,34 @@ public class RagServiceImpl implements RagService {
             double contentContainsScore,
             double contentOverlapScore,
             double contentPathScore,
+            double structureScore,
+            double titleBm25SignalScore,
+            double contentBm25SignalScore,
+            double vectorSignalScore,
             double rankPenalty
     ) {
         static RerankScore empty() {
-            return new RerankScore(0D, 0D, 0D, 0D, 0D, 0D, 0D);
+            return new RerankScore(0D, 0D, 0D, 0D, 0D, 0D, 0D, 0D, 0D, 0D, 0D);
+        }
+
+        RerankScore withRetrievalSignals(
+                double titleBm25SignalScore,
+                double contentBm25SignalScore,
+                double vectorSignalScore
+        ) {
+            return new RerankScore(
+                    titleExactScore,
+                    titleContainsScore,
+                    titleOverlapScore,
+                    contentContainsScore,
+                    contentOverlapScore,
+                    contentPathScore,
+                    structureScore,
+                    titleBm25SignalScore,
+                    contentBm25SignalScore,
+                    vectorSignalScore,
+                    rankPenalty
+            );
         }
 
         RerankScore withRankPenalty(double rankPenalty) {
@@ -820,19 +1269,27 @@ public class RagServiceImpl implements RagService {
                     contentContainsScore,
                     contentOverlapScore,
                     contentPathScore,
+                    structureScore,
+                    titleBm25SignalScore,
+                    contentBm25SignalScore,
+                    vectorSignalScore,
                     rankPenalty
             );
         }
 
         double lexicalScore() {
             return Math.min(
-                    titleExactScore + titleContainsScore + titleOverlapScore + contentContainsScore + contentOverlapScore + contentPathScore,
+                    titleExactScore + titleContainsScore + titleOverlapScore + contentContainsScore + contentOverlapScore + contentPathScore + structureScore,
                     0.75D
             );
         }
 
+        double retrievalSignalScore() {
+            return Math.min(titleBm25SignalScore + contentBm25SignalScore + vectorSignalScore, 0.26D);
+        }
+
         double finalScore() {
-            return lexicalScore() - rankPenalty;
+            return lexicalScore() + retrievalSignalScore() - rankPenalty;
         }
     }
 }

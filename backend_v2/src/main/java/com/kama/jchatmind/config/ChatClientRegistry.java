@@ -17,4 +17,8 @@ public class ChatClientRegistry {
     public ChatClient get(String key) {
         return chatClients.get(key);
     }
+
+    public java.util.Collection<ChatClient> getAllClients() {
+        return chatClients.values();
+    }
 }

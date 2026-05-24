@@ -29,5 +29,17 @@ public interface MarkdownParserService {
         private String title;
         private String content;
         private String contentPath;
+        private String parentContentPath;
+        private int headingLevel;
+        private boolean hasChildren;
+        private SectionType sectionType;
+        private int pathDepth;
+        private int localContentLength;
+    }
+
+    enum SectionType {
+        PARENT_OVERVIEW,
+        LEAF_CONTENT,
+        LEAF_QA
     }
 }

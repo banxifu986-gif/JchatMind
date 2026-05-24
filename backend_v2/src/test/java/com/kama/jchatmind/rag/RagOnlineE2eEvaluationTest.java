@@ -123,10 +123,84 @@ class RagOnlineE2eEvaluationTest {
 
     private List<OnlineQueryCase> buildOnlineCases(List<SourceChunk> chunks) {
         List<OnlineQueryCase> cases = new ArrayList<>();
-        addCases(cases, chunks, "path_aware", chunk -> "请解释 " + chunk.parentContentPath() + " > " + chunk.title());
-        addCases(cases, chunks, "source_path", chunk -> "在 " + chunk.sourceName() + " 中，" + chunk.parentContentPath() + " > " + chunk.title() + " 怎么答");
-        addCases(cases, chunks, "title_question", chunk -> chunk.title() + " 面试怎么回答");
+        addCases(cases, chunks, "path_aware", chunk -> chunk.parentContentPath() + " > " + chunk.title());
+        addCases(cases, chunks, "source_path", chunk -> "在 " + chunk.sourceName() + " 里，" + chunk.parentContentPath() + " > " + chunk.title() + " 这部分主要讲什么");
+        addCases(cases, chunks, "title_question", this::buildUserLikeQuestion);
         return cases;
+    }
+
+    private String buildUserLikeQuestion(SourceChunk chunk) {
+        String title = normalize(chunk.title());
+        String focus = buildQuestionFocus(chunk);
+        if (!StringUtils.hasText(focus)) {
+            return null;
+        }
+        if (!StringUtils.hasText(title)) {
+            return null;
+        }
+        if (title.contains("区别") || title.contains("对比")) {
+            String contrastTarget = buildContrastTarget(chunk);
+            return contrastTarget == null
+                    ? focus + "有什么区别"
+                    : focus + "和" + contrastTarget + "有什么区别";
+        }
+        if (title.contains("原理")) {
+            return focus + "的原理是什么";
+        }
+        if (title.contains("为什么")) {
+            return "为什么" + focus + "会这样设计";
+        }
+        if (title.contains("优缺点")) {
+            return focus + "有什么优缺点";
+        }
+        if (title.contains("方案")) {
+            return focus + "适合什么场景";
+        }
+        if (title.contains("如何") || title.contains("怎么") || title.contains("流程")
+                || isGenericQaLeafTitle(title)) {
+            return focus + "如何使用";
+        }
+        if (title.contains("总结")) {
+            return focus + "主要讲了什么";
+        }
+        return focus + "是什么";
+    }
+
+    private String buildContrastTarget(SourceChunk chunk) {
+        String parentContentPath = normalize(chunk.parentContentPath());
+        if (!StringUtils.hasText(parentContentPath)) {
+            return null;
+        }
+        int separatorIndex = parentContentPath.lastIndexOf(" > ");
+        if (separatorIndex < 0) {
+            return null;
+        }
+        String siblingOrParent = parentContentPath.substring(separatorIndex + 3).trim();
+        return StringUtils.hasText(siblingOrParent) && !siblingOrParent.equals(normalize(chunk.title()))
+                ? siblingOrParent
+                : null;
+    }
+
+    private String buildQuestionFocus(SourceChunk chunk) {
+        String title = normalize(chunk.title());
+        String parentContentPath = normalize(chunk.parentContentPath());
+        if (isGenericQaLeafTitle(title) && StringUtils.hasText(parentContentPath)) {
+            return lastPathSegment(parentContentPath);
+        }
+        if (StringUtils.hasText(title)) {
+            return title;
+        }
+        if (StringUtils.hasText(parentContentPath)) {
+            return lastPathSegment(parentContentPath);
+        }
+        return null;
+    }
+
+    private boolean isGenericQaLeafTitle(String title) {
+        return "回答".equals(title)
+                || "原理".equals(title)
+                || "总结".equals(title)
+                || "方案".equals(title);
     }
 
     private void addCases(
@@ -227,6 +301,27 @@ class RagOnlineE2eEvaluationTest {
             return contentPath;
         }
         return contentPath.substring(0, separatorIndex);
+    }
+
+    private String lastPathSegment(String contentPath) {
+        if (!StringUtils.hasText(contentPath)) {
+            return null;
+        }
+        int separatorIndex = contentPath.lastIndexOf(" > ");
+        if (separatorIndex < 0) {
+            return contentPath;
+        }
+        return contentPath.substring(separatorIndex + 3).trim();
+    }
+
+    private String normalize(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        return text.replace("\r", "")
+                .replace("\n", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private String extractMetadataText(String metadata, String fieldName) {
