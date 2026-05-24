@@ -17,4 +17,12 @@ public interface UserMemoryMapper {
     List<UserMemory> selectByUserId(String userId);
 
     int deleteById(@Param("id") String id);
+
+    int updateEmbedding(@Param("id") String id, @Param("embedding") float[] embedding);
+
+    List<UserMemory> similaritySearch(
+            @Param("userId") String userId,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("limit") int limit
+    );
 }

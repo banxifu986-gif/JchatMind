@@ -12,4 +12,6 @@ public class UserMemoryCandidateVO {
     private String memoryType;
     private String content;
     private String evidence;
+    private String importance;
+    private String evidenceMessageId;
 }

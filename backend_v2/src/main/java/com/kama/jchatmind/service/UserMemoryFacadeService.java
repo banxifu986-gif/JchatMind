@@ -18,4 +18,6 @@ public interface UserMemoryFacadeService {
     List<UserMemory> getConfirmedMemories(String userId);
 
     void extractMemoryCandidates(String userId, String sessionId);
+
+    List<UserMemory> recallRelevantMemories(String userId, String query, int topK);
 }

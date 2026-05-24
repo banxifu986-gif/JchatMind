@@ -10,6 +10,10 @@
         <result property="sessionId" column="session_id" jdbcType="VARCHAR"/>
         <result property="memoryType" column="memory_type" jdbcType="VARCHAR"/>
         <result property="content" column="content" jdbcType="VARCHAR"/>
+        <result property="importance" column="importance" jdbcType="VARCHAR"/>
+        <result property="evidenceMessageId" column="evidence_message_id" jdbcType="VARCHAR"/>
+        <result property="evidenceText" column="evidence_text" jdbcType="VARCHAR"/>
+        <result property="embedding" column="embedding" jdbcType="OTHER"/>
         <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
         <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
     </resultMap>
@@ -22,6 +26,10 @@
             session_id,
             memory_type,
             content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            embedding,
             created_at,
             updated_at
         )
@@ -34,10 +42,24 @@
             </choose>,
             #{memoryType},
             #{content},
+            #{importance},
+            <choose>
+                <when test="evidenceMessageId != null">CAST(#{evidenceMessageId} AS uuid)</when>
+                <otherwise>null</otherwise>
+            </choose>,
+            #{evidenceText},
+            #{embedding}::vector,
             #{createdAt},
             #{updatedAt}
         )
     </insert>
+
+    <update id="updateEmbedding">
+        UPDATE user_memory
+        SET embedding = #{embedding}::vector,
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+    </update>
 
     <select id="selectByIdAndUserId" resultMap="BaseResultMap">
         SELECT
@@ -46,6 +68,10 @@
             session_id,
             memory_type,
             content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            embedding,
             created_at,
             updated_at
         FROM user_memory
@@ -60,6 +86,10 @@
             session_id,
             memory_type,
             content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            embedding,
             created_at,
             updated_at
         FROM user_memory
@@ -74,6 +104,10 @@
             session_id,
             memory_type,
             content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            embedding,
             created_at,
             updated_at
         FROM user_memory
@@ -81,6 +115,27 @@
           AND content = #{content}
         ORDER BY updated_at DESC
         LIMIT 1
+    </select>
+
+    <select id="similaritySearch" resultMap="BaseResultMap">
+        SELECT
+            id,
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            embedding,
+            created_at,
+            updated_at,
+            embedding &lt;-&gt; #{vectorLiteral}::vector AS distance
+        FROM user_memory
+        WHERE user_id = #{userId}
+          AND embedding IS NOT NULL
+        ORDER BY embedding &lt;-&gt; #{vectorLiteral}::vector
+        LIMIT #{limit}
     </select>
 
     <delete id="deleteById">

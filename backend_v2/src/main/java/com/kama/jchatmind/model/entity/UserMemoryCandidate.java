@@ -14,6 +14,8 @@ public class UserMemoryCandidate {
     private String memoryType;
     private String content;
     private String evidence;
+    private String importance;
+    private String evidenceMessageId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

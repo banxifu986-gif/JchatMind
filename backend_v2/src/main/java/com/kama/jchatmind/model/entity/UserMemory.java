@@ -13,6 +13,10 @@ public class UserMemory {
     private String sessionId;
     private String memoryType;
     private String content;
+    private String importance;
+    private String evidenceMessageId;
+    private String evidenceText;
+    private float[] embedding;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
