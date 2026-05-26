@@ -237,9 +237,26 @@ public class JChatMind {
                 现在你是负责当前回合决策的 Agent。
                 请根据当前对话上下文决定下一步动作。
 
+                【工具选择规则】
+                你需要根据当前用户问题的性质独立判断是否需要调用工具。用户此前对知识库或工具的随意评价不应影响你的工具选择——始终以当前问题的实际需求为准。
+
+                1. 需要调用 KnowledgeTool 的场景：
+                   - 用户询问的事实、规范、文档类问题，可能存在于知识库中
+                   - 用户要求查找、检索、搜索特定信息
+                   - 问题涉及专业领域知识，需要参考外部资料才能准确回答
+                   - 你无法仅凭通用知识给出可靠答案的事实性问题
+
+                2. 不需要调用 KnowledgeTool 的场景：
+                   - 纯闲聊、打招呼（如"你好"、"今天过得怎么样"）
+                   - 用户表达主观感受、意见或偏好，不涉及事实查询
+                   - 通用常识、编程语法等无需检索也能准确回答的问题
+                   - 用户只是对上一轮结果做出反馈或追问，无需额外检索
+
+                3. 其他工具：
+                   - 任务完成或无需进一步操作时，调用 terminate 结束当前回合
+
                 【额外信息】
                 - 你当前可访问的知识库：%s
-                - 如果上下文不足，优先从知识库检索
                 - 调用 KnowledgeTool 时，可以显式传入 kbIds 指定搜索范围；如果不传 kbIds，默认搜索当前 Agent 全部可访问知识库
                 """.formatted(formatKbSummary()));
 
@@ -276,6 +293,10 @@ public class JChatMind {
         if (keepFrom <= 1) {
             return;
         }
+        keepFrom = adjustKeepFromForToolPairs(allMessages, keepFrom);
+        if (keepFrom <= 1) {
+            return;
+        }
 
         try {
             List<Message> toCompress = new ArrayList<>(allMessages.subList(1, keepFrom));
@@ -293,6 +314,23 @@ public class JChatMind {
         } catch (Exception e) {
             log.warn("Failed to compress memory", e);
         }
+    }
+
+    private int adjustKeepFromForToolPairs(List<Message> messages, int keepFrom) {
+        int adjusted = keepFrom;
+        for (int i = keepFrom; i < messages.size(); i++) {
+            if (messages.get(i) instanceof ToolResponseMessage) {
+                for (int j = i - 1; j >= 1; j--) {
+                    if (messages.get(j) instanceof AssistantMessage am
+                            && am.getToolCalls() != null
+                            && !am.getToolCalls().isEmpty()) {
+                        adjusted = Math.min(adjusted, j);
+                        break;
+                    }
+                }
+            }
+        }
+        return adjusted;
     }
 
     private String messageText(Message msg) {
