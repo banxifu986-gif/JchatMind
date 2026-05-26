@@ -26,6 +26,19 @@
 - 除非逻辑确实不明显，不要新增注释；修改现有代码时保持原有注释密度
 - 不要未经允许新增兼容性分支、兜底逻辑或双写逻辑
 
+## 文档导航
+
+`docs/` 目录结构与查阅指引：
+
+- **`docs/README.md`** — 文档总索引，先读这个
+- **`docs/reference/`** — 稳定参考资料：简历表述版本、Agent 面试八股、RAG 收口规范
+- **`docs/plans/active/`** — 规划中的方案：MCP 双向集成、系统路线图、RAG 优化路线图、用户记忆系统
+- **`docs/plans/done/`** — 已完成的方案：Agent Harness、Query Rewrite、多路召回、工具调用改进
+- **`docs/records/`** — 重大 bug 修复与阶段性收口记录，按 rag/user-memory/startup/sse 分目录
+- **`docs/测试清单.md`** — 后端测试覆盖清单
+
+涉及方案设计或历史决策时，优先查阅对应 `docs/plans/` 和 `docs/records/` 目录。
+
 ### 前端风格
 - 使用 TypeScript + React 函数组件
 - import 路径显式，现有代码普遍保留 `.ts`、`.tsx` 扩展名
