@@ -1,5 +1,6 @@
 package com.kama.jchatmind.service.impl;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -84,8 +85,9 @@ public class RagServiceImpl implements RagService {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class EmbeddingResponse {
-        private float[] embedding;
+        private List<float[]> embeddings;
     }
 
     private Map<String, float[]> createEmbeddingCache(int maxEntries) {
@@ -107,19 +109,22 @@ public class RagServiceImpl implements RagService {
             return embeddingCache.get(cacheKey).clone();
         }
 
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", embeddingModel);
+        body.put("input", text);
+        body.put("keep_alive", -1);
+
         EmbeddingResponse resp = webClient.post()
-                .uri("/api/embeddings")
-                .bodyValue(Map.of(
-                        "model", embeddingModel,
-                        "prompt", text
-                ))
+                .uri("/api/embed")
+                .bodyValue(body)
                 .retrieve()
                 .bodyToMono(EmbeddingResponse.class)
                 .block();
         Assert.notNull(resp, "Embedding response cannot be null");
-        Assert.notNull(resp.getEmbedding(), "Embedding vector cannot be null");
+        Assert.isTrue(!CollectionUtils.isEmpty(resp.getEmbeddings()), "Embedding response cannot be empty");
+        Assert.notNull(resp.getEmbeddings().get(0), "Embedding vector cannot be null");
 
-        float[] embedding = resp.getEmbedding();
+        float[] embedding = resp.getEmbeddings().get(0);
         if (!CollectionUtils.isEmpty(embeddingCache)) {
             embeddingCache.put(cacheKey, embedding.clone());
         }

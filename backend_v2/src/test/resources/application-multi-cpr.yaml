@@ -1,0 +1,16 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekAutoConfiguration
+      - org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiAutoConfiguration
+
+ollama:
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+  embedding-model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+
+multi-cpr:
+  data-dir: ${MULTI_CPR_DATA_DIR:D:/coding/Java/project/JchatMind/RAGDataTest/Multi-CPR-main/data}
+  domain: ${MULTI_CPR_DOMAIN:ecom}
+  corpus-sample-size: ${MULTI_CPR_CORPUS_SAMPLE_SIZE:20000}
+  eval-limit: ${MULTI_CPR_EVAL_LIMIT:10}
+  rerun-import: ${MULTI_CPR_RERUN_IMPORT:false}

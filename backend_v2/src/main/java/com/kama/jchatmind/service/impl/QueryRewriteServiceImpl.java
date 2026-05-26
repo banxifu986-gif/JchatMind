@@ -59,10 +59,12 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final QueryRewriteLlmClient queryRewriteLlmClient;
+    private final ObjectProvider<ChatClientRegistry> chatClientRegistryProvider;
     private final boolean llmRewriteEnabled;
+    private final String llmRewriteModel;
 
     public QueryRewriteServiceImpl(ChunkBgeM3Mapper chunkBgeM3Mapper) {
-        this(chunkBgeM3Mapper, null, false);
+        this(chunkBgeM3Mapper, null, null, false, null);
     }
 
     @Autowired
@@ -74,19 +76,25 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     ) {
         this(
                 chunkBgeM3Mapper,
-                createLlmClient(chatClientRegistryProvider.getIfAvailable(), llmRewriteModel),
-                llmRewriteEnabled
+                null,
+                chatClientRegistryProvider,
+                llmRewriteEnabled,
+                llmRewriteModel
         );
     }
 
     QueryRewriteServiceImpl(
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             QueryRewriteLlmClient queryRewriteLlmClient,
-            boolean llmRewriteEnabled
+            ObjectProvider<ChatClientRegistry> chatClientRegistryProvider,
+            boolean llmRewriteEnabled,
+            String llmRewriteModel
     ) {
         this.chunkBgeM3Mapper = chunkBgeM3Mapper;
         this.queryRewriteLlmClient = queryRewriteLlmClient;
+        this.chatClientRegistryProvider = chatClientRegistryProvider;
         this.llmRewriteEnabled = llmRewriteEnabled;
+        this.llmRewriteModel = llmRewriteModel;
     }
 
     @Override
@@ -217,7 +225,11 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             return null;
         }
         try {
-            String rewritten = queryRewriteLlmClient.rewrite(sanitizedQuery, context, intent);
+            QueryRewriteLlmClient llmClient = resolveLlmClient();
+            if (llmClient == null) {
+                return null;
+            }
+            String rewritten = llmClient.rewrite(sanitizedQuery, context, intent);
             String sanitizedRewritten = sanitizeLlmRewrittenQuery(rewritten);
             if (!StringUtils.hasText(sanitizedRewritten)) {
                 return null;
@@ -239,7 +251,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             QueryRewriteResult.ContextApplyMode contextApplyMode,
             boolean topicSwitchSignal
     ) {
-        if (!llmRewriteEnabled || queryRewriteLlmClient == null || !StringUtils.hasText(sanitizedQuery)) {
+        if (!llmRewriteEnabled || !StringUtils.hasText(sanitizedQuery)) {
             return false;
         }
         if (context == null || !context.hasContext() || topicSwitchSignal) {
@@ -255,6 +267,16 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         String normalizedQuery = normalize(sanitizedQuery);
         return !isPathAwareQuery(normalizedQuery)
                 && terms(normalizedQuery).size() <= LLM_REWRITE_MAX_TERM_COUNT;
+    }
+
+    private QueryRewriteLlmClient resolveLlmClient() {
+        if (queryRewriteLlmClient != null) {
+            return queryRewriteLlmClient;
+        }
+        if (chatClientRegistryProvider == null || !StringUtils.hasText(llmRewriteModel)) {
+            return null;
+        }
+        return createLlmClient(chatClientRegistryProvider.getIfAvailable(), llmRewriteModel);
     }
 
     private RagRetrievalContext adjustContextForRewrite(

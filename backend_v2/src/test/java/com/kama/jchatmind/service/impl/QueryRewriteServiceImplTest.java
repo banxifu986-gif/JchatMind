@@ -1,12 +1,15 @@
 package com.kama.jchatmind.service.impl;
 
+import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.dto.QueryRewriteResult;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,6 +40,46 @@ class QueryRewriteServiceImplTest {
         assertEquals(QueryRewriteResult.ContextApplyMode.HARD, result.getContextApplyMode());
         assertEquals(List.of("resume.md interview > answer answer", "answer"), result.getRetrievalQueries());
         assertFalse(result.isTitleQuery());
+    }
+
+    @Test
+    void shouldNotResolveChatClientRegistryDuringConstruction() {
+        AtomicInteger resolutionCount = new AtomicInteger();
+        ObjectProvider<ChatClientRegistry> chatClientRegistryProvider = new CountingObjectProvider<>(resolutionCount, null);
+
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of()),
+                chatClientRegistryProvider,
+                false,
+                "deepseek-chat"
+        );
+
+        assertNotNull(service);
+        assertEquals(0, resolutionCount.get());
+    }
+
+    @Test
+    void shouldNotResolveChatClientWhenLlmRewriteDisabled() {
+        AtomicInteger resolutionCount = new AtomicInteger();
+        ObjectProvider<ChatClientRegistry> chatClientRegistryProvider = new CountingObjectProvider<>(resolutionCount, null);
+
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of()),
+                chatClientRegistryProvider,
+                false,
+                "deepseek-chat"
+        );
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > answer")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "answer", context);
+
+        assertEquals(List.of("resume.md interview > answer answer", "answer"), result.getRetrievalQueries());
+        assertEquals(0, resolutionCount.get());
     }
 
     @Test
@@ -190,25 +233,27 @@ class QueryRewriteServiceImplTest {
     void shouldAppendLlmRewriteForHardFollowUpWhenEnabled() {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
                 new StubChunkBgeM3Mapper(List.of()),
-                (query, context, intent) -> "resume.md interview strengths 这部分该怎么展开介绍自己的优势",
-                true
+                (query, context, intent) -> "resume.md interview answer detail",
+                null,
+                true,
+                "deepseek-chat"
         );
 
         RagRetrievalContext context = RagRetrievalContext.builder()
                 .kbId("kb-1")
                 .sourceName("resume.md")
-                .contentPath("interview > strengths")
+                .contentPath("interview > answer")
                 .build();
 
-        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "这部分该怎么展开", context);
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "answer", context);
 
         assertEquals(QueryRewriteResult.Intent.FOLLOW_UP, result.getIntent());
         assertEquals(QueryRewriteResult.ContextApplyMode.HARD, result.getContextApplyMode());
         assertEquals(
                 List.of(
-                        "resume.md interview strengths 这部分该怎么展开介绍自己的优势",
-                        "resume.md interview > strengths 这部分该怎么展开",
-                        "这部分该怎么展开"
+                        "resume.md interview answer detail",
+                        "resume.md interview > answer answer",
+                        "answer"
                 ),
                 result.getRetrievalQueries()
         );
@@ -221,19 +266,21 @@ class QueryRewriteServiceImplTest {
                 (query, context, intent) -> {
                     throw new IllegalStateException("boom");
                 },
-                true
+                null,
+                true,
+                "deepseek-chat"
         );
 
         RagRetrievalContext context = RagRetrievalContext.builder()
                 .kbId("kb-1")
                 .sourceName("resume.md")
-                .contentPath("interview > strengths")
+                .contentPath("interview > answer")
                 .build();
 
-        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "这部分该怎么展开", context);
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "answer", context);
 
         assertEquals(
-                List.of("resume.md interview > strengths 这部分该怎么展开", "这部分该怎么展开"),
+                List.of("resume.md interview > answer answer", "answer"),
                 result.getRetrievalQueries()
         );
     }
@@ -243,7 +290,9 @@ class QueryRewriteServiceImplTest {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
                 new StubChunkBgeM3Mapper(List.of()),
                 (query, context, intent) -> "ignored rewrite",
-                true
+                null,
+                true,
+                "deepseek-chat"
         );
 
         RagRetrievalContext context = RagRetrievalContext.builder()
@@ -366,6 +415,28 @@ class QueryRewriteServiceImplTest {
         @Override
         public List<com.kama.jchatmind.model.entity.ChunkBgeM3> selectByDocId(String docId) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class CountingObjectProvider<T> implements ObjectProvider<T> {
+        private final AtomicInteger resolutionCount;
+        private final T value;
+
+        private CountingObjectProvider(AtomicInteger resolutionCount, T value) {
+            this.resolutionCount = resolutionCount;
+            this.value = value;
+        }
+
+        @Override
+        public T getObject(Object... args) {
+            resolutionCount.incrementAndGet();
+            return value;
+        }
+
+        @Override
+        public T getIfAvailable() {
+            resolutionCount.incrementAndGet();
+            return value;
         }
     }
 }

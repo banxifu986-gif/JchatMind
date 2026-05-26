@@ -128,7 +128,7 @@
         ]]>
         <include refid="KbIdsWhereClause"/>
         <![CDATA[
-        ORDER BY embedding <-> #{vectorLiteral}::vector
+        ORDER BY embedding <=> #{vectorLiteral}::vector
         LIMIT #{limit}
         ]]>
     </select>
@@ -140,14 +140,14 @@
                doc_id,
                content,
                metadata::text AS metadata,
-               embedding <-> #{vectorLiteral}::vector AS distance,
-               ROW_NUMBER() OVER (ORDER BY embedding <-> #{vectorLiteral}::vector) AS rank
+               embedding <=> #{vectorLiteral}::vector AS distance,
+               ROW_NUMBER() OVER (ORDER BY embedding <=> #{vectorLiteral}::vector) AS rank
         FROM chunk_bge_m3
         WHERE 
         ]]>
         <include refid="KbIdsWhereClause"/>
         <![CDATA[
-        ORDER BY embedding <-> #{vectorLiteral}::vector
+        ORDER BY embedding <=> #{vectorLiteral}::vector
         LIMIT #{limit}
         ]]>
     </select>
@@ -158,8 +158,8 @@
                doc_id,
                content,
                metadata::text AS metadata,
-               embedding &lt;-> #{vectorLiteral}::vector AS distance,
-               ROW_NUMBER() OVER (ORDER BY embedding &lt;-> #{vectorLiteral}::vector) AS rank
+               embedding &lt;=&gt; #{vectorLiteral}::vector AS distance,
+               ROW_NUMBER() OVER (ORDER BY embedding &lt;=&gt; #{vectorLiteral}::vector) AS rank
         FROM chunk_bge_m3
         WHERE
         <include refid="KbIdsWhereClause"/>
@@ -172,7 +172,7 @@
         <if test="contentPathPrefix != null and contentPathPrefix != ''">
           AND lower(regexp_replace(trim(COALESCE(metadata->>'contentPath', '')), '\s+', ' ', 'g')) LIKE CONCAT(#{contentPathPrefix}, '%')
         </if>
-        ORDER BY embedding &lt;-> #{vectorLiteral}::vector
+        ORDER BY embedding &lt;=&gt; #{vectorLiteral}::vector
         LIMIT #{limit}
     </select>
 
@@ -183,15 +183,15 @@
                doc_id,
                content,
                metadata::text AS metadata,
-               embedding <-> #{vectorLiteral}::vector AS distance,
-               ROW_NUMBER() OVER (ORDER BY embedding <-> #{vectorLiteral}::vector, created_at ASC, id ASC) AS rank
+               embedding <=> #{vectorLiteral}::vector AS distance,
+               ROW_NUMBER() OVER (ORDER BY embedding <=> #{vectorLiteral}::vector, created_at ASC, id ASC) AS rank
         FROM chunk_bge_m3
         WHERE
           ]]>
         <include refid="KbIdsWhereClause"/>
         <![CDATA[
           AND lower(regexp_replace(trim(COALESCE(metadata->>'retrievableTitle', metadata->>'title')), '\s+', ' ', 'g')) = #{normalizedTitle}
-        ORDER BY embedding <-> #{vectorLiteral}::vector, created_at ASC, id ASC
+        ORDER BY embedding <=> #{vectorLiteral}::vector, created_at ASC, id ASC
         LIMIT #{limit}
         ]]>
     </select>
@@ -202,8 +202,8 @@
                doc_id,
                content,
                metadata::text AS metadata,
-               embedding &lt;-> #{vectorLiteral}::vector AS distance,
-               ROW_NUMBER() OVER (ORDER BY embedding &lt;-> #{vectorLiteral}::vector, created_at ASC, id ASC) AS rank
+               embedding &lt;=&gt; #{vectorLiteral}::vector AS distance,
+               ROW_NUMBER() OVER (ORDER BY embedding &lt;=&gt; #{vectorLiteral}::vector, created_at ASC, id ASC) AS rank
         FROM chunk_bge_m3
         WHERE
         <include refid="KbIdsWhereClause"/>
@@ -217,7 +217,7 @@
         <if test="contentPathPrefix != null and contentPathPrefix != ''">
           AND lower(regexp_replace(trim(COALESCE(metadata->>'contentPath', '')), '\s+', ' ', 'g')) LIKE CONCAT(#{contentPathPrefix}, '%')
         </if>
-        ORDER BY embedding &lt;-> #{vectorLiteral}::vector, created_at ASC, id ASC
+        ORDER BY embedding &lt;=&gt; #{vectorLiteral}::vector, created_at ASC, id ASC
         LIMIT #{limit}
     </select>
 

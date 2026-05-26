@@ -130,11 +130,11 @@
             embedding,
             created_at,
             updated_at,
-            embedding &lt;-&gt; #{vectorLiteral}::vector AS distance
+            embedding &lt;=&gt; #{vectorLiteral}::vector AS distance
         FROM user_memory
         WHERE user_id = #{userId}
           AND embedding IS NOT NULL
-        ORDER BY embedding &lt;-&gt; #{vectorLiteral}::vector
+        ORDER BY embedding &lt;=&gt; #{vectorLiteral}::vector
         LIMIT #{limit}
     </select>
 
