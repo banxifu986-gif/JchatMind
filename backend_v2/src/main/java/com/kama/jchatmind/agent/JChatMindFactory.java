@@ -29,6 +29,7 @@ import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -50,7 +51,7 @@ public class JChatMindFactory {
     private final ChatMessageFacadeService chatMessageFacadeService;
     private final ChatMessageConverter chatMessageConverter;
     private final UserMemoryFacadeService userMemoryFacadeService;
-    private final List<ToolCallbackProvider> toolCallbackProviders;
+    private final ToolCallbackProvider externalToolCallbackProvider;
     private final HarnessRunner harnessRunner;
     private final HarnessInterceptorChain harnessInterceptorChain;
 
@@ -67,7 +68,8 @@ public class JChatMindFactory {
             ChatMessageFacadeService chatMessageFacadeService,
             ChatMessageConverter chatMessageConverter,
             UserMemoryFacadeService userMemoryFacadeService,
-            List<ToolCallbackProvider> toolCallbackProviders,
+            @Qualifier("externalToolCallbackProvider")
+            ToolCallbackProvider externalToolCallbackProvider,
             HarnessRunner harnessRunner,
             HarnessInterceptorChain harnessInterceptorChain
     ) {
@@ -81,7 +83,7 @@ public class JChatMindFactory {
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.chatMessageConverter = chatMessageConverter;
         this.userMemoryFacadeService = userMemoryFacadeService;
-        this.toolCallbackProviders = toolCallbackProviders;
+        this.externalToolCallbackProvider = externalToolCallbackProvider;
         this.harnessRunner = harnessRunner;
         this.harnessInterceptorChain = harnessInterceptorChain;
     }
@@ -141,23 +143,28 @@ public class JChatMindFactory {
     }
 
     private List<Message> loadLongTermMemory(String userId, String query) {
-        List<UserMemory> memories;
-        int topK = 5;
-        if (StringUtils.hasText(query)) {
-            memories = userMemoryFacadeService.recallRelevantMemories(userId, query, topK);
-        } else {
-            memories = userMemoryFacadeService.getConfirmedMemories(userId).stream()
-                    .limit(topK)
-                    .toList();
-        }
-        if (memories.isEmpty()) {
-            return Collections.emptyList();
-        }
+        try {
+            List<UserMemory> memories;
+            int topK = 5;
+            if (StringUtils.hasText(query)) {
+                memories = userMemoryFacadeService.recallRelevantMemories(userId, query, topK);
+            } else {
+                memories = userMemoryFacadeService.getConfirmedMemories(userId).stream()
+                        .limit(topK)
+                        .toList();
+            }
+            if (memories.isEmpty()) {
+                return Collections.emptyList();
+            }
 
         String content = memories.stream()
                 .map(memory -> "- [" + memory.getMemoryType() + "] " + memory.getContent())
                 .collect(Collectors.joining("\n"));
         return List.of(new SystemMessage("以下是用户相关的长期记忆，请在后续回答中遵守和利用：\n" + content));
+        } catch (Exception e) {
+            log.warn("Failed to load long-term memory for user {}, continuing without it: {}", userId, e.getMessage());
+            return List.of();
+        }
     }
 
     private AgentDTO toAgentConfig(Agent agent) {
@@ -248,11 +255,9 @@ public class JChatMindFactory {
                 .map(tc -> tc.getToolDefinition().name())
                 .collect(Collectors.toSet());
         List<ToolCallback> external = new ArrayList<>();
-        for (ToolCallbackProvider provider : toolCallbackProviders) {
-            for (ToolCallback tc : provider.getToolCallbacks()) {
-                if (!localNames.contains(tc.getToolDefinition().name())) {
-                    external.add(wrapToolCallback(tc));
-                }
+        for (ToolCallback tc : externalToolCallbackProvider.getToolCallbacks()) {
+            if (!localNames.contains(tc.getToolDefinition().name())) {
+                external.add(wrapToolCallback(tc));
             }
         }
         return external;

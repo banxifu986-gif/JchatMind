@@ -22,6 +22,7 @@ public class McpServerConfig {
 
     @Bean
     @Primary
+    @org.springframework.beans.factory.annotation.Qualifier("mcpServerToolCallbackProvider")
     ToolCallbackProvider mcpToolCallbackProvider(
             McpKnowledgeTool mcpKnowledgeTool,
             EmailTools emailTools,

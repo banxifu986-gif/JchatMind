@@ -40,15 +40,16 @@ spring:
         version: 1.0.0
         type: SYNC
       client:
-        connections:
-          notion:
-            type: stdio
-            command: npx
-            args:
-              - "-y"
-              - "@notionhq/notion-mcp-server"
-            env:
-              NOTION_API_KEY: ${NOTION_API_KEY:}
+        initialized: false
+        stdio:
+          connections:
+            notion:
+              command: npx.cmd
+              args:
+                - "-y"
+                - "@notionhq/notion-mcp-server"
+              env:
+                NOTION_TOKEN: ${NOTION_API_KEY:}
 mybatis:
   type-aliases-package: com.kama.jchatmind.model.entity
   mapper-locations: classpath:mapper/*.xml
