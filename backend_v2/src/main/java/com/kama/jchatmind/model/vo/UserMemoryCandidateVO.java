@@ -14,4 +14,5 @@ public class UserMemoryCandidateVO {
     private String evidence;
     private String importance;
     private String evidenceMessageId;
+    private String status;
 }

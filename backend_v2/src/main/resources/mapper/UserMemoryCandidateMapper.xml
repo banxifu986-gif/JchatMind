@@ -13,6 +13,7 @@
         <result property="evidence" column="evidence" jdbcType="VARCHAR"/>
         <result property="importance" column="importance" jdbcType="VARCHAR"/>
         <result property="evidenceMessageId" column="evidence_message_id" jdbcType="VARCHAR"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
         <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
         <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
     </resultMap>
@@ -28,6 +29,7 @@
             evidence,
             importance,
             evidence_message_id,
+            status,
             created_at,
             updated_at
         )
@@ -43,6 +45,7 @@
                 <when test="evidenceMessageId != null">CAST(#{evidenceMessageId} AS uuid)</when>
                 <otherwise>null</otherwise>
             </choose>,
+            #{status},
             #{createdAt},
             #{updatedAt}
         )
@@ -58,6 +61,7 @@
             evidence,
             importance,
             evidence_message_id,
+            status,
             created_at,
             updated_at
         FROM user_memory_candidate
@@ -75,6 +79,7 @@
             evidence,
             importance,
             evidence_message_id,
+            status,
             created_at,
             updated_at
         FROM user_memory_candidate
@@ -92,6 +97,7 @@
             evidence,
             importance,
             evidence_message_id,
+            status,
             created_at,
             updated_at
         FROM user_memory_candidate
@@ -100,6 +106,13 @@
         ORDER BY updated_at DESC
         LIMIT 1
     </select>
+
+    <update id="updateStatusById">
+        UPDATE user_memory_candidate
+        SET status = #{status},
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+    </update>
 
     <delete id="deleteById">
         DELETE FROM user_memory_candidate

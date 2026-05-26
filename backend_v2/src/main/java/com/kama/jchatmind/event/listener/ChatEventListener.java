@@ -5,12 +5,14 @@ import com.kama.jchatmind.agent.JChatMindFactory;
 import com.kama.jchatmind.event.ChatEvent;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 @Component
 @AllArgsConstructor
+@Slf4j
 public class ChatEventListener {
 
     private final JChatMindFactory jChatMindFactory;
@@ -27,7 +29,11 @@ public class ChatEventListener {
             );
             jChatMind.run();
         } finally {
-            userMemoryFacadeService.extractMemoryCandidates(event.getUserId(), event.getSessionId());
+            try {
+                userMemoryFacadeService.extractMemoryCandidates(event.getUserId(), event.getSessionId());
+            } catch (Exception e) {
+                log.warn("Failed to extract memory candidates for session {}", event.getSessionId(), e);
+            }
         }
     }
 }

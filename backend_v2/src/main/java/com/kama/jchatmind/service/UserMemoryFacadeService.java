@@ -11,8 +11,6 @@ public interface UserMemoryFacadeService {
 
     GetUserMemoryCandidatesResponse getUserMemoryCandidates(String userId);
 
-    void confirmCandidate(String userId, String candidateId);
-
     void deleteMemory(String userId, String memoryId);
 
     List<UserMemory> getConfirmedMemories(String userId);
