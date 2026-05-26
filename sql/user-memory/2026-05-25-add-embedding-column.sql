@@ -1,0 +1,8 @@
+BEGIN;
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+ALTER TABLE IF EXISTS user_memory
+    ADD COLUMN IF NOT EXISTS embedding vector;
+
+COMMIT;
