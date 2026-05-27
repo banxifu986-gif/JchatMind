@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.UserMapper">
+
+    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.User">
+        <id property="userId" column="user_id" jdbcType="BIGINT"/>
+        <result property="account" column="account" jdbcType="VARCHAR"/>
+        <result property="username" column="username" jdbcType="VARCHAR"/>
+        <result property="password" column="password" jdbcType="VARCHAR"/>
+        <result property="gender" column="gender" jdbcType="SMALLINT"/>
+        <result property="birthday" column="birthday" jdbcType="DATE"/>
+        <result property="avatarUrl" column="avatar_url" jdbcType="VARCHAR"/>
+        <result property="email" column="email" jdbcType="VARCHAR"/>
+        <result property="school" column="school" jdbcType="VARCHAR"/>
+        <result property="signature" column="signature" jdbcType="VARCHAR"/>
+        <result property="isBanned" column="is_banned" jdbcType="SMALLINT"/>
+        <result property="isAdmin" column="is_admin" jdbcType="SMALLINT"/>
+        <result property="lastLoginAt" column="last_login_at" jdbcType="TIMESTAMP"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        user_id,account,username,password,gender,birthday,
+        avatar_url,email,school,signature,
+        is_banned,is_admin,last_login_at,created_at,updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.User"
+            keyColumn="user_id" keyProperty="userId" useGeneratedKeys="true">
+        INSERT INTO jchatmind_user
+        (
+            account,
+            username,
+            password,
+            gender,
+            birthday,
+            avatar_url,
+            email,
+            school,
+            signature,
+            is_banned,
+            is_admin,
+            last_login_at,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            #{account},
+            #{username},
+            #{password},
+            #{gender},
+            #{birthday},
+            #{avatarUrl},
+            #{email},
+            #{school},
+            #{signature},
+            #{isBanned},
+            #{isAdmin},
+            #{lastLoginAt},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <select id="findById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM jchatmind_user
+        WHERE user_id = #{userId}
+    </select>
+
+    <select id="findByAccount" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM jchatmind_user
+        WHERE account = #{account}
+    </select>
+
+    <select id="findByEmail" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM jchatmind_user
+        WHERE email = #{email}
+    </select>
+
+    <update id="updateLastLoginAt">
+        UPDATE jchatmind_user
+        SET last_login_at = CURRENT_TIMESTAMP
+        WHERE user_id = #{userId}
+    </update>
+
+    <select id="existsByEmail" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1 FROM jchatmind_user WHERE email = #{email}
+        )
+    </select>
+
+</mapper>
