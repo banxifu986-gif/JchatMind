@@ -9,11 +9,14 @@ import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import com.kama.jchatmind.model.entity.Document;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.RetrievableTitleLexicalizer;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -138,7 +141,13 @@ class MultiCprEvaluationTest {
 
         String kbName = KB_NAME_PREFIX + " " + domain;
         String kbId = prepareKnowledgeBase(kbName);
-        Map<String, String> passageIdToDocDbId = importPassages(kbId, passageTextMap);
+        Map<String, String> passageIdToDocDbId;
+        if (!rerunImport && !documentMapper.selectByKbId(kbId).isEmpty()) {
+            System.out.println("知识库已有数据，跳过导入: " + kbName);
+            passageIdToDocDbId = buildPassageIdMapping(kbId, passageTextMap);
+        } else {
+            passageIdToDocDbId = importPassages(kbId, passageTextMap);
+        }
 
         EvaluationResult result = evaluate(kbId, queryMap, qrelsMap, passageIdToDocDbId);
 
@@ -280,6 +289,33 @@ class MultiCprEvaluationTest {
         knowledgeBaseMapper.insert(kb);
         System.out.println("知识库已创建: " + kb.getId());
         return kb.getId();
+    }
+
+    private Map<String, String> buildPassageIdMapping(
+            String kbId,
+            Map<String, String> passageTextMap
+    ) {
+        Map<String, String> mapping = new LinkedHashMap<>();
+        for (Document doc : documentMapper.selectByKbId(kbId)) {
+            String passageId = extractPassageIdFromMetadata(doc.getMetadata());
+            if (passageId != null && passageTextMap.containsKey(passageId)) {
+                mapping.put(passageId, doc.getId());
+            }
+        }
+        return mapping;
+    }
+
+    private String extractPassageIdFromMetadata(String metadata) {
+        if (!StringUtils.hasText(metadata)) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(metadata);
+            com.fasterxml.jackson.databind.JsonNode node = root.get("passageId");
+            return node != null && node.isTextual() ? node.asText() : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private void cleanupExistingData(String kbId) {
@@ -514,12 +550,18 @@ class MultiCprEvaluationTest {
     @MapperScan("com.kama.jchatmind.mapper")
     @Import({
             QueryRewriteServiceImpl.class,
-            RagServiceImpl.class
+            RagServiceImpl.class,
+            ChatClientRegistry.class
     })
     static class MultiCprTestConfig {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean("deepseek-chat")
+        ChatClient deepseekChatClient(DeepSeekChatModel deepSeekChatModel) {
+            return ChatClient.create(deepSeekChatModel);
         }
     }
 

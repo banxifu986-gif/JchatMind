@@ -1,12 +1,22 @@
 spring:
   autoconfigure:
     exclude:
-      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekAutoConfiguration
       - org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiAutoConfiguration
+      - org.springframework.ai.mcp.client.common.autoconfigure.McpClientAutoConfiguration
+      - org.springframework.ai.mcp.client.common.autoconfigure.McpToolCallbackAutoConfiguration
+      - org.springframework.ai.mcp.server.common.autoconfigure.ToolCallbackConverterAutoConfiguration
+      - org.springframework.ai.mcp.server.common.autoconfigure.StatelessToolCallbackConverterAutoConfiguration
+      - org.springframework.ai.mcp.server.common.autoconfigure.McpServerAutoConfiguration
 
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   embedding-model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+
+rag:
+  query-rewrite:
+    llm:
+      enabled: true
+      model: deepseek-chat
 
 multi-cpr:
   data-dir: ${MULTI_CPR_DATA_DIR:D:/coding/Java/project/JchatMind/RAGDataTest/Multi-CPR-main/data}

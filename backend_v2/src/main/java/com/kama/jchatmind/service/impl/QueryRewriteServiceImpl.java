@@ -254,14 +254,19 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         if (!llmRewriteEnabled || !StringUtils.hasText(sanitizedQuery)) {
             return false;
         }
-        if (context == null || !context.hasContext() || topicSwitchSignal) {
+        if (intent == QueryRewriteResult.Intent.NAVIGATION) {
             return false;
         }
-        if (intent == QueryRewriteResult.Intent.FOLLOW_UP) {
-            return contextApplyMode == QueryRewriteResult.ContextApplyMode.HARD;
-        }
-        if (intent != QueryRewriteResult.Intent.ANALYTICAL
-                || contextApplyMode == QueryRewriteResult.ContextApplyMode.NONE) {
+        if (context != null && context.hasContext() && !topicSwitchSignal) {
+            if (intent == QueryRewriteResult.Intent.FOLLOW_UP) {
+                return contextApplyMode == QueryRewriteResult.ContextApplyMode.HARD;
+            }
+            if (intent == QueryRewriteResult.Intent.ANALYTICAL
+                    && contextApplyMode != QueryRewriteResult.ContextApplyMode.NONE) {
+                String normalizedQuery = normalize(sanitizedQuery);
+                return !isPathAwareQuery(normalizedQuery)
+                        && terms(normalizedQuery).size() <= LLM_REWRITE_MAX_TERM_COUNT;
+            }
             return false;
         }
         String normalizedQuery = normalize(sanitizedQuery);
