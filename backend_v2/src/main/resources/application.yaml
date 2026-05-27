@@ -21,6 +21,19 @@ spring:
           starttls:
             enable: true
             required: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual
   ai:
     deepseek:
       api-key: ${DEEPSEEK_API_KEY}
@@ -84,3 +97,18 @@ jchatmind:
     audit:
       enabled: true
       max-records-per-session: 1000
+
+jwt:
+  secret: ${JWT_SECRET:change-me-change-me-change-me-change-me-change-me}
+  expiration: ${JWT_EXPIRATION:2592000}
+
+mail:
+  verify-code:
+    expire-minutes: 15
+    limit-expire-seconds: 60
+    max-error-count: 5
+    error-expire-minutes: 5
+    ip-limit-count: 20
+    ip-limit-expire-minutes: 10
+    email-ip-limit-count: 5
+    email-ip-limit-expire-minutes: 10

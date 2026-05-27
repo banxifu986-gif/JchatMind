@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg14
+    container_name: jchatmind-postgres
+    environment:
+      POSTGRES_DB: jchatmind
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: jchatmind-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: jchatmind-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    external: true
+    name: jchatmind_postgres_data
