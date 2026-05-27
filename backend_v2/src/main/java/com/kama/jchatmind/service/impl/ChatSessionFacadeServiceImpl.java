@@ -1,6 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.ChatSessionConverter;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.ChatSessionMapper;
@@ -16,7 +17,6 @@ import com.kama.jchatmind.model.vo.ChatSessionVO;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -28,10 +28,12 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatSessionConverter chatSessionConverter;
+    private final RequestScopeData requestScopeData;
 
     @Override
-    public GetChatSessionsResponse getChatSessions(String userId) {
-        List<ChatSession> chatSessions = chatSessionMapper.selectByUserId(requireUserId(userId));
+    public GetChatSessionsResponse getChatSessions() {
+        String userId = requireUserId();
+        List<ChatSession> chatSessions = chatSessionMapper.selectByUserId(userId);
         List<ChatSessionVO> result = new ArrayList<>();
         for (ChatSession chatSession : chatSessions) {
             result.add(toVO(chatSession));
@@ -42,19 +44,17 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     }
 
     @Override
-    public GetChatSessionResponse getChatSession(String userId, String chatSessionId) {
-        ChatSession chatSession = requireOwnedSession(userId, chatSessionId);
+    public GetChatSessionResponse getChatSession(String chatSessionId) {
+        ChatSession chatSession = requireOwnedSession(chatSessionId);
         return GetChatSessionResponse.builder()
                 .chatSession(toVO(chatSession))
                 .build();
     }
 
     @Override
-    public GetChatSessionsResponse getChatSessionsByAgentId(String userId, String agentId) {
-        List<ChatSession> chatSessions = chatSessionMapper.selectByAgentIdAndUserId(
-                agentId,
-                requireUserId(userId)
-        );
+    public GetChatSessionsResponse getChatSessionsByAgentId(String agentId) {
+        String userId = requireUserId();
+        List<ChatSession> chatSessions = chatSessionMapper.selectByAgentIdAndUserId(agentId, userId);
         List<ChatSessionVO> result = new ArrayList<>();
         for (ChatSession chatSession : chatSessions) {
             result.add(toVO(chatSession));
@@ -67,8 +67,9 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     @Override
     public CreateChatSessionResponse createChatSession(CreateChatSessionRequest request) {
         try {
-            request.setUserId(requireUserId(request.getUserId()));
+            String userId = requireUserId();
             ChatSessionDTO chatSessionDTO = chatSessionConverter.toDTO(request);
+            chatSessionDTO.setUserId(userId);
             ChatSession chatSession = chatSessionConverter.toEntity(chatSessionDTO);
             LocalDateTime now = LocalDateTime.now();
             chatSession.setCreatedAt(now);
@@ -86,8 +87,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     }
 
     @Override
-    public void deleteChatSession(String userId, String chatSessionId) {
-        requireOwnedSession(userId, chatSessionId);
+    public void deleteChatSession(String chatSessionId) {
+        requireOwnedSession(chatSessionId);
         int result = chatSessionMapper.deleteById(chatSessionId);
         if (result <= 0) {
             throw new BizException("删除聊天会话失败");
@@ -95,15 +96,16 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     }
 
     @Override
-    public void updateChatSession(String userId, String chatSessionId, UpdateChatSessionRequest request) {
+    public void updateChatSession(String chatSessionId, UpdateChatSessionRequest request) {
         try {
-            ChatSession existingChatSession = requireOwnedSession(userId, chatSessionId);
+            String userId = requireUserId();
+            ChatSession existingChatSession = requireOwnedSession(chatSessionId);
             ChatSessionDTO chatSessionDTO = chatSessionConverter.toDTO(existingChatSession);
             chatSessionConverter.updateDTOFromRequest(chatSessionDTO, request);
 
             ChatSession updatedChatSession = chatSessionConverter.toEntity(chatSessionDTO);
             updatedChatSession.setId(existingChatSession.getId());
-            updatedChatSession.setUserId(existingChatSession.getUserId());
+            updatedChatSession.setUserId(userId);
             updatedChatSession.setAgentId(existingChatSession.getAgentId());
             updatedChatSession.setCreatedAt(existingChatSession.getCreatedAt());
             updatedChatSession.setUpdatedAt(LocalDateTime.now());
@@ -118,9 +120,9 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     }
 
     @Override
-    public RagRetrievalContext getRetrievalContext(String userId, String chatSessionId) {
+    public RagRetrievalContext getRetrievalContext(String chatSessionId) {
         try {
-            ChatSession existingChatSession = requireOwnedSession(userId, chatSessionId);
+            ChatSession existingChatSession = requireOwnedSession(chatSessionId);
             ChatSessionDTO chatSessionDTO = chatSessionConverter.toDTO(existingChatSession);
             if (chatSessionDTO.getMetadata() == null) {
                 return null;
@@ -132,9 +134,10 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     }
 
     @Override
-    public void updateRetrievalContext(String userId, String chatSessionId, RagRetrievalContext retrievalContext) {
+    public void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext) {
         try {
-            ChatSession existingChatSession = requireOwnedSession(userId, chatSessionId);
+            String userId = requireUserId();
+            ChatSession existingChatSession = requireOwnedSession(chatSessionId);
             ChatSessionDTO chatSessionDTO = chatSessionConverter.toDTO(existingChatSession);
             ChatSessionDTO.MetaData metadata = chatSessionDTO.getMetadata();
             if (metadata == null) {
@@ -145,7 +148,7 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
 
             ChatSession updatedChatSession = chatSessionConverter.toEntity(chatSessionDTO);
             updatedChatSession.setId(existingChatSession.getId());
-            updatedChatSession.setUserId(existingChatSession.getUserId());
+            updatedChatSession.setUserId(userId);
             updatedChatSession.setAgentId(existingChatSession.getAgentId());
             updatedChatSession.setCreatedAt(existingChatSession.getCreatedAt());
             updatedChatSession.setUpdatedAt(LocalDateTime.now());
@@ -159,20 +162,21 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
         }
     }
 
-    private ChatSession requireOwnedSession(String userId, String chatSessionId) {
-        String validatedUserId = requireUserId(userId);
-        ChatSession chatSession = chatSessionMapper.selectByIdAndUserId(chatSessionId, validatedUserId);
+    private ChatSession requireOwnedSession(String chatSessionId) {
+        String userId = requireUserId();
+        ChatSession chatSession = chatSessionMapper.selectByIdAndUserId(chatSessionId, userId);
         if (chatSession == null) {
             throw new BizException("聊天会话不存在: " + chatSessionId);
         }
         return chatSession;
     }
 
-    private String requireUserId(String userId) {
-        if (!StringUtils.hasText(userId)) {
-            throw new BizException("userId 不能为空");
+    private String requireUserId() {
+        Long userId = requestScopeData.getUserId();
+        if (userId == null) {
+            throw new BizException("用户未登录");
         }
-        return userId.trim();
+        return String.valueOf(userId);
     }
 
     private ChatSessionVO toVO(ChatSession chatSession) {
@@ -197,6 +201,6 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     }
 
     private String trimToNull(String value) {
-        return StringUtils.hasText(value) ? value.trim() : null;
+        return org.springframework.util.StringUtils.hasText(value) ? value.trim() : null;
     }
 }

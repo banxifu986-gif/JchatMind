@@ -8,19 +8,19 @@ import com.kama.jchatmind.model.response.GetChatSessionResponse;
 import com.kama.jchatmind.model.response.GetChatSessionsResponse;
 
 public interface ChatSessionFacadeService {
-    GetChatSessionsResponse getChatSessions(String userId);
+    GetChatSessionsResponse getChatSessions();
 
-    GetChatSessionResponse getChatSession(String userId, String chatSessionId);
+    GetChatSessionResponse getChatSession(String chatSessionId);
 
-    GetChatSessionsResponse getChatSessionsByAgentId(String userId, String agentId);
+    GetChatSessionsResponse getChatSessionsByAgentId(String agentId);
 
     CreateChatSessionResponse createChatSession(CreateChatSessionRequest request);
 
-    void deleteChatSession(String userId, String chatSessionId);
+    void deleteChatSession(String chatSessionId);
 
-    void updateChatSession(String userId, String chatSessionId, UpdateChatSessionRequest request);
+    void updateChatSession(String chatSessionId, UpdateChatSessionRequest request);
 
-    RagRetrievalContext getRetrievalContext(String userId, String chatSessionId);
+    RagRetrievalContext getRetrievalContext(String chatSessionId);
 
-    void updateRetrievalContext(String userId, String chatSessionId, RagRetrievalContext retrievalContext);
+    void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext);
 }

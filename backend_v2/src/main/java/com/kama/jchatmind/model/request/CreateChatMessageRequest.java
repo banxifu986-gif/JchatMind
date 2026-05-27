@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateChatMessageRequest {
-    private String userId;
     private String agentId;
     private String sessionId;
     private ChatMessageDTO.RoleType role;

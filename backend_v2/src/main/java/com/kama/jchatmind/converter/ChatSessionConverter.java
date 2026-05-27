@@ -65,11 +65,9 @@ public class ChatSessionConverter {
 
     public ChatSessionDTO toDTO(CreateChatSessionRequest request) {
         Assert.notNull(request, "CreateChatSessionRequest cannot be null");
-        Assert.notNull(request.getUserId(), "UserId cannot be null");
         Assert.notNull(request.getAgentId(), "AgentId cannot be null");
 
         return ChatSessionDTO.builder()
-                .userId(request.getUserId())
                 .agentId(request.getAgentId())
                 .title(request.getTitle())
                 .metadata(request.getMetadata())

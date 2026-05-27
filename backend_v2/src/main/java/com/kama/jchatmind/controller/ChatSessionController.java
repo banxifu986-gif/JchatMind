@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.CreateChatSessionRequest;
 import com.kama.jchatmind.model.request.UpdateChatSessionRequest;
@@ -16,26 +17,25 @@ import org.springframework.web.bind.annotation.*;
 public class ChatSessionController {
 
     private final ChatSessionFacadeService chatSessionFacadeService;
+    private final RequestScopeData requestScopeData;
 
     @GetMapping("/chat-sessions")
-    public ApiResponse<GetChatSessionsResponse> getChatSessions(@RequestParam String userId) {
-        return ApiResponse.success(chatSessionFacadeService.getChatSessions(userId));
+    public ApiResponse<GetChatSessionsResponse> getChatSessions() {
+        return ApiResponse.success(chatSessionFacadeService.getChatSessions());
     }
 
     @GetMapping("/chat-sessions/{chatSessionId}")
     public ApiResponse<GetChatSessionResponse> getChatSession(
-            @RequestParam String userId,
             @PathVariable String chatSessionId
     ) {
-        return ApiResponse.success(chatSessionFacadeService.getChatSession(userId, chatSessionId));
+        return ApiResponse.success(chatSessionFacadeService.getChatSession(chatSessionId));
     }
 
     @GetMapping("/chat-sessions/agent/{agentId}")
     public ApiResponse<GetChatSessionsResponse> getChatSessionsByAgentId(
-            @RequestParam String userId,
             @PathVariable String agentId
     ) {
-        return ApiResponse.success(chatSessionFacadeService.getChatSessionsByAgentId(userId, agentId));
+        return ApiResponse.success(chatSessionFacadeService.getChatSessionsByAgentId(agentId));
     }
 
     @PostMapping("/chat-sessions")
@@ -44,18 +44,17 @@ public class ChatSessionController {
     }
 
     @DeleteMapping("/chat-sessions/{chatSessionId}")
-    public ApiResponse<Void> deleteChatSession(@RequestParam String userId, @PathVariable String chatSessionId) {
-        chatSessionFacadeService.deleteChatSession(userId, chatSessionId);
+    public ApiResponse<Void> deleteChatSession(@PathVariable String chatSessionId) {
+        chatSessionFacadeService.deleteChatSession(chatSessionId);
         return ApiResponse.success();
     }
 
     @PatchMapping("/chat-sessions/{chatSessionId}")
     public ApiResponse<Void> updateChatSession(
-            @RequestParam String userId,
             @PathVariable String chatSessionId,
             @RequestBody UpdateChatSessionRequest request
     ) {
-        chatSessionFacadeService.updateChatSession(userId, chatSessionId, request);
+        chatSessionFacadeService.updateChatSession(chatSessionId, request);
         return ApiResponse.success();
     }
 }

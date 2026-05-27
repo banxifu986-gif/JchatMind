@@ -18,10 +18,9 @@ public class ChatMessageController {
 
     @GetMapping("/chat-messages/session/{sessionId}")
     public ApiResponse<GetChatMessagesResponse> getChatMessagesBySessionId(
-            @RequestParam String userId,
             @PathVariable String sessionId
     ) {
-        return ApiResponse.success(chatMessageFacadeService.getChatMessagesBySessionId(userId, sessionId));
+        return ApiResponse.success(chatMessageFacadeService.getChatMessagesBySessionId(sessionId));
     }
 
     @PostMapping("/chat-messages")
@@ -30,18 +29,17 @@ public class ChatMessageController {
     }
 
     @DeleteMapping("/chat-messages/{chatMessageId}")
-    public ApiResponse<Void> deleteChatMessage(@RequestParam String userId, @PathVariable String chatMessageId) {
-        chatMessageFacadeService.deleteChatMessage(userId, chatMessageId);
+    public ApiResponse<Void> deleteChatMessage(@PathVariable String chatMessageId) {
+        chatMessageFacadeService.deleteChatMessage(chatMessageId);
         return ApiResponse.success();
     }
 
     @PatchMapping("/chat-messages/{chatMessageId}")
     public ApiResponse<Void> updateChatMessage(
-            @RequestParam String userId,
             @PathVariable String chatMessageId,
             @RequestBody UpdateChatMessageRequest request
     ) {
-        chatMessageFacadeService.updateChatMessage(userId, chatMessageId, request);
+        chatMessageFacadeService.updateChatMessage(chatMessageId, request);
         return ApiResponse.success();
     }
 }

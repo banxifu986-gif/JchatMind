@@ -1,6 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.event.ChatEvent;
 import com.kama.jchatmind.exception.BizException;
@@ -17,7 +18,6 @@ import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -31,10 +31,11 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     private final ChatMessageConverter chatMessageConverter;
     private final ChatSessionFacadeService chatSessionFacadeService;
     private final ApplicationEventPublisher publisher;
+    private final RequestScopeData requestScopeData;
 
     @Override
-    public GetChatMessagesResponse getChatMessagesBySessionId(String userId, String sessionId) {
-        requireOwnedSession(userId, sessionId);
+    public GetChatMessagesResponse getChatMessagesBySessionId(String sessionId) {
+        requireOwnedSession(sessionId);
         List<ChatMessage> chatMessages = chatMessageMapper.selectBySessionId(sessionId);
         List<ChatMessageVO> result = new ArrayList<>();
         for (ChatMessage chatMessage : chatMessages) {
@@ -46,8 +47,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
-    public List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String userId, String sessionId, int limit) {
-        requireOwnedSession(userId, sessionId);
+    public List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit) {
+        requireOwnedSession(sessionId);
         List<ChatMessage> chatMessages = chatMessageMapper.selectBySessionIdRecently(sessionId, limit);
         List<ChatMessageDTO> result = new ArrayList<>();
         for (ChatMessage chatMessage : chatMessages) {
@@ -58,11 +59,10 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
 
     @Override
     public CreateChatMessageResponse createChatMessage(CreateChatMessageRequest request) {
-        String userId = requireUserId(request.getUserId());
-        requireOwnedSession(userId, request.getSessionId());
+        requireOwnedSession(request.getSessionId());
         ChatMessage chatMessage = doCreateChatMessage(request);
         publisher.publishEvent(new ChatEvent(
-                userId,
+                requireUserId(),
                 request.getAgentId(),
                 chatMessage.getSessionId(),
                 chatMessage.getContent()
@@ -73,8 +73,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
-    public CreateChatMessageResponse createChatMessage(String userId, ChatMessageDTO chatMessageDTO) {
-        requireOwnedSession(userId, chatMessageDTO.getSessionId());
+    public CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO) {
+        requireOwnedSession(chatMessageDTO.getSessionId());
         ChatMessage chatMessage = doCreateChatMessage(chatMessageDTO);
         return CreateChatMessageResponse.builder()
                 .chatMessageId(chatMessage.getId())
@@ -83,7 +83,7 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
 
     @Override
     public CreateChatMessageResponse agentCreateChatMessage(CreateChatMessageRequest request) {
-        requireOwnedSession(request.getUserId(), request.getSessionId());
+        requireOwnedSession(request.getSessionId());
         ChatMessage chatMessage = doCreateChatMessage(request);
         return CreateChatMessageResponse.builder()
                 .chatMessageId(chatMessage.getId())
@@ -91,8 +91,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
-    public CreateChatMessageResponse appendChatMessage(String userId, String chatMessageId, String appendContent) {
-        ChatMessage existingChatMessage = requireOwnedMessage(userId, chatMessageId);
+    public CreateChatMessageResponse appendChatMessage(String chatMessageId, String appendContent) {
+        ChatMessage existingChatMessage = requireOwnedMessage(chatMessageId);
         String currentContent = existingChatMessage.getContent() != null ? existingChatMessage.getContent() : "";
         String updatedContent = currentContent + appendContent;
 
@@ -117,8 +117,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
-    public void deleteChatMessage(String userId, String chatMessageId) {
-        requireOwnedMessage(userId, chatMessageId);
+    public void deleteChatMessage(String chatMessageId) {
+        requireOwnedMessage(chatMessageId);
         int result = chatMessageMapper.deleteById(chatMessageId);
         if (result <= 0) {
             throw new BizException("删除聊天消息失败");
@@ -126,9 +126,9 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
-    public void updateChatMessage(String userId, String chatMessageId, UpdateChatMessageRequest request) {
+    public void updateChatMessage(String chatMessageId, UpdateChatMessageRequest request) {
         try {
-            ChatMessage existingChatMessage = requireOwnedMessage(userId, chatMessageId);
+            ChatMessage existingChatMessage = requireOwnedMessage(chatMessageId);
             ChatMessageDTO chatMessageDTO = chatMessageConverter.toDTO(existingChatMessage);
             chatMessageConverter.updateDTOFromRequest(chatMessageDTO, request);
 
@@ -169,24 +169,25 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
         }
     }
 
-    private void requireOwnedSession(String userId, String sessionId) {
-        chatSessionFacadeService.getChatSession(requireUserId(userId), sessionId);
+    private void requireOwnedSession(String sessionId) {
+        chatSessionFacadeService.getChatSession(sessionId);
     }
 
-    private ChatMessage requireOwnedMessage(String userId, String chatMessageId) {
+    private ChatMessage requireOwnedMessage(String chatMessageId) {
         ChatMessage chatMessage = chatMessageMapper.selectById(chatMessageId);
         if (chatMessage == null) {
             throw new BizException("聊天消息不存在: " + chatMessageId);
         }
-        requireOwnedSession(userId, chatMessage.getSessionId());
+        requireOwnedSession(chatMessage.getSessionId());
         return chatMessage;
     }
 
-    private String requireUserId(String userId) {
-        if (!StringUtils.hasText(userId)) {
-            throw new BizException("userId 不能为空");
+    private String requireUserId() {
+        Long userId = requestScopeData.getUserId();
+        if (userId == null) {
+            throw new BizException("用户未登录");
         }
-        return userId.trim();
+        return String.valueOf(userId);
     }
 
     private ChatMessageVO toVO(ChatMessage chatMessage) {
