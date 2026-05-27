@@ -161,7 +161,7 @@ public class JChatMind {
                             .toolCalls(assistantMessage.getToolCalls())
                             .build())
                     .build();
-            CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(userId, chatMessageDTO);
+            CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO);
             chatMessageDTO.setId(chatMessage.getChatMessageId());
             pendingChatMessages.add(chatMessageDTO);
         } else if (message instanceof ToolResponseMessage toolResponseMessage) {
@@ -173,7 +173,7 @@ public class JChatMind {
                                 .toolResponse(toolResponse)
                                 .build())
                         .build();
-                CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(userId, chatMessageDTO);
+                CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO);
                 chatMessageDTO.setId(chatMessage.getChatMessageId());
                 pendingChatMessages.add(chatMessageDTO);
             }

@@ -3,6 +3,7 @@ package com.kama.jchatmind.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.UserMemoryCandidateMapper;
@@ -48,7 +49,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             - 只提取稳定、可复用、对未来回答有帮助的信息
             - 不要保存一次性任务、短期上下文、敏感信息、纯闲聊信息
             - 不要提取可以从对话中直接推断出的通用信息
-            - 如果与已有记忆存在冲突，content 使用“更新：”前缀
+            - 如果与已有记忆存在冲突，content 使用"更新："前缀
             - 如果没有值得提取的信息，返回空数组 []
 
             只输出 JSON 数组，不要输出 markdown 代码块或解释文字。
@@ -60,13 +61,15 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     private final ObjectMapper objectMapper;
     private final ChatClient memoryExtractionChatClient;
     private final RagService ragService;
+    private final RequestScopeData requestScopeData;
 
     public UserMemoryFacadeServiceImpl(
             UserMemoryMapper userMemoryMapper,
             UserMemoryCandidateMapper userMemoryCandidateMapper,
-            ChatMessageFacadeService chatMessageFacadeService
+            ChatMessageFacadeService chatMessageFacadeService,
+            RequestScopeData requestScopeData
     ) {
-        this(userMemoryMapper, userMemoryCandidateMapper, chatMessageFacadeService, null, null);
+        this(userMemoryMapper, userMemoryCandidateMapper, chatMessageFacadeService, requestScopeData, null, null);
     }
 
     @Autowired
@@ -74,12 +77,14 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             UserMemoryMapper userMemoryMapper,
             UserMemoryCandidateMapper userMemoryCandidateMapper,
             ChatMessageFacadeService chatMessageFacadeService,
+            RequestScopeData requestScopeData,
             ObjectProvider<ChatClientRegistry> chatClientRegistryProvider,
             ObjectProvider<RagService> ragServiceProvider
     ) {
         this.userMemoryMapper = userMemoryMapper;
         this.userMemoryCandidateMapper = userMemoryCandidateMapper;
         this.chatMessageFacadeService = chatMessageFacadeService;
+        this.requestScopeData = requestScopeData;
         this.objectMapper = new ObjectMapper();
         this.memoryExtractionChatClient = resolveChatClient(chatClientRegistryProvider);
         this.ragService = ragServiceProvider != null ? ragServiceProvider.getIfAvailable() : null;
@@ -105,8 +110,9 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
-    public GetUserMemoriesResponse getUserMemories(String userId) {
-        List<UserMemoryVO> result = getConfirmedMemories(requireUserId(userId))
+    public GetUserMemoriesResponse getUserMemories() {
+        String userId = requireUserId();
+        List<UserMemoryVO> result = getConfirmedMemoriesInternal(userId)
                 .stream()
                 .map(this::toMemoryVO)
                 .toList();
@@ -116,8 +122,9 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
-    public GetUserMemoryCandidatesResponse getUserMemoryCandidates(String userId) {
-        List<UserMemoryCandidateVO> result = getMemoryCandidates(requireUserId(userId))
+    public GetUserMemoryCandidatesResponse getUserMemoryCandidates() {
+        String userId = requireUserId();
+        List<UserMemoryCandidateVO> result = getMemoryCandidatesInternal(userId)
                 .stream()
                 .map(this::toCandidateVO)
                 .toList();
@@ -127,9 +134,9 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
-    public void deleteMemory(String userId, String memoryId) {
-        String validatedUserId = requireUserId(userId);
-        UserMemory memory = getConfirmedMemoryById(validatedUserId, memoryId);
+    public void deleteMemory(String memoryId) {
+        String userId = requireUserId();
+        UserMemory memory = getConfirmedMemoryById(userId, memoryId);
         if (memory == null) {
             throw new BizException("用户记忆不存在: " + memoryId);
         }
@@ -141,19 +148,18 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
 
     @Override
     public List<UserMemory> getConfirmedMemories(String userId) {
-        return userMemoryMapper.selectByUserId(requireUserId(userId));
+        return userMemoryMapper.selectByUserId(userId);
     }
 
     @Override
     public List<UserMemory> recallRelevantMemories(String userId, String query, int topK) {
-        String validatedUserId = requireUserId(userId);
         if (!StringUtils.hasText(query)) {
             return List.of();
         }
         if (ragService == null) {
             log.debug("RagService not available, falling back to recent memories");
             try {
-                return getConfirmedMemories(validatedUserId).stream()
+                return getConfirmedMemoriesInternal(userId).stream()
                         .limit(topK)
                         .toList();
             } catch (Exception e) {
@@ -165,14 +171,14 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         try {
             float[] queryEmbedding = ragService.embed(query);
             String vectorLiteral = toPgVector(queryEmbedding);
-            List<UserMemory> semanticResults = similaritySearchMemories(validatedUserId, vectorLiteral, topK);
+            List<UserMemory> semanticResults = similaritySearchMemories(userId, vectorLiteral, topK);
             if (semanticResults.size() >= topK) {
                 return semanticResults;
             }
 
             List<UserMemory> fallback;
             try {
-                fallback = getConfirmedMemories(validatedUserId).stream()
+                fallback = getConfirmedMemoriesInternal(userId).stream()
                         .filter(memory -> memory.getEmbedding() == null)
                         .limit(topK - semanticResults.size())
                         .toList();
@@ -187,13 +193,42 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         } catch (Exception e) {
             log.warn("Semantic memory recall failed, falling back to recent memories", e);
             try {
-                return getConfirmedMemories(validatedUserId).stream()
+                return getConfirmedMemoriesInternal(userId).stream()
                         .limit(topK)
                         .toList();
             } catch (Exception fallbackException) {
                 log.warn("All memory recall paths failed, returning empty", fallbackException);
                 return List.of();
             }
+        }
+    }
+
+    @Override
+    public void extractMemoryCandidates(String userId, String sessionId) {
+        if (!StringUtils.hasText(sessionId)) {
+            return;
+        }
+
+        List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
+                sessionId,
+                8
+        );
+        List<ChatMessageDTO> userMessages = recentMessages.stream()
+                .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)
+                .toList();
+        if (userMessages.isEmpty()) {
+            return;
+        }
+
+        List<ExtractedMemory> extracted = memoryExtractionChatClient != null
+                ? extractWithLlm(userId, userMessages)
+                : extractWithKeywords(userMessages);
+        if (memoryExtractionChatClient == null) {
+            log.warn("No ChatClient available for memory extraction, using keyword-based fallback");
+        }
+
+        for (ExtractedMemory memory : extracted) {
+            persistAutomatically(userId, sessionId, memory);
         }
     }
 
@@ -207,37 +242,6 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         }
         sb.append("]");
         return sb.toString();
-    }
-
-    @Override
-    public void extractMemoryCandidates(String userId, String sessionId) {
-        String validatedUserId = requireUserId(userId);
-        if (!StringUtils.hasText(sessionId)) {
-            return;
-        }
-
-        List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
-                validatedUserId,
-                sessionId,
-                8
-        );
-        List<ChatMessageDTO> userMessages = recentMessages.stream()
-                .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)
-                .toList();
-        if (userMessages.isEmpty()) {
-            return;
-        }
-
-        List<ExtractedMemory> extracted = memoryExtractionChatClient != null
-                ? extractWithLlm(validatedUserId, userMessages)
-                : extractWithKeywords(userMessages);
-        if (memoryExtractionChatClient == null) {
-            log.warn("No ChatClient available for memory extraction, using keyword-based fallback");
-        }
-
-        for (ExtractedMemory memory : extracted) {
-            persistAutomatically(validatedUserId, sessionId, memory);
-        }
     }
 
     private List<ExtractedMemory> extractWithLlm(String userId, List<ChatMessageDTO> userMessages) {
@@ -261,7 +265,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     private String formatExistingMemories(String userId) {
-        List<UserMemory> memories = getConfirmedMemories(userId);
+        List<UserMemory> memories = getConfirmedMemoriesInternal(userId);
         if (memories.isEmpty()) {
             return "无";
         }
@@ -521,7 +525,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     private void handleConflictUpdate(String userId, UserMemoryCandidate candidate, String newContent) {
-        List<UserMemory> existingMemories = getConfirmedMemories(userId);
+        List<UserMemory> existingMemories = getConfirmedMemoriesInternal(userId);
         UserMemory match = existingMemories.stream()
                 .filter(memory -> memory.getMemoryType().equals(candidate.getMemoryType()))
                 .findFirst()
@@ -570,7 +574,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         }
     }
 
-    private List<UserMemoryCandidate> getMemoryCandidates(String userId) {
+    private List<UserMemoryCandidate> getMemoryCandidatesInternal(String userId) {
         return userMemoryCandidateMapper.selectByUserId(userId);
     }
 
@@ -588,6 +592,10 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
 
     private UserMemoryCandidate findMemoryCandidateByContent(String userId, String content) {
         return userMemoryCandidateMapper.selectByUserIdAndContent(userId, content);
+    }
+
+    private List<UserMemory> getConfirmedMemoriesInternal(String userId) {
+        return userMemoryMapper.selectByUserId(userId);
     }
 
     private UserMemoryVO toMemoryVO(UserMemory memory) {
@@ -617,11 +625,12 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .build();
     }
 
-    private String requireUserId(String userId) {
-        if (!StringUtils.hasText(userId)) {
-            throw new BizException("userId 不能为空");
+    private String requireUserId() {
+        Long userId = requestScopeData.getUserId();
+        if (userId == null) {
+            throw new BizException("用户未登录");
         }
-        return userId.trim();
+        return String.valueOf(userId);
     }
 
     private record ExtractedMemory(

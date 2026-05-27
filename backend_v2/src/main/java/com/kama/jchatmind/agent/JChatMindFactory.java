@@ -97,7 +97,6 @@ public class JChatMindFactory {
         List<Message> memory = new ArrayList<>();
 
         List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
-                userId,
                 chatSessionId,
                 messageLength
         );

@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -27,10 +26,9 @@ public class HarnessController {
 
     @PostMapping("/approve/{requestId}")
     public ApiResponse<ApprovalActionResponse> approve(
-            @RequestParam String userId,
             @PathVariable String requestId
     ) {
-        ApprovalRequest request = requireOwnedRequest(userId, requestId);
+        ApprovalRequest request = requireOwnedRequest(requestId);
         ApprovalStatus status = harnessRunner.approve(requestId);
         return ApiResponse.success(ApprovalActionResponse.builder()
                 .requestId(requestId)
@@ -40,10 +38,9 @@ public class HarnessController {
 
     @PostMapping("/reject/{requestId}")
     public ApiResponse<ApprovalActionResponse> reject(
-            @RequestParam String userId,
             @PathVariable String requestId
     ) {
-        ApprovalRequest request = requireOwnedRequest(userId, requestId);
+        ApprovalRequest request = requireOwnedRequest(requestId);
         ApprovalStatus status = harnessRunner.reject(requestId);
         return ApiResponse.success(ApprovalActionResponse.builder()
                 .requestId(requestId)
@@ -53,10 +50,9 @@ public class HarnessController {
 
     @GetMapping("/pending/{sessionId}")
     public ApiResponse<PendingApprovalsResponse> getPending(
-            @RequestParam String userId,
             @PathVariable String sessionId
     ) {
-        chatSessionFacadeService.getChatSession(userId, sessionId);
+        chatSessionFacadeService.getChatSession(sessionId);
         List<PendingApprovalVO> approvals = harnessRunner.getPendingApprovals(sessionId).stream()
                 .map(request -> PendingApprovalVO.builder()
                         .id(request.getId())
@@ -74,12 +70,12 @@ public class HarnessController {
                 .build());
     }
 
-    private ApprovalRequest requireOwnedRequest(String userId, String requestId) {
+    private ApprovalRequest requireOwnedRequest(String requestId) {
         ApprovalRequest request = harnessRunner.getApprovalRequest(requestId);
         if (request == null) {
             throw new IllegalArgumentException("审批请求不存在: " + requestId);
         }
-        chatSessionFacadeService.getChatSession(userId, request.getSessionId());
+        chatSessionFacadeService.getChatSession(request.getSessionId());
         return request;
     }
 
