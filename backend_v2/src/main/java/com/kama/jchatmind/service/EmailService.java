@@ -1,15 +1,12 @@
 package com.kama.jchatmind.service;
 
-/**
- * 邮件服务接口
- */
+import com.kama.jchatmind.model.common.ApiResponse;
+
 public interface EmailService {
-    /**
-     * 异步发送邮件
-     *
-     * @param to      收件人邮箱地址
-     * @param subject 邮件主题
-     * @param content 邮件内容
-     */
+
     void sendEmailAsync(String to, String subject, String content);
+
+    ApiResponse<Void> sendVerificationCode(String email, String ip, String type, boolean shouldSend);
+
+    boolean checkVerificationCode(String email, String code, String ip, String type);
 }
