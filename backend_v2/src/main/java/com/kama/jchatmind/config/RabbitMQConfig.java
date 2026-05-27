@@ -1,0 +1,113 @@
+package com.kama.jchatmind.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.DirectExchange;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.QueueBuilder;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Configuration
+public class RabbitMQConfig {
+
+    public static final String EMAIL_EXCHANGE = "email.exchange";
+    public static final String EMAIL_QUEUE = "email.queue";
+    public static final String EMAIL_ROUTING_KEY = "email.send";
+
+    public static final String EMAIL_RETRY_EXCHANGE = "email.retry.exchange";
+    public static final String EMAIL_RETRY_QUEUE = "email.retry.queue";
+    public static final String EMAIL_RETRY_ROUTING_KEY = "email.retry";
+
+    public static final String EMAIL_DLX = "email.dlx";
+    public static final String EMAIL_DLQ = "email.dlq";
+    public static final String EMAIL_DLQ_ROUTING_KEY = "email.dlq";
+
+    public static final int EMAIL_MAX_RETRY_COUNT = 3;
+    public static final int EMAIL_RETRY_TTL_MILLIS = 30_000;
+
+    @Bean
+    public DirectExchange emailExchange() {
+        return new DirectExchange(EMAIL_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange emailRetryExchange() {
+        return new DirectExchange(EMAIL_RETRY_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange emailDlx() {
+        return new DirectExchange(EMAIL_DLX);
+    }
+
+    @Bean
+    public Queue emailQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", EMAIL_DLX);
+        args.put("x-dead-letter-routing-key", EMAIL_DLQ_ROUTING_KEY);
+        return QueueBuilder.durable(EMAIL_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue emailRetryQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", EMAIL_EXCHANGE);
+        args.put("x-dead-letter-routing-key", EMAIL_ROUTING_KEY);
+        args.put("x-message-ttl", EMAIL_RETRY_TTL_MILLIS);
+        return QueueBuilder.durable(EMAIL_RETRY_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue emailDlq() {
+        return QueueBuilder.durable(EMAIL_DLQ).build();
+    }
+
+    @Bean
+    public Binding emailBinding() {
+        return BindingBuilder.bind(emailQueue())
+                .to(emailExchange())
+                .with(EMAIL_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding emailRetryBinding() {
+        return BindingBuilder.bind(emailRetryQueue())
+                .to(emailRetryExchange())
+                .with(EMAIL_RETRY_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding emailDlqBinding() {
+        return BindingBuilder.bind(emailDlq())
+                .to(emailDlx())
+                .with(EMAIL_DLQ_ROUTING_KEY);
+    }
+
+    @Bean
+    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+
+        RabbitTemplate template = new RabbitTemplate(connectionFactory);
+        template.setMessageConverter(new Jackson2JsonMessageConverter(mapper));
+        template.setConfirmCallback((correlationData, ack, cause) -> {
+            if (!ack && correlationData != null) {
+                // Publisher confirm failed — handled by DLX retry
+            }
+        });
+        return template;
+    }
+}

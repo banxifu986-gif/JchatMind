@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.EmailFailureMapper">
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.EmailSendFailure"
+            keyColumn="id" keyProperty="id" useGeneratedKeys="true">
+        INSERT INTO email_send_failure
+        (
+            task_id,
+            email,
+            type,
+            retry_count,
+            failure_reason,
+            trace_id,
+            expired_flag,
+            created_at,
+            failed_at
+        )
+        VALUES
+        (
+            #{taskId},
+            #{email},
+            #{type},
+            #{retryCount},
+            #{failureReason},
+            #{traceId},
+            #{expiredFlag},
+            #{createdAt},
+            #{failedAt}
+        )
+    </insert>
+
+</mapper>
