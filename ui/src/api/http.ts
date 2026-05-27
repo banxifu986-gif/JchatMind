@@ -40,6 +40,10 @@ function buildUrl(url: string, params?: Record<string, string | number | boolean
  * 处理响应
  */
 async function handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
+  if (response.status === 401) {
+    window.localStorage.removeItem("jchatmind.token");
+    window.localStorage.removeItem("jchatmind.user");
+  }
   if (!response.ok) {
     // HTTP 状态码错误
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -57,6 +61,17 @@ async function handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
 }
 
 /**
+ * 从 localStorage 获取 Auth Token
+ */
+function getAuthHeaders(): HeadersInit {
+  const token = window.localStorage.getItem("jchatmind.token");
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
+/**
  * 封装的 fetch 请求函数
  */
 async function request<T = unknown>(
@@ -71,6 +86,7 @@ async function request<T = unknown>(
   // 设置默认请求头
   const defaultHeaders: HeadersInit = {
     "Content-Type": "application/json",
+    ...getAuthHeaders(),
     ...headers,
   };
 

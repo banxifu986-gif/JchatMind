@@ -4,8 +4,10 @@ import {
   IdcardOutlined,
   MessageOutlined,
   RobotOutlined,
+  UserOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
-import { Tabs, type TabsProps, Input } from "antd";
+import { Tabs, type TabsProps, Button, Dropdown, Space } from "antd";
 import { useNavigate, useLocation } from "react-router-dom";
 import AgentTabContent from "./tabs/AgentTabContent.tsx";
 import AddAgentModal from "./modals/AddAgentModal.tsx";
@@ -15,11 +17,16 @@ import AddKnowledgeBaseModal from "./modals/AddKnowledgeBaseModal.tsx";
 import { useAgents } from "../hooks/useAgents.ts";
 import { useKnowledgeBases } from "../hooks/useKnowledgeBases.ts";
 import { useUser } from "../hooks/useUser.ts";
+import { LoginModal } from "./auth/LoginModal.tsx";
+import { RegisterModal } from "./auth/RegisterModal.tsx";
 
 const SideMenu: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { userId, setUserId } = useUser();
+  const { user, isLogin, logout } = useUser();
+
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
 
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<
@@ -132,13 +139,33 @@ const SideMenu: React.FC = () => {
               JChatMind
             </div>
           </div>
-          <Input
-            value={userId}
-            size="small"
-            prefix={<IdcardOutlined className="text-slate-400" />}
-            onChange={(event) => setUserId(event.target.value)}
-            placeholder="输入当前 userId"
-          />
+          {isLogin && user ? (
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "logout",
+                    label: "退出登录",
+                    icon: <LogoutOutlined />,
+                    onClick: logout,
+                  },
+                ],
+              }}
+            >
+              <Button size="small" icon={<UserOutlined />}>
+                {user.username}
+              </Button>
+            </Dropdown>
+          ) : (
+            <Space size="small">
+              <Button size="small" onClick={() => setLoginOpen(true)}>
+                登录
+              </Button>
+              <Button size="small" type="primary" onClick={() => setRegisterOpen(true)}>
+                注册
+              </Button>
+            </Space>
+          )}
         </div>
       </div>
       <div className="flex-1 min-h-0 flex flex-col pt-3">
@@ -155,6 +182,22 @@ const SideMenu: React.FC = () => {
         open={isAddKnowledgeBaseModalOpen}
         onClose={toggleAddKnowledgeBaseModal}
         createKnowledgeBaseHandle={createKnowledgeBaseHandle}
+      />
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onSwitchToRegister={() => {
+          setLoginOpen(false);
+          setRegisterOpen(true);
+        }}
+      />
+      <RegisterModal
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        onSwitchToLogin={() => {
+          setRegisterOpen(false);
+          setLoginOpen(true);
+        }}
       />
     </div>
   );

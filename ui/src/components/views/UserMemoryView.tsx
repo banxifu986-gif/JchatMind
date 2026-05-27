@@ -19,7 +19,7 @@ import { useUser } from "../../hooks/useUser.ts";
 const { Title, Text, Paragraph } = Typography;
 
 const UserMemoryView: React.FC = () => {
-  const { userId } = useUser();
+  const { user } = useUser();
   const [loading, setLoading] = useState(false);
   const [memories, setMemories] = useState<UserMemoryVO[]>([]);
   const [candidates, setCandidates] = useState<UserMemoryCandidateVO[]>([]);
@@ -28,27 +28,27 @@ const UserMemoryView: React.FC = () => {
     setLoading(true);
     try {
       const [memoriesResp, candidatesResp] = await Promise.all([
-        getUserMemories(userId),
-        getUserMemoryCandidates(userId),
+        getUserMemories(),
+        getUserMemoryCandidates(),
       ]);
       setMemories(memoriesResp.memories);
       setCandidates(candidatesResp.candidates);
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   const handleConfirm = async (candidateId: string) => {
-    await confirmUserMemoryCandidate(userId, candidateId);
+    await confirmUserMemoryCandidate(candidateId);
     await refresh();
   };
 
   const handleDeleteMemory = async (memoryId: string) => {
-    await deleteUserMemory(userId, memoryId);
+    await deleteUserMemory(memoryId);
     await refresh();
   };
 
@@ -65,7 +65,7 @@ const UserMemoryView: React.FC = () => {
                 用户记忆管理
               </Title>
               <Paragraph className="!mb-1 text-slate-600">
-                当前 userId: <Text code>{userId}</Text>
+                当前用户: <Text code>{user?.username || "未登录"}</Text>
               </Paragraph>
               <Text type="secondary">
                 候选记忆需手动确认后才会进入 Agent 长期上下文。

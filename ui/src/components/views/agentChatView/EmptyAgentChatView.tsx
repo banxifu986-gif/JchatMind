@@ -15,8 +15,6 @@ import {
 } from "../../../api/api.ts";
 import { getAgentEmoji } from "../../../utils";
 import { useChatSessions } from "../../../hooks/useChatSessions.ts";
-import { useUser } from "../../../hooks/useUser.ts";
-
 const { Title, Text } = Typography;
 
 interface EmptyAgentChatViewProps {
@@ -32,8 +30,6 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { refreshChatSessions } = useChatSessions();
-  const { userId } = useUser();
-
   const agentsWithEmoji = useMemo(() => {
     return agents.map((agent) => ({
       ...agent,
@@ -82,7 +78,7 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
               开始新的对话
             </Title>
             <Text type="secondary" className="text-base">
-              选择一个智能体开始聊天，当前用户边界由显式 userId 控制。
+              选择一个智能体开始聊天，登录后用户数据由 JWT Token 边界隔离。
             </Text>
           </div>
 
@@ -124,7 +120,7 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
                   <Title level={5} className="mb-1">
                     快速开始
                   </Title>
-                  <Text type="secondary">直接在底部输入消息，自动创建带 userId 的新会话。</Text>
+                  <Text type="secondary">直接在底部输入消息，自动创建新会话。</Text>
                 </div>
               </Space>
             </Card>
@@ -139,12 +135,10 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
               return;
             }
             const response = await createChatSession({
-              userId,
               agentId: effectiveAgentId,
               title: message.slice(0, 20),
             });
             await createChatMessage({
-              userId,
               sessionId: response.chatSessionId ?? "",
               content: message,
               role: "user",

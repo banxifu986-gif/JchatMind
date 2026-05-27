@@ -1,30 +1,93 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  DEFAULT_USER_ID,
-  STORAGE_KEY,
-  UserContext,
+  AuthContext,
+  TOKEN_KEY,
+  USER_KEY,
 } from "./UserContextBase.ts";
+import type { AuthContextType, UserInfo } from "./UserContextBase.ts";
+
+async function whoamiCall(token: string): Promise<{ user: UserInfo; token: string } | null> {
+  try {
+    const resp = await fetch("/api/users/whoami", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) return null;
+    const body = await resp.json();
+    if (body.code !== 200 || !body.data) return null;
+    return { user: body.data, token: body.data.token || token };
+  } catch {
+    return null;
+  }
+}
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [userId, setUserIdState] = useState<string>(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    return saved && saved.trim() ? saved : DEFAULT_USER_ID;
-  });
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [token, setToken] = useState<string | null>(() =>
+    window.localStorage.getItem(TOKEN_KEY),
+  );
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, userId);
-  }, [userId]);
+    if (token) {
+      whoamiCall(token).then((result) => {
+        if (result) {
+          setUser(result.user);
+          if (result.token !== token) {
+            setToken(result.token);
+            window.localStorage.setItem(TOKEN_KEY, result.token);
+          }
+          window.localStorage.setItem(USER_KEY, JSON.stringify(result.user));
+        } else {
+          setToken(null);
+          setUser(null);
+          window.localStorage.removeItem(TOKEN_KEY);
+          window.localStorage.removeItem(USER_KEY);
+        }
+        setLoading(false);
+      });
+    } else {
+      setLoading(false);
+    }
+  }, []);
 
-  const value = useMemo(
+  const login = useCallback((newToken: string, newUser: UserInfo) => {
+    setToken(newToken);
+    setUser(newUser);
+    window.localStorage.setItem(TOKEN_KEY, newToken);
+    window.localStorage.setItem(USER_KEY, JSON.stringify(newUser));
+  }, []);
+
+  const logout = useCallback(() => {
+    setToken(null);
+    setUser(null);
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(USER_KEY);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    if (!token) return;
+    const result = await whoamiCall(token);
+    if (result) {
+      setUser(result.user);
+      if (result.token !== token) {
+        setToken(result.token);
+        window.localStorage.setItem(TOKEN_KEY, result.token);
+      }
+    }
+  }, [token]);
+
+  const value: AuthContextType = useMemo(
     () => ({
-      userId,
-      setUserId: (nextUserId: string) => {
-        const normalized = nextUserId.trim();
-        setUserIdState(normalized || DEFAULT_USER_ID);
-      },
+      user,
+      token,
+      isLogin: !!user,
+      loading,
+      login,
+      logout,
+      refreshUser,
     }),
-    [userId],
+    [user, token, loading, login, logout, refreshUser],
   );
 
-  return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

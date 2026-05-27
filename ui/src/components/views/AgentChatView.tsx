@@ -24,7 +24,7 @@ const AgentChatView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
-  const { userId } = useUser();
+  const { isLogin } = useUser();
 
   const [messages, setMessages] = useState<ChatMessageVO[]>([]);
   const [agentId, setAgentId] = useState<string>("");
@@ -40,12 +40,12 @@ const AgentChatView: React.FC = () => {
     if (!chatSessionId) {
       return;
     }
-    const resp = await getChatMessagesBySessionId(userId, chatSessionId);
+    const resp = await getChatMessagesBySessionId(chatSessionId);
     setMessages(resp.chatMessages);
 
-    const sessionResp = await getChatSession(userId, chatSessionId);
+    const sessionResp = await getChatSession(chatSessionId);
     setAgentId(sessionResp.chatSession.agentId);
-  }, [chatSessionId, userId]);
+  }, [chatSessionId]);
 
   useEffect(() => {
     if (!chatSessionId) {
@@ -67,8 +67,11 @@ const AgentChatView: React.FC = () => {
       }
       setLoading(true);
       try {
+        if (!isLogin) {
+          antdMessage.warning("请先登录");
+          return;
+        }
         const response = await createChatSession({
-          userId,
           agentId,
           title: message.slice(0, 20),
         });
@@ -91,7 +94,6 @@ const AgentChatView: React.FC = () => {
 
     if (state?.init) {
       await createChatMessage({
-        userId,
         agentId: agentId ?? "",
         sessionId: chatSessionId,
         role: "user",
@@ -99,7 +101,6 @@ const AgentChatView: React.FC = () => {
       });
     } else {
       await createChatMessage({
-        userId,
         agentId: agentId ?? "",
         sessionId: chatSessionId,
         role: "user",

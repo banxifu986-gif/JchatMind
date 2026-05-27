@@ -72,7 +72,6 @@ export async function updateAgent(
 }
 
 export interface CreateChatSessionRequest {
-  userId: string;
   agentId: string;
   title?: string;
   metadata?: ChatSessionMetadata;
@@ -119,43 +118,33 @@ export interface ChatSessionMetadata {
   retrievalContext?: RagRetrievalContext;
 }
 
-export async function getChatSessions(
-  userId: string,
-): Promise<GetChatSessionsResponse> {
-  return get<GetChatSessionsResponse>("/chat-sessions", { userId });
+export async function getChatSessions(): Promise<GetChatSessionsResponse> {
+  return get<GetChatSessionsResponse>("/chat-sessions");
 }
 
 export async function getChatSession(
-  userId: string,
   chatSessionId: string,
 ): Promise<GetChatSessionResponse> {
-  return get<GetChatSessionResponse>(`/chat-sessions/${chatSessionId}`, {
-    userId,
-  });
+  return get<GetChatSessionResponse>(`/chat-sessions/${chatSessionId}`);
 }
 
 export async function getChatSessionsByAgentId(
-  userId: string,
   agentId: string,
 ): Promise<GetChatSessionsResponse> {
-  return get<GetChatSessionsResponse>(`/chat-sessions/agent/${agentId}`, {
-    userId,
-  });
+  return get<GetChatSessionsResponse>(`/chat-sessions/agent/${agentId}`);
 }
 
 export async function updateChatSession(
-  userId: string,
   chatSessionId: string,
   request: UpdateChatSessionRequest,
 ): Promise<void> {
-  return patch<void>(`/chat-sessions/${chatSessionId}?userId=${encodeURIComponent(userId)}`, request);
+  return patch<void>(`/chat-sessions/${chatSessionId}`, request);
 }
 
 export async function deleteChatSession(
-  userId: string,
   chatSessionId: string,
 ): Promise<void> {
-  return del<void>(`/chat-sessions/${chatSessionId}`, { userId });
+  return del<void>(`/chat-sessions/${chatSessionId}`);
 }
 
 export interface MetaData {
@@ -167,7 +156,6 @@ export interface GetChatMessagesResponse {
 }
 
 export interface CreateChatMessageRequest {
-  userId: string;
   agentId: string;
   sessionId: string;
   role: MessageType;
@@ -185,12 +173,9 @@ export interface UpdateChatMessageRequest {
 }
 
 export async function getChatMessagesBySessionId(
-  userId: string,
   sessionId: string,
 ): Promise<GetChatMessagesResponse> {
-  return get<GetChatMessagesResponse>(`/chat-messages/session/${sessionId}`, {
-    userId,
-  });
+  return get<GetChatMessagesResponse>(`/chat-messages/session/${sessionId}`);
 }
 
 export async function createChatMessage(
@@ -200,18 +185,16 @@ export async function createChatMessage(
 }
 
 export async function updateChatMessage(
-  userId: string,
   chatMessageId: string,
   request: UpdateChatMessageRequest,
 ): Promise<void> {
-  return patch<void>(`/chat-messages/${chatMessageId}?userId=${encodeURIComponent(userId)}`, request);
+  return patch<void>(`/chat-messages/${chatMessageId}`, request);
 }
 
 export async function deleteChatMessage(
-  userId: string,
   chatMessageId: string,
 ): Promise<void> {
-  return del<void>(`/chat-messages/${chatMessageId}`, { userId });
+  return del<void>(`/chat-messages/${chatMessageId}`);
 }
 
 export interface KnowledgeBaseVO {
@@ -287,12 +270,19 @@ export async function uploadDocument(
   kbId: string,
   file: File,
 ): Promise<CreateDocumentResponse> {
+  const token = window.localStorage.getItem("jchatmind.token");
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const formData = new FormData();
   formData.append("kbId", kbId);
   formData.append("file", file);
 
   const response = await fetch(`${BASE_URL}/documents/upload`, {
     method: "POST",
+    headers,
     body: formData,
   });
 
@@ -354,32 +344,66 @@ export interface GetUserMemoryCandidatesResponse {
   candidates: UserMemoryCandidateVO[];
 }
 
-export async function getUserMemories(
-  userId: string,
-): Promise<GetUserMemoriesResponse> {
-  return get<GetUserMemoriesResponse>(`/users/${encodeURIComponent(userId)}/memories`);
+export async function getUserMemories(): Promise<GetUserMemoriesResponse> {
+  return get<GetUserMemoriesResponse>("/users/memories");
 }
 
-export async function getUserMemoryCandidates(
-  userId: string,
-): Promise<GetUserMemoryCandidatesResponse> {
-  return get<GetUserMemoryCandidatesResponse>(
-    `/users/${encodeURIComponent(userId)}/memory-candidates`,
-  );
+export async function getUserMemoryCandidates(): Promise<GetUserMemoryCandidatesResponse> {
+  return get<GetUserMemoryCandidatesResponse>("/users/memory-candidates");
 }
 
 export async function confirmUserMemoryCandidate(
-  userId: string,
   candidateId: string,
 ): Promise<void> {
-  return post<void>(
-    `/users/${encodeURIComponent(userId)}/memory-candidates/${candidateId}/confirm`,
-  );
+  return post<void>(`/users/memory-candidates/${candidateId}/confirm`);
 }
 
 export async function deleteUserMemory(
-  userId: string,
   memoryId: string,
 ): Promise<void> {
-  return del<void>(`/users/${encodeURIComponent(userId)}/memories/${memoryId}`);
+  return del<void>(`/users/memories/${memoryId}`);
+}
+
+// ========== Auth APIs ==========
+
+export interface LoginRequest {
+  account?: string;
+  email?: string;
+  password?: string;
+  verifyCode?: string;
+}
+
+export interface RegisterRequest {
+  account: string;
+  username: string;
+  password: string;
+  email?: string;
+  verifyCode?: string;
+}
+
+export interface LoginResponse {
+  userId: number;
+  account: string;
+  username: string;
+  avatarUrl?: string;
+  isAdmin: number;
+  email?: string;
+  token: string;
+}
+
+export interface RegisterResponse {
+  userId: number;
+  token: string;
+}
+
+export async function loginUser(request: LoginRequest): Promise<LoginResponse> {
+  return post<LoginResponse>("/users/login", request);
+}
+
+export async function registerUser(request: RegisterRequest): Promise<RegisterResponse> {
+  return post<RegisterResponse>("/users", request);
+}
+
+export async function whoami(): Promise<LoginResponse> {
+  return get<LoginResponse>("/users/whoami");
 }

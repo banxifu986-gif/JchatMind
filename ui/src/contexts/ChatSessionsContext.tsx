@@ -10,26 +10,27 @@ import type { ChatSessionVO } from "../api/api.ts";
 export function ChatSessionsProvider({ children }: { children: React.ReactNode }) {
   const [chatSessions, setChatSessions] = useState<ChatSessionVO[]>([]);
   const [loading, setLoading] = useState(false);
-  const { userId } = useUser();
+  const { isLogin } = useUser();
 
   const fetchChatSessions = useCallback(async () => {
+    if (!isLogin) return;
     setLoading(true);
     try {
-      const resp = await getChatSessions(userId);
+      const resp = await getChatSessions();
       setChatSessions(resp.chatSessions);
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [isLogin]);
 
   useEffect(() => {
     fetchChatSessions();
   }, [fetchChatSessions]);
 
   const deleteChatSessionHandle = useCallback(async (chatSessionId: string) => {
-    await deleteChatSession(userId, chatSessionId);
+    await deleteChatSession(chatSessionId);
     await fetchChatSessions();
-  }, [fetchChatSessions, userId]);
+  }, [fetchChatSessions]);
 
   return (
     <ChatSessionsContext.Provider
