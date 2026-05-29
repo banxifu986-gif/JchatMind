@@ -184,10 +184,81 @@ Recall@10: 0.755 → 0.761 (+0.006), MRR: 0.544 → 0.545 (+0.001)
 
 ---
 
+## 第四层：Chunk 多样性指标 (2026-05-29)
+
+**定位**: 衡量检索结果在文档来源和内容路径上的分布广度，补充传统 Recall/MRR 只关注"命中与否"的不足。
+
+**指标**:
+
+| 指标 | 说明 |
+|------|------|
+| `uniquePaths` | top-K 结果中不重复的 contentPath 数量 |
+| `uniqueSources` | top-K 结果中不重复的 sourceName 数量 |
+| `pathDiversityRatio` | uniquePaths / totalSlots，衡量路径分散度 |
+| `sourceDiversityRatio` | uniqueSources / totalSlots，衡量来源分散度 |
+
+**计算方式**: 解析每个检索结果的 metadata JSON 中的 `contentPath` 和 `sourceName` 字段，统计全局唯一值，分别在 k=5 和 k=10 两个窗口计算。多样性指标同时输出到 aggregate、dimension 和 breakdown 三层。
+
+**用途**: 如果 top-5 全是同一章节的不同层级 chunk，即使 Recall=1.0 也存在多样性风险——LLM 生成时可用的信息面太窄。
+
+---
+
+## 第五层：答案质量评测 (2026-05-29)
+
+**定位**: 在检索层之上增加 LLM-as-judge 的答案质量评测，弥补纯检索指标无法反映端到端生成质量的不足。
+
+**模式**: 完全可选，默认关闭。启用后对采样 query cases 执行以下流程：
+
+1. 检索 top-5 chunk 拼接为上下文
+2. 调用 ChatClient 基于上下文生成回答
+3. LLM-as-judge 评判两个维度：
+   - **Faithfulness**：回答是否严格基于提供的上下文（无幻觉）
+   - **Answer Relevancy**：回答是否直接回应了查询（不偏题）
+
+**配置** (`application-rag-eval.yaml`):
+
+```yaml
+rag:
+  eval:
+    answer-quality:
+      enabled: false     # 默认关闭
+      sample-size: 10    # 每次评测采样条数
+      model: deepseek-chat
+```
+
+**启用方式**:
+
+```bash
+mvn test -Dtest=RagRecallEvaluationTest \
+  -Dspring.autoconfigure.exclude="" \
+  -DRAG_EVAL_ANSWER_QUALITY_ENABLED=true
+```
+
+**降级**: ChatClientRegistry 不可用时自动跳过，不阻塞主评测流程。
+
+---
+
+## 跨文档 Fixture (2026-05-29)
+
+原 fixture 仅覆盖单文档 3 个 section。现已扩展为 4 份电商客服域 Markdown 文档：
+
+| 文件 | 内容 | Sections |
+|------|------|----------|
+| `fixture-kb.md` | 订单退款、发货时效、会员积分 | 3 |
+| `fixture-kb-returns.md` | 退货退款政策（嵌套层级） | ~8 |
+| `fixture-kb-logistics.md` | 发货与物流（含交叉术语） | ~7 |
+| `fixture-kb-membership.md` | 会员体系与积分规则 | ~6 |
+
+交叉术语（"订单退款"同时出现在物流文档，"会员积分"同时出现在三个文档）可检验跨文档检索的辨别能力。
+
+通过 `rag.eval.fixture.multi-doc` 开关控制，默认开启。设为 `false` 回退到单文档兼容模式。
+
+---
+
 ## 已知局限
 
 - 当前评测配置需排除 MCP 自动配置（`ToolCallbackConverterAutoConfiguration` 等），否则启动超时
 - `MultiCprEvaluationTest` 启动依赖 `DeepSeekChatModel`（来自 `application.yaml` 中 `spring.ai.openai` 配置），即使未启用 LLM 改写
 - Ollama 本地 CPU 运行 embedding 速率约 4 条/秒，大批量导入耗时较长
-- Fixture 模式仅覆盖单文档场景，不测试跨文档检索
-- 未集成端到端答案质量评测（如 RAGAS）
+- 答案质量评测依赖 LLM API 调用，成本较高，不适合高频回归；当前仅对主评测采样 10 条
+- 答案质量评测默认关闭，启用需手动排除 LLM 自动配置排除项

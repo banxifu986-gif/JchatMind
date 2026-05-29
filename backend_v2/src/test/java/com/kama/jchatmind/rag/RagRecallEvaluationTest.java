@@ -1,8 +1,10 @@
 package com.kama.jchatmind.rag;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.converter.DocumentConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -188,6 +191,30 @@ class RagRecallEvaluationTest {
     @Value("classpath:rag-eval/fixtures/fixture-kb.md")
     private Resource fixtureMarkdown;
 
+    @Value("classpath:rag-eval/fixtures/fixture-kb-returns.md")
+    private Resource fixtureReturns;
+
+    @Value("classpath:rag-eval/fixtures/fixture-kb-logistics.md")
+    private Resource fixtureLogistics;
+
+    @Value("classpath:rag-eval/fixtures/fixture-kb-membership.md")
+    private Resource fixtureMembership;
+
+    @Value("${rag.eval.fixture.multi-doc:true}")
+    private boolean fixtureMultiDoc;
+
+    @Value("${rag.eval.answer-quality.enabled:false}")
+    private boolean answerQualityEnabled;
+
+    @Value("${rag.eval.answer-quality.sample-size:10}")
+    private int answerQualitySampleSize;
+
+    @Value("${rag.eval.answer-quality.model:deepseek-chat}")
+    private String answerQualityModel;
+
+    @Autowired(required = false)
+    private ChatClientRegistry chatClientRegistry;
+
     @Value("${document.storage.base-path}")
     private String documentStorageBasePath;
 
@@ -254,17 +281,29 @@ class RagRecallEvaluationTest {
         cleanupFixtureData();
 
         KnowledgeBase knowledgeBase = createKnowledgeBase(FIXTURE_KB_NAME, "离线召回测试知识库");
-        Document document = ingestFixtureMarkdown(knowledgeBase.getId(), fixtureMarkdown);
-        List<ChunkBgeM3> persistedChunks = chunkBgeM3Mapper.selectByDocId(document.getId());
-        List<MarkdownParserService.MarkdownSection> sections = parseMarkdownByDocument(document);
 
-        List<QueryCase> queryCases = buildQueryCases(
-                knowledgeBase.getId(),
-                document.getId(),
-                sections,
-                persistedChunks,
-                "fixture"
-        );
+        List<Resource> fixtureResources = new ArrayList<>();
+        fixtureResources.add(fixtureMarkdown);
+        if (fixtureMultiDoc) {
+            fixtureResources.add(fixtureReturns);
+            fixtureResources.add(fixtureLogistics);
+            fixtureResources.add(fixtureMembership);
+        }
+
+        List<QueryCase> queryCases = new ArrayList<>();
+        for (Resource resource : fixtureResources) {
+            Document document = ingestFixtureMarkdown(knowledgeBase.getId(), resource);
+            List<ChunkBgeM3> persistedChunks = chunkBgeM3Mapper.selectByDocId(document.getId());
+            List<MarkdownParserService.MarkdownSection> sections = parseMarkdownByDocument(document);
+            queryCases.addAll(buildQueryCases(
+                    knowledgeBase.getId(),
+                    document.getId(),
+                    sections,
+                    persistedChunks,
+                    "fixture"
+            ));
+        }
+
         return evaluateCases("fixture", queryCases, Map.of(), previousMissCaseIds);
     }
 
@@ -445,6 +484,14 @@ class RagRecallEvaluationTest {
                 ? buildVariantComparisons(source, cases, skippedDocumentReasons, primaryBreakdown, diagnosticBreakdown)
                 : List.of();
 
+        DiversityMetrics aggregateDiversityAt5 = mergeDiversity(primaryBreakdown, 5);
+        DiversityMetrics aggregateDiversityAt10 = mergeDiversity(primaryBreakdown, 10);
+
+        AnswerQualitySummary answerQualitySummary = null;
+        if (includeVariantComparisons && answerQualityEnabled) {
+            answerQualitySummary = tryEvaluateAnswerQuality(source, cases, retrievalService);
+        }
+
         return new EvaluationSummary(
                 source,
                 total,
@@ -472,9 +519,12 @@ class RagRecallEvaluationTest {
                 missCaseIds,
                 newMissCases,
                 fixedMissCases,
+                aggregateDiversityAt5,
+                aggregateDiversityAt10,
                 dimensions,
                 allBreakdown,
-                comparisons
+                comparisons,
+                answerQualitySummary
         );
     }
 
@@ -485,6 +535,7 @@ class RagRecallEvaluationTest {
             RagService retrievalService
     ) {
         List<EvaluatedCase> evaluatedCases = new ArrayList<>();
+        List<List<RagRetrievalResult>> allRetrievalResults = new ArrayList<>();
         Map<String, Integer> excludedReasons = new LinkedHashMap<>();
 
         for (QueryCase queryCase : cases) {
@@ -494,6 +545,7 @@ class RagRecallEvaluationTest {
             }
 
             List<RagRetrievalResult> results = retrieveForEvaluation(queryCase, retrievalService);
+            allRetrievalResults.add(results);
             List<String> topChunkIds = results.stream()
                     .map(RagRetrievalResult::getChunkId)
                     .toList();
@@ -536,6 +588,9 @@ class RagRecallEvaluationTest {
         List<String> newMissCases = newMissCases(group, missCaseIds, previousMissCaseIds);
         List<String> fixedMissCases = fixedMissCases(group, missCaseIds, previousMissCaseIds);
 
+        DiversityMetrics diversityAt5 = computeDiversity(allRetrievalResults, 5);
+        DiversityMetrics diversityAt10 = computeDiversity(allRetrievalResults, 10);
+
         return new EvaluationSummary(
                 group,
                 total,
@@ -563,9 +618,12 @@ class RagRecallEvaluationTest {
                 missCaseIds,
                 newMissCases,
                 fixedMissCases,
+                diversityAt5,
+                diversityAt10,
                 List.of(),
                 List.of(),
-                List.of()
+                List.of(),
+                null
         );
     }
 
@@ -875,7 +933,9 @@ class RagRecallEvaluationTest {
                 ratio(hitAt5Count, evaluated),
                 ratio(hitAt10Count, evaluated),
                 weightedAverage(matched, 3),
-                weightedAverage(matched, 10)
+                weightedAverage(matched, 10),
+                mergeDiversity(matched, 5),
+                mergeDiversity(matched, 10)
         );
     }
 
@@ -1642,6 +1702,244 @@ class RagRecallEvaluationTest {
                 .sum() / evaluated;
     }
 
+    private DiversityMetrics computeDiversity(List<List<RagRetrievalResult>> allResults, int k) {
+        Set<String> allUniquePaths = new LinkedHashSet<>();
+        Set<String> allUniqueSources = new LinkedHashSet<>();
+        int totalSlots = 0;
+
+        for (List<RagRetrievalResult> results : allResults) {
+            int limit = Math.min(k, results.size());
+            totalSlots += limit;
+            for (int i = 0; i < limit; i++) {
+                String metadata = results.get(i).getMetadata();
+                String contentPath = extractMetadataField(metadata, "contentPath");
+                String sourceName = extractMetadataField(metadata, "sourceName");
+                if (StringUtils.hasText(contentPath)) {
+                    allUniquePaths.add(contentPath);
+                }
+                if (StringUtils.hasText(sourceName)) {
+                    allUniqueSources.add(sourceName);
+                }
+            }
+        }
+
+        return new DiversityMetrics(
+                k,
+                allUniquePaths.size(),
+                allUniqueSources.size(),
+                totalSlots == 0 ? 0D : (double) allUniquePaths.size() / totalSlots,
+                totalSlots == 0 ? 0D : (double) allUniqueSources.size() / totalSlots
+        );
+    }
+
+    private DiversityMetrics mergeDiversity(List<EvaluationSummary> summaries, int k) {
+        int totalUniquePaths = 0;
+        int totalUniqueSources = 0;
+        int totalEvaluated = 0;
+
+        for (EvaluationSummary summary : summaries) {
+            DiversityMetrics dm = k == 5 ? summary.diversityAt5() : summary.diversityAt10();
+            if (dm != null) {
+                totalUniquePaths += dm.uniquePaths();
+                totalUniqueSources += dm.uniqueSources();
+            }
+            totalEvaluated += summary.evaluated();
+        }
+
+        int totalSlots = totalEvaluated * k;
+        return new DiversityMetrics(
+                k,
+                totalUniquePaths,
+                totalUniqueSources,
+                totalSlots == 0 ? 0D : (double) totalUniquePaths / totalSlots,
+                totalSlots == 0 ? 0D : (double) totalUniqueSources / totalSlots
+        );
+    }
+
+    private String extractMetadataField(String metadata, String field) {
+        if (!StringUtils.hasText(metadata)) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(metadata);
+            JsonNode value = node.get(field);
+            return value != null && !value.isNull() ? value.asText() : null;
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
+
+    private AnswerQualitySummary tryEvaluateAnswerQuality(
+            String source,
+            List<QueryCase> cases,
+            RagService retrievalService
+    ) {
+        if (chatClientRegistry == null) {
+            System.out.println("[answer-quality] ChatClientRegistry not available (LLM auto-config excluded?), skipping.");
+            return new AnswerQualitySummary(0, 0, "no_chat_client_registry", 0D, 0D, List.of(), null);
+        }
+        ChatClient chatClient = chatClientRegistry.get(answerQualityModel);
+        if (chatClient == null) {
+            System.out.println("[answer-quality] Model '" + answerQualityModel + "' not found in registry, skipping.");
+            return new AnswerQualitySummary(0, 0, "model_not_found", 0D, 0D, List.of(), answerQualityModel);
+        }
+
+        List<QueryCase> evaluableCases = cases.stream()
+                .filter(QueryCase::evaluable)
+                .toList();
+        if (evaluableCases.isEmpty()) {
+            return new AnswerQualitySummary(0, 0, "no_evaluable_cases", 0D, 0D, List.of(), answerQualityModel);
+        }
+
+        List<QueryCase> sampled = sampleAnswerQualityCases(evaluableCases);
+        AnswerQualityEvaluator evaluator = new AnswerQualityEvaluator(chatClient);
+        return evaluator.evaluate(sampled, retrievalService);
+    }
+
+    private List<QueryCase> sampleAnswerQualityCases(List<QueryCase> evaluableCases) {
+        List<String> preferredStyles = List.of(
+                QUERY_STYLE_REWRITE,
+                QUERY_STYLE_TITLE,
+                QUERY_STYLE_USER_LIKE_QUESTION
+        );
+        List<QueryCase> sampled = new ArrayList<>();
+        int perStyle = Math.max(1, answerQualitySampleSize / preferredStyles.size());
+        for (String style : preferredStyles) {
+            evaluableCases.stream()
+                    .filter(c -> style.equals(c.queryStyle()))
+                    .limit(perStyle)
+                    .forEach(sampled::add);
+        }
+        if (sampled.size() < answerQualitySampleSize) {
+            evaluableCases.stream()
+                    .filter(c -> !sampled.contains(c))
+                    .limit(answerQualitySampleSize - sampled.size())
+                    .forEach(sampled::add);
+        }
+        return sampled;
+    }
+
+    private class AnswerQualityEvaluator {
+        private final ChatClient chatClient;
+
+        AnswerQualityEvaluator(ChatClient chatClient) {
+            this.chatClient = chatClient;
+        }
+
+        AnswerQualitySummary evaluate(List<QueryCase> cases, RagService retrievalService) {
+            List<AnswerQualityScore> scores = new ArrayList<>();
+            int skipped = 0;
+
+            for (QueryCase queryCase : cases) {
+                try {
+                    List<RagRetrievalResult> results = retrievalService.retrieve(
+                            List.of(queryCase.kbId()), queryCase.query(), queryCase.context(), 5);
+                    String context = buildContextText(results);
+                    if (!StringUtils.hasText(context)) {
+                        skipped++;
+                        continue;
+                    }
+                    String answer = generateAnswer(queryCase.query(), context);
+                    if (!StringUtils.hasText(answer)) {
+                        skipped++;
+                        continue;
+                    }
+                    double faithfulness = evaluateFaithfulness(queryCase.query(), context, answer);
+                    double answerRelevancy = evaluateAnswerRelevancy(queryCase.query(), answer);
+                    scores.add(new AnswerQualityScore(
+                            queryCase.caseId(),
+                            queryCase.queryStyle(),
+                            queryCase.query(),
+                            faithfulness,
+                            answerRelevancy,
+                            "faithfulness=" + faithfulness,
+                            "relevancy=" + answerRelevancy
+                    ));
+                } catch (Exception e) {
+                    System.out.println("[answer-quality] Failed to evaluate case " + queryCase.caseId() + ": " + e.getMessage());
+                    skipped++;
+                }
+            }
+
+            int evaluated = scores.size();
+            double avgFaithfulness = evaluated == 0 ? 0D
+                    : scores.stream().mapToDouble(AnswerQualityScore::faithfulness).average().orElse(0D);
+            double avgAnswerRelevancy = evaluated == 0 ? 0D
+                    : scores.stream().mapToDouble(AnswerQualityScore::answerRelevancy).average().orElse(0D);
+
+            return new AnswerQualitySummary(
+                    evaluated, skipped, skipped > 0 ? "partial" : null,
+                    avgFaithfulness, avgAnswerRelevancy,
+                    scores, answerQualityModel
+            );
+        }
+
+        private String buildContextText(List<RagRetrievalResult> results) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < results.size(); i++) {
+                RagRetrievalResult r = results.get(i);
+                if (StringUtils.hasText(r.getContent())) {
+                    sb.append("--- (来源: ").append(i + 1).append(") ---\n");
+                    sb.append(r.getContent()).append("\n\n");
+                }
+            }
+            return sb.toString().trim();
+        }
+
+        private String generateAnswer(String query, String context) {
+            String prompt = "根据以下上下文回答问题。严格基于上下文，不要编造信息。\n\n上下文:\n"
+                    + context + "\n\n问题: " + query;
+            return callLlm(prompt);
+        }
+
+        private double evaluateFaithfulness(String query, String context, String answer) {
+            String prompt = "判断\"生成的回答\"是否完全基于\"提供的上下文\"。"
+                    + "回答中如果包含上下文不存在的事实，应扣分。\n"
+                    + "查询: " + query + "\n"
+                    + "上下文: " + context + "\n"
+                    + "回答: " + answer + "\n\n"
+                    + "回复严格JSON格式，不要包含其他文字: {\"score\": 0.0到1.0的分数, \"reason\": \"中文解释\"}";
+            return parseScore(callLlm(prompt));
+        }
+
+        private double evaluateAnswerRelevancy(String query, String answer) {
+            String prompt = "判断\"生成的回答\"是否直接回答了\"查询\"。\n"
+                    + "查询: " + query + "\n"
+                    + "回答: " + answer + "\n\n"
+                    + "回复严格JSON格式，不要包含其他文字: {\"score\": 0.0到1.0的分数, \"reason\": \"中文解释\"}";
+            return parseScore(callLlm(prompt));
+        }
+
+        private String callLlm(String prompt) {
+            try {
+                return chatClient.prompt().user(prompt).call().content();
+            } catch (Exception e) {
+                System.out.println("[answer-quality] LLM call failed: " + e.getMessage());
+                return null;
+            }
+        }
+
+        private double parseScore(String llmResponse) {
+            if (!StringUtils.hasText(llmResponse)) {
+                return 0D;
+            }
+            try {
+                String json = llmResponse.trim();
+                if (json.startsWith("```")) {
+                    json = json.replaceAll("```[a-z]*\\s*", "").replaceAll("```\\s*$", "").trim();
+                }
+                JsonNode node = objectMapper.readTree(json);
+                JsonNode scoreNode = node.get("score");
+                if (scoreNode != null && scoreNode.isNumber()) {
+                    return Math.max(0D, Math.min(1D, scoreNode.asDouble()));
+                }
+                return 0D;
+            } catch (Exception e) {
+                return 0D;
+            }
+        }
+    }
+
     private void addCount(Map<String, Integer> counts, String key) {
         addCount(counts, key, 1);
     }
@@ -1843,9 +2141,12 @@ class RagRecallEvaluationTest {
             List<String> missCaseIds,
             List<String> newMissCases,
             List<String> fixedMissCases,
+            @JsonInclude(JsonInclude.Include.NON_NULL) DiversityMetrics diversityAt5,
+            @JsonInclude(JsonInclude.Include.NON_NULL) DiversityMetrics diversityAt10,
             List<DimensionSummary> dimensions,
             List<EvaluationSummary> breakdown,
-            List<VariantComparison> comparisons
+            List<VariantComparison> comparisons,
+            @JsonInclude(JsonInclude.Include.NON_NULL) AnswerQualitySummary answerQuality
     ) {
     }
 
@@ -1862,7 +2163,9 @@ class RagRecallEvaluationTest {
             double recallAt5,
             double recallAt10,
             double mrrAt3,
-            double mrrAt10
+            double mrrAt10,
+            @JsonInclude(JsonInclude.Include.NON_NULL) DiversityMetrics diversityAt5,
+            @JsonInclude(JsonInclude.Include.NON_NULL) DiversityMetrics diversityAt10
     ) {
     }
 
@@ -1871,6 +2174,15 @@ class RagRecallEvaluationTest {
             int hitAt3Not1,
             int hitAt5Not3,
             int missAt5
+    ) {
+    }
+
+    private record DiversityMetrics(
+            int topK,
+            int uniquePaths,
+            int uniqueSources,
+            double pathDiversityRatio,
+            double sourceDiversityRatio
     ) {
     }
 
@@ -1898,6 +2210,28 @@ class RagRecallEvaluationTest {
     private record GoldResolution(
             List<String> chunkIds,
             String mode
+    ) {
+    }
+
+    private record AnswerQualityScore(
+            String caseId,
+            String queryStyle,
+            String query,
+            double faithfulness,
+            double answerRelevancy,
+            String faithfulnessReason,
+            String answerRelevancyReason
+    ) {
+    }
+
+    private record AnswerQualitySummary(
+            int evaluated,
+            int skipped,
+            String skipReason,
+            double avgFaithfulness,
+            double avgAnswerRelevancy,
+            List<AnswerQualityScore> scores,
+            String modelName
     ) {
     }
 

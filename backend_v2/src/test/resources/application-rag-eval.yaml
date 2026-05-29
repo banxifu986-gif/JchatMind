@@ -22,3 +22,9 @@ rag:
     real-max-documents: ${RAG_EVAL_REAL_MAX_DOCUMENTS:0}
     real-max-cases: ${RAG_EVAL_REAL_MAX_CASES:0}
     real-document-order: ${RAG_EVAL_REAL_DOCUMENT_ORDER:created_desc}
+    fixture:
+      multi-doc: ${RAG_EVAL_FIXTURE_MULTI_DOC:true}
+    answer-quality:
+      enabled: ${RAG_EVAL_ANSWER_QUALITY_ENABLED:false}
+      sample-size: ${RAG_EVAL_ANSWER_QUALITY_SAMPLE_SIZE:10}
+      model: ${RAG_EVAL_ANSWER_QUALITY_MODEL:deepseek-chat}
