@@ -8,7 +8,7 @@ import {
   MoreOutlined,
 } from "@ant-design/icons";
 import type { AgentVO } from "../../api/api.ts";
-import { formatDateTime, getAgentEmoji } from "../../utils";
+import { formatDateTime, getAgentAvatar } from "../../utils";
 
 interface AgentTabContentProps {
   agents: AgentVO[];
@@ -25,11 +25,10 @@ const AgentTabContent: React.FC<AgentTabContentProps> = ({
   onEditAgent,
   onDeleteAgent,
 }) => {
-  // 为每个 agent 生成 emoji
   const agentsWithEmoji = useMemo(() => {
     return agents.map((agent) => ({
       ...agent,
-      emoji: getAgentEmoji(agent.id),
+      ...getAgentAvatar(agent.id, agent.name),
     }));
   }, [agents]);
 
@@ -104,8 +103,8 @@ const AgentTabContent: React.FC<AgentTabContentProps> = ({
                   className="w-full px-3 py-3 rounded-lg bg-white cursor-pointer transition-all hover:bg-gray-100 hover:shadow-sm group relative"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-200 to-orange-200 flex items-center justify-center shrink-0 text-lg mt-0.5">
-                      {agent.emoji}
+                    <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${agent.gradientClass} flex items-center justify-center shrink-0 text-white font-semibold text-sm mt-0.5`}>
+                      {agent.initial}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-gray-900 truncate">

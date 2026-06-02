@@ -1,24 +1,24 @@
-export const getAgentEmoji = (agentId: string): string => {
-  // 使用 agent id 的哈希值来选择 emoji，确保同一个 agent 总是显示相同的 emoji
-  const EMOJI_LIST = [
-    "🤖",
-    "🎯",
-    "🚀",
-    "💡",
-    "🔮",
-    "⚡",
-    "🌟",
-    "🎨",
-    "🔧",
-    "📚",
+export const getAgentAvatar = (agentId: string, name?: string): { initial: string; gradientClass: string } => {
+  const GRADIENTS = [
+    "from-blue-400 to-cyan-500",
+    "from-emerald-400 to-teal-500",
+    "from-amber-400 to-rose-500",
+    "from-violet-400 to-purple-500",
+    "from-orange-400 to-red-500",
+    "from-pink-400 to-rose-500",
+    "from-indigo-400 to-blue-500",
+    "from-teal-400 to-green-500",
+    "from-yellow-400 to-orange-500",
+    "from-rose-400 to-pink-500",
   ];
   let hash = 0;
   for (let i = 0; i < agentId.length; i++) {
     hash = (hash << 5) - hash + agentId.charCodeAt(i);
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash & hash;
   }
-  const index = Math.abs(hash) % EMOJI_LIST.length;
-  return EMOJI_LIST[index];
+  const gradientClass = GRADIENTS[Math.abs(hash) % GRADIENTS.length];
+  const initial = name ? name.charAt(0).toUpperCase() : "A";
+  return { initial, gradientClass };
 };
 
 export const getKnowledgeBaseEmoji = (knowledgeBaseId: string): string => {
