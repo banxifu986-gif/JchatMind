@@ -19,6 +19,8 @@ public interface AgentMapper {
 
     List<Agent> selectAll();
 
+    List<Agent> selectByUserId(String userId);
+
     int deleteById(String id);
 
     int updateById(Agent agent);

@@ -1,6 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.AgentConverter;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.AgentMapper;
@@ -26,10 +27,12 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
 
     private final AgentMapper agentMapper;
     private final AgentConverter agentConverter;
+    private final RequestScopeData requestScopeData;
 
     @Override
     public GetAgentsResponse getAgents() {
-        List<Agent> agents = agentMapper.selectAll();
+        String userId = requireUserId();
+        List<Agent> agents = agentMapper.selectByUserId(userId);
         List<AgentVO> result = new ArrayList<>();
         for (Agent agent : agents) {
             try {
@@ -47,23 +50,26 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     @Override
     public CreateAgentResponse createAgent(CreateAgentRequest request) {
         try {
+            String userId = requireUserId();
+
             // 将 CreateAgentRequest 转换为 AgentDTO
             AgentDTO agentDTO = agentConverter.toDTO(request);
-            
+            agentDTO.setUserId(userId);
+
             // 将 AgentDTO 转换为 Agent 实体
             Agent agent = agentConverter.toEntity(agentDTO);
-            
+
             // 设置创建时间和更新时间
             LocalDateTime now = LocalDateTime.now();
             agent.setCreatedAt(now);
             agent.setUpdatedAt(now);
-            
+
             // 插入数据库，ID 由数据库自动生成
             int result = agentMapper.insert(agent);
             if (result <= 0) {
                 throw new BizException("创建 agent 失败");
             }
-            
+
             // 返回生成的 agentId
             return CreateAgentResponse.builder()
                     .agentId(agent.getId())
@@ -75,12 +81,9 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
 
     @Override
     public void deleteAgent(String agentId) {
-        Agent agent = agentMapper.selectById(agentId);
-        if (agent == null) {
-            throw new BizException("Agent 不存在: " + agentId);
-        }
-        
-        int result = agentMapper.deleteById(agentId);
+        Agent agent = requireOwnedAgent(agentId);
+
+        int result = agentMapper.deleteById(agent.getId());
         if (result <= 0) {
             throw new BizException("删除 agent 失败");
         }
@@ -89,26 +92,24 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     @Override
     public void updateAgent(String agentId, UpdateAgentRequest request) {
         try {
-            // 查询现有的 agent
-            Agent existingAgent = agentMapper.selectById(agentId);
-            if (existingAgent == null) {
-                throw new BizException("Agent 不存在: " + agentId);
-            }
-            
+            String userId = requireUserId();
+            Agent existingAgent = requireOwnedAgent(agentId);
+
             // 将现有 Agent 转换为 AgentDTO
             AgentDTO agentDTO = agentConverter.toDTO(existingAgent);
-            
+
             // 使用 UpdateAgentRequest 更新 AgentDTO
             agentConverter.updateDTOFromRequest(agentDTO, request);
-            
+
             // 将更新后的 AgentDTO 转换回 Agent 实体
             Agent updatedAgent = agentConverter.toEntity(agentDTO);
-            
-            // 保留原有的 ID 和创建时间
+
+            // 保留原有的 ID、userId 和创建时间
             updatedAgent.setId(existingAgent.getId());
+            updatedAgent.setUserId(userId);
             updatedAgent.setCreatedAt(existingAgent.getCreatedAt());
             updatedAgent.setUpdatedAt(LocalDateTime.now());
-            
+
             // 更新数据库
             int result = agentMapper.updateById(updatedAgent);
             if (result <= 0) {
@@ -117,5 +118,25 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
         } catch (JsonProcessingException e) {
             throw new BizException("更新 agent 时发生序列化错误: " + e.getMessage());
         }
+    }
+
+    private String requireUserId() {
+        Long userId = requestScopeData.getUserId();
+        if (userId == null) {
+            throw new BizException("用户未登录");
+        }
+        return String.valueOf(userId);
+    }
+
+    private Agent requireOwnedAgent(String agentId) {
+        String userId = requireUserId();
+        Agent agent = agentMapper.selectById(agentId);
+        if (agent == null) {
+            throw new BizException("Agent 不存在: " + agentId);
+        }
+        if (agent.getUserId() == null || !agent.getUserId().equals(userId)) {
+            throw new BizException("无权操作此 Agent");
+        }
+        return agent;
     }
 }

@@ -19,6 +19,8 @@ public class Agent {
 
     private String systemPrompt;
 
+    private String userId;
+
     private String model;
 
     // JSON String
