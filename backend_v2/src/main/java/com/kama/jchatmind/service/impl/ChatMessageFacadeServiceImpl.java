@@ -48,7 +48,12 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
 
     @Override
     public List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit) {
-        requireOwnedSession(sessionId);
+        return getChatMessagesBySessionIdRecently(sessionId, limit, requireUserId());
+    }
+
+    @Override
+    public List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit, String userId) {
+        requireOwnedSession(sessionId, userId);
         List<ChatMessage> chatMessages = chatMessageMapper.selectBySessionIdRecently(sessionId, limit);
         List<ChatMessageDTO> result = new ArrayList<>();
         for (ChatMessage chatMessage : chatMessages) {
@@ -74,7 +79,12 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
 
     @Override
     public CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO) {
-        requireOwnedSession(chatMessageDTO.getSessionId());
+        return createChatMessage(chatMessageDTO, requireUserId());
+    }
+
+    @Override
+    public CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO, String userId) {
+        requireOwnedSession(chatMessageDTO.getSessionId(), userId);
         ChatMessage chatMessage = doCreateChatMessage(chatMessageDTO);
         return CreateChatMessageResponse.builder()
                 .chatMessageId(chatMessage.getId())
@@ -171,6 +181,10 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
 
     private void requireOwnedSession(String sessionId) {
         chatSessionFacadeService.getChatSession(sessionId);
+    }
+
+    private void requireOwnedSession(String sessionId, String userId) {
+        chatSessionFacadeService.getChatSession(sessionId, userId);
     }
 
     private ChatMessage requireOwnedMessage(String chatMessageId) {

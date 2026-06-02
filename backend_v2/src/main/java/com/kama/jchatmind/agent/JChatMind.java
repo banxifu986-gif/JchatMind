@@ -35,6 +35,9 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -161,7 +164,7 @@ public class JChatMind {
                             .toolCalls(assistantMessage.getToolCalls())
                             .build())
                     .build();
-            CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO);
+            CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO, this.userId);
             chatMessageDTO.setId(chatMessage.getChatMessageId());
             pendingChatMessages.add(chatMessageDTO);
         } else if (message instanceof ToolResponseMessage toolResponseMessage) {
@@ -173,7 +176,7 @@ public class JChatMind {
                                 .toolResponse(toolResponse)
                                 .build())
                         .build();
-                CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO);
+                CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO, this.userId);
                 chatMessageDTO.setId(chatMessage.getChatMessageId());
                 pendingChatMessages.add(chatMessageDTO);
             }
@@ -488,21 +491,27 @@ public class JChatMind {
 
         ChatResponse responseToExecute = buildFilteredChatResponse(allowedToolCalls);
         try {
+            RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
             ToolExecutionResult result = CompletableFuture
                     .supplyAsync(() -> {
-                        HarnessExecutionContextHolder.bind(
-                                allowedContexts,
-                                new HarnessExecutionContextHolder.BatchMetadata(
-                                        chatSessionId,
-                                        agentId,
-                                        userId,
-                                        currentStepNumber
-                                )
-                        );
+                        RequestContextHolder.setRequestAttributes(requestAttributes);
                         try {
-                            return toolCallingManager.executeToolCalls(prompt, responseToExecute);
+                            HarnessExecutionContextHolder.bind(
+                                    allowedContexts,
+                                    new HarnessExecutionContextHolder.BatchMetadata(
+                                            chatSessionId,
+                                            agentId,
+                                            userId,
+                                            currentStepNumber
+                                    )
+                            );
+                            try {
+                                return toolCallingManager.executeToolCalls(prompt, responseToExecute);
+                            } finally {
+                                HarnessExecutionContextHolder.clear();
+                            }
                         } finally {
-                            HarnessExecutionContextHolder.clear();
+                            RequestContextHolder.resetRequestAttributes();
                         }
                     })
                     .orTimeout(toolTimeoutSeconds, TimeUnit.SECONDS)

@@ -12,6 +12,8 @@ public interface ChatSessionFacadeService {
 
     GetChatSessionResponse getChatSession(String chatSessionId);
 
+    GetChatSessionResponse getChatSession(String chatSessionId, String userId);
+
     GetChatSessionsResponse getChatSessionsByAgentId(String agentId);
 
     CreateChatSessionResponse createChatSession(CreateChatSessionRequest request);
@@ -22,5 +24,9 @@ public interface ChatSessionFacadeService {
 
     RagRetrievalContext getRetrievalContext(String chatSessionId);
 
+    RagRetrievalContext getRetrievalContext(String chatSessionId, String userId);
+
     void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext);
+
+    void updateRetrievalContext(String chatSessionId, RagRetrievalContext retrievalContext, String userId);
 }

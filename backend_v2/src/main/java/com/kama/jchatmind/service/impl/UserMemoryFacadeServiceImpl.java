@@ -211,7 +211,8 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
 
         List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
                 sessionId,
-                8
+                8,
+                userId
         );
         List<ChatMessageDTO> userMessages = recentMessages.stream()
                 .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)

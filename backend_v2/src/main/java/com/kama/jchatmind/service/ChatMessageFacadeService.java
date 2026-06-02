@@ -13,9 +13,13 @@ public interface ChatMessageFacadeService {
 
     List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit);
 
+    List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit, String userId);
+
     CreateChatMessageResponse createChatMessage(CreateChatMessageRequest request);
 
     CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO);
+
+    CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO, String userId);
 
     CreateChatMessageResponse agentCreateChatMessage(CreateChatMessageRequest request);
 

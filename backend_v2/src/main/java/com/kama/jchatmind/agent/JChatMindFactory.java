@@ -98,7 +98,8 @@ public class JChatMindFactory {
 
         List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
                 chatSessionId,
-                messageLength
+                messageLength,
+                userId
         );
 
         String latestUserQuery = chatMessages.stream()

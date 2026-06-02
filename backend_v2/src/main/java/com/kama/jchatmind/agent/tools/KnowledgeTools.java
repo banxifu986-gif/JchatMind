@@ -79,7 +79,7 @@ public class KnowledgeTools implements Tool {
         if (!StringUtils.hasText(chatSessionId) || !StringUtils.hasText(userId)) {
             return null;
         }
-        return chatSessionFacadeService.getRetrievalContext(chatSessionId);
+        return chatSessionFacadeService.getRetrievalContext(chatSessionId, userId);
     }
 
     private void updateRetrievalContext(List<RagRetrievalResult> results) {
@@ -88,7 +88,7 @@ public class KnowledgeTools implements Tool {
         }
         RagRetrievalContext context = buildContextFromTopResult(results.get(0));
         if (context != null && context.hasContext()) {
-            chatSessionFacadeService.updateRetrievalContext(chatSessionId, context);
+            chatSessionFacadeService.updateRetrievalContext(chatSessionId, context, userId);
         }
     }
 
