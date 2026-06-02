@@ -164,7 +164,7 @@ const KnowledgeBaseView: React.FC = () => {
   // 显示知识库详情和文档列表
   return (
     <div className="flex flex-col h-full p-6 overflow-y-auto">
-      <div className="max-w-6xl w-full mx-auto">
+      <div className="max-w-5xl w-full mx-auto">
         <div className="mb-3">
           <Card>
             <div className="flex items-start gap-4">

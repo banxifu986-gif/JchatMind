@@ -27,7 +27,19 @@ services:
       - "15672:15672"
     restart: unless-stopped
 
+  ollama:
+    build:
+      context: ./docker/ollama
+    container_name: jchatmind-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     external: true
     name: jchatmind_postgres_data
+  ollama_data:
+    name: jchatmind_ollama_data

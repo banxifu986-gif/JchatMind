@@ -99,7 +99,7 @@ jchatmind:
       max-records-per-session: 1000
 
 jwt:
-  secret: ${JWT_SECRET:change-me-change-me-change-me-change-me-change-me}
+  secret: ${JWT_SECRET:change-me-change-me-change-me-change-me-change-me-change-me-to-64}
   expiration: ${JWT_EXPIRATION:2592000}
 
 mail:
