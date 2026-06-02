@@ -1,2 +1,5 @@
 /.baseline_head/
 /RAGDataTest
+.claude/settings.local.json
+.claude/understand-anything-temp/
+.understand-anything/
