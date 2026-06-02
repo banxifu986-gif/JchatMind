@@ -1,0 +1,41 @@
+spring:
+  autoconfigure:
+    exclude:
+      # 需外部服务器的服务
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+      - org.springframework.boot.autoconfigure.mail.MailSenderAutoConfiguration
+      # MCP 客户端/服务端
+      - org.springframework.ai.mcp.client.common.autoconfigure.McpClientAutoConfiguration
+      - org.springframework.ai.mcp.client.common.autoconfigure.McpToolCallbackAutoConfiguration
+      - org.springframework.ai.mcp.server.common.autoconfigure.ToolCallbackConverterAutoConfiguration
+      - org.springframework.ai.mcp.server.common.autoconfigure.StatelessToolCallbackConverterAutoConfiguration
+      - org.springframework.ai.mcp.server.common.autoconfigure.McpServerAutoConfiguration
+
+  # 禁用 RabbitMQ listener 自动启动
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+
+  # 邮件占位（不会实际发送）
+  mail:
+    username: test@example.com
+    password: test-password
+
+  # 测试用虚拟 API Key（不会实际调用模型）
+  ai:
+    deepseek:
+      api-key: test-dummy-key
+      base-url: http://localhost:9999
+    zhipuai:
+      api-key: test-dummy-key
+      base-url: http://localhost:9999
+
+# 测试用 JWT 密钥
+jwt:
+  secret: test-secret-key-at-least-256-bits-long-for-testing-purposes-only
+
+# 测试用 MCP API Key 置空
+mcp:
+  api-key: ""
