@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Card, Space, Typography, Select } from "antd";
+import { Card, Space, Typography, Select, Tag } from "antd";
 import {
   BulbOutlined,
   MessageOutlined,
@@ -7,13 +7,12 @@ import {
   DownOutlined,
 } from "@ant-design/icons";
 import { Sender } from "@ant-design/x";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   type AgentVO,
-  createChatMessage,
   createChatSession,
 } from "../../../api/api.ts";
-import { getAgentEmoji } from "../../../utils";
+import { getAgentAvatar } from "../../../utils";
 import { useChatSessions } from "../../../hooks/useChatSessions.ts";
 const { Title, Text } = Typography;
 
@@ -27,27 +26,36 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
   agents,
 }) => {
   const [message, setMessage] = useState("");
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const { refreshChatSessions } = useChatSessions();
   const agentsWithEmoji = useMemo(() => {
     return agents.map((agent) => ({
       ...agent,
-      emoji: getAgentEmoji(agent.id),
+      ...getAgentAvatar(agent.id, agent.name),
     }));
   }, [agents]);
 
+  const preselectedAgentId = (location.state as { selectedAgentId?: string })?.selectedAgentId;
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
+    () => preselectedAgentId ?? null,
+  );
+
   const effectiveAgentId = useMemo(() => {
-    if (selectedAgentId) {
+    if (selectedAgentId && agents.some((a) => a.id === selectedAgentId)) {
       return selectedAgentId;
     }
     return agents.length > 0 ? agents[0].id : null;
   }, [selectedAgentId, agents]);
 
+  const effectiveAgent = useMemo(() => {
+    return agentsWithEmoji.find((a) => a.id === effectiveAgentId) ?? null;
+  }, [agentsWithEmoji, effectiveAgentId]);
+
   return (
     <div className="flex flex-col h-full">
       {agents.length > 0 && (
-        <div className="border-b border-gray-200 bg-white px-4 py-3">
+        <div className="border-b border-gray-200 bg-white px-4 py-3 flex items-center gap-3">
           <Select
             value={effectiveAgentId}
             onChange={(value) => setSelectedAgentId(value)}
@@ -55,30 +63,40 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
             className="agent-selector"
             suffixIcon={<DownOutlined className="text-gray-400" />}
             placeholder="选择智能体"
-            optionRender={(option) => (
-              <div className="flex items-center gap-2">
-                <span className="text-lg">
-                  {agentsWithEmoji.find((a) => a.id === option.value)?.emoji}
-                </span>
-                <span className="text-sm">{option.label}</span>
-              </div>
-            )}
+            optionRender={(option) => {
+              const agent = agentsWithEmoji.find((a) => a.id === option.value);
+              return (
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex w-5 h-5 rounded bg-gradient-to-br ${agent?.gradientClass} items-center justify-center text-white text-[10px] font-semibold`}>
+                    {agent?.initial}
+                  </span>
+                  <span className="text-sm">{option.label}</span>
+                </div>
+              );
+            }}
             options={agentsWithEmoji.map((agent) => ({
               value: agent.id,
               label: agent.name,
             }))}
           />
+          {effectiveAgent && (
+            <Tag color="blue">
+              当前：{effectiveAgent.name}
+            </Tag>
+          )}
         </div>
       )}
 
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-2xl w-full space-y-6">
+        <div className="max-w-5xl w-full space-y-6">
           <div className="text-center mb-8">
             <Title level={2} className="mb-2">
               开始新的对话
             </Title>
             <Text type="secondary" className="text-base">
-              选择一个智能体开始聊天，登录后用户数据由 JWT Token 边界隔离。
+              {effectiveAgent
+                ? `当前智能体：${effectiveAgent.name}，在下方输入消息即可开始对话。`
+                : "请先在左侧「智能体」标签中创建一个智能体助手。"}
             </Text>
           </div>
 
@@ -138,19 +156,23 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
               agentId: effectiveAgentId,
               title: message.slice(0, 20),
             });
-            await createChatMessage({
-              sessionId: response.chatSessionId ?? "",
-              content: message,
-              role: "user",
-              agentId: effectiveAgentId,
-            });
             await refreshChatSessions();
             setMessage("");
-            navigate(`/chat/${response.chatSessionId}`);
+            navigate(`/chat/${response.chatSessionId}`, {
+              replace: true,
+              state: {
+                init: true,
+                initMessage: message,
+              },
+            });
           }}
           value={message}
           loading={loading}
-          placeholder="输入消息开始对话..."
+          placeholder={
+            effectiveAgent
+              ? `向 ${effectiveAgent.name} 发送消息...`
+              : "请先选择智能体"
+          }
           onChange={setMessage}
         />
       </div>

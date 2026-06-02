@@ -5,10 +5,11 @@ import {
   USER_KEY,
 } from "./UserContextBase.ts";
 import type { AuthContextType, UserInfo } from "./UserContextBase.ts";
+import { BASE_URL } from "../api/http.ts";
 
 async function whoamiCall(token: string): Promise<{ user: UserInfo; token: string } | null> {
   try {
-    const resp = await fetch("/api/users/whoami", {
+    const resp = await fetch(`${BASE_URL}/users/whoami`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) return null;

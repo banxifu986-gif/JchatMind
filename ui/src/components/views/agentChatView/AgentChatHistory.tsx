@@ -7,6 +7,7 @@ import {
   RobotOutlined,
   DownOutlined,
   RightOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import type { ChatMessageVO, SseMessageType, ToolCall, ToolResponse } from "../../../types";
 
@@ -281,7 +282,8 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
                       filter: "brightness(1.3)",
                     }}
                   >
-                    ✨ {getStatusLabel()}
+                    <ThunderboltOutlined className="mr-1" />
+                    {getStatusLabel()}
                   </span>
                   <span className="text-gray-400">·</span>
                   <span className="text-gray-600">{agentStatusText}</span>

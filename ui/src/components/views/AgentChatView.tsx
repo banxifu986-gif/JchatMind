@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { message as antdMessage } from "antd";
+import { RobotOutlined } from "@ant-design/icons";
 import AgentChatHistory from "./agentChatView/AgentChatHistory.tsx";
 import AgentChatInput from "./agentChatView/AgentChatInput.tsx";
 import {
@@ -20,7 +21,10 @@ const SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL;
 const AgentChatView: React.FC = () => {
   const { chatSessionId } = useParams<{ chatSessionId: string }>();
   const navigate = useNavigate();
-  const { state } = useLocation();
+  const location = useLocation();
+  const state = location.state;
+  const initProcessedRef = useRef(false);
+  const seenMessageIdsRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
@@ -33,6 +37,8 @@ const AgentChatView: React.FC = () => {
   const [agentStatusType, setAgentStatusType] = useState<SseMessageType>();
 
   const addMessage = (message: ChatMessageVO) => {
+    if (seenMessageIdsRef.current.has(message.id)) return;
+    seenMessageIdsRef.current.add(message.id);
     setMessages((prevMessages) => [...prevMessages, message]);
   };
 
@@ -41,6 +47,7 @@ const AgentChatView: React.FC = () => {
       return;
     }
     const resp = await getChatMessagesBySessionId(chatSessionId);
+    seenMessageIdsRef.current = new Set(resp.chatMessages.map((m) => m.id));
     setMessages(resp.chatMessages);
 
     const sessionResp = await getChatSession(chatSessionId);
@@ -53,6 +60,22 @@ const AgentChatView: React.FC = () => {
     }
     getChatMessages().then();
   }, [chatSessionId, getChatMessages]);
+
+  useEffect(() => {
+    if (!state?.init || !chatSessionId || !agentId || initProcessedRef.current) {
+      return;
+    }
+    initProcessedRef.current = true;
+
+    createChatMessage({
+      agentId,
+      sessionId: chatSessionId,
+      role: "user",
+      content: state.initMessage ?? "",
+    }).then(() => getChatMessages());
+
+    navigate(location.pathname, { replace: true });
+  }, [state?.init, chatSessionId, agentId]);
 
   const handleSendMessage = async (value: string | { text: string }) => {
     const message = typeof value === "string" ? value : value.text;
@@ -79,7 +102,7 @@ const AgentChatView: React.FC = () => {
         navigate(`/chat/${response.chatSessionId}`, {
           replace: true,
           state: {
-            init: false,
+            init: true,
             initMessage: message,
           },
         });
@@ -92,21 +115,12 @@ const AgentChatView: React.FC = () => {
       return;
     }
 
-    if (state?.init) {
-      await createChatMessage({
-        agentId: agentId ?? "",
-        sessionId: chatSessionId,
-        role: "user",
-        content: state.initMessage ?? "",
-      });
-    } else {
-      await createChatMessage({
-        agentId: agentId ?? "",
-        sessionId: chatSessionId,
-        role: "user",
-        content: message,
-      });
-    }
+    await createChatMessage({
+      agentId: agentId ?? "",
+      sessionId: chatSessionId,
+      role: "user",
+      content: message,
+    });
     await getChatMessages();
   };
 
@@ -115,7 +129,6 @@ const AgentChatView: React.FC = () => {
       return;
     }
     const es = new EventSource(`${SSE_BASE_URL}/connect/${chatSessionId}`);
-    es.onmessage = () => {};
     es.onerror = (error) => {
       console.error("SSE error:", error);
     };
@@ -142,12 +155,24 @@ const AgentChatView: React.FC = () => {
     };
   }, [chatSessionId]);
 
+  const agentName = useMemo(() => {
+    if (!agentId) return null;
+    return agents.find((a) => a.id === agentId)?.name ?? null;
+  }, [agentId, agents]);
+
   if (!chatSessionId) {
     return <EmptyAgentChatView agents={agents} loading={loading} />;
   }
 
   return (
     <div className="flex flex-col h-full">
+      {agentName && (
+        <div className="border-b border-gray-200 bg-white px-4 py-2 flex items-center gap-2">
+          <RobotOutlined className="text-gray-400" />
+          <span className="text-sm text-gray-600">当前智能体：</span>
+          <span className="text-sm font-medium text-gray-900">{agentName}</span>
+        </div>
+      )}
       <AgentChatHistory
         messages={messages}
         displayAgentStatus={displayAgentStatus}
