@@ -1,0 +1,28 @@
+{
+  "gitCommitHash": "34e753937bf5ee3daf40fac0542e42673411ff3f",
+  "analyzedAt": "2026-06-02T08:06:53.248Z",
+  "nodeCount": 2268,
+  "edgeCount": 2309,
+  "layerCount": 17,
+  "tourSteps": 14,
+  "languages": [
+    "java",
+    "typescript",
+    "markdown",
+    "yaml",
+    "xml",
+    "sql",
+    "dockerfile",
+    "shell"
+  ],
+  "frameworks": [
+    "Spring Boot 3.5.8",
+    "Spring AI 1.1.0",
+    "React 19",
+    "MyBatis",
+    "Ant Design 6",
+    "Tailwind CSS 4",
+    "PostgreSQL+pgvector"
+  ],
+  "version": "1.0.0"
+}
