@@ -3,3 +3,4 @@
 .claude/settings.local.json
 .claude/understand-anything-temp/
 .understand-anything/
+.env
