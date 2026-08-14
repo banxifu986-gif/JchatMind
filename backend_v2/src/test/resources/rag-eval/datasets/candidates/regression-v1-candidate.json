@@ -1,0 +1,1076 @@
+{
+  "datasetId": "regression-v1-candidate",
+  "status": "candidate",
+  "sourceKnowledgeBaseId": "34d6eabb-9823-434a-9966-bc9eaa103739",
+  "cases": [
+    {
+      "caseId": "reg-candidate-001",
+      "query": "项目中用户认证如何实现？",
+      "queryType": "user_like_question",
+      "difficulty": "easy",
+      "logicalChunkId": "interview-qa#一、项目概览>用户认证实现#0",
+      "logicalSectionPath": "一、项目概览 > 用户认证实现",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "认证链路包含 JWT、拦截器和登录校验"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "auth"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#一、项目概览>用户认证实现#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-002",
+      "query": "为什么密码不能明文或使用 MD5 存储？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#一、项目概览>密码存储#0",
+      "logicalSectionPath": "一、项目概览 > 密码存储",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "密码应使用安全哈希而非明文或 MD5"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "security",
+        "auth"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#一、项目概览>密码存储#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-003",
+      "query": "认证和授权有什么区别？",
+      "queryType": "title_to_content",
+      "difficulty": "easy",
+      "logicalChunkId": "interview-qa#二、认证、授权与请求上下文>认证和授权区别#0",
+      "logicalSectionPath": "二、认证、授权与请求上下文 > 认证和授权区别",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "认证确认身份，授权决定权限"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "auth"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#二、认证、授权与请求上下文>认证和授权区别#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-004",
+      "query": "异步任务怎么安全传递用户信息？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#二、认证、授权与请求上下文>异步显式传参#0",
+      "logicalSectionPath": "二、认证、授权与请求上下文 > 异步显式传参",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "异步场景使用最小必要字段显式传参"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "async",
+        "security"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#二、认证、授权与请求上下文>异步显式传参#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-005",
+      "query": "为什么消息里只传 userId，不传完整用户对象？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#二、认证、授权与请求上下文>最小必要字段#0",
+      "logicalSectionPath": "二、认证、授权与请求上下文 > 最小必要字段",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "消息应传递最小必要字段以降低泄露和耦合"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "security",
+        "async"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#二、认证、授权与请求上下文>最小必要字段#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-006",
+      "query": "如何防止邮箱验证码接口被刷？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#三、验证码、Redis与安全>防刷#0",
+      "logicalSectionPath": "三、验证码、Redis 与安全 > 防刷",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "验证码发送需要限流和失败次数控制"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "security",
+        "redis"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#三、验证码、Redis与安全>防刷#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-007",
+      "query": "验证码失败次数为什么适合放 Redis？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#三、验证码、Redis与安全>失败次数Redis#0",
+      "logicalSectionPath": "三、验证码、Redis 与安全 > 失败次数 Redis",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "失败次数需要高频计数和过期控制"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "redis",
+        "security"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#三、验证码、Redis与安全>失败次数Redis#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-008",
+      "query": "Redis 挂了验证码能力应该怎么处理？",
+      "queryType": "user_like_question",
+      "difficulty": "hard",
+      "logicalChunkId": "interview-qa#三、验证码、Redis与安全>Redis不可用#0",
+      "logicalSectionPath": "三、验证码、Redis 与安全 > Redis 不可用",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "安全校验依赖 Redis 时应偏向拒绝而非放开校验"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "redis",
+        "no-answer-policy"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#三、验证码、Redis与安全>Redis不可用#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-009",
+      "query": "JWT 为什么只保存 userId？",
+      "queryType": "content_rewrite",
+      "difficulty": "easy",
+      "logicalChunkId": "interview-qa#四、JWT设计与风险控制>JWT最小载荷#0",
+      "logicalSectionPath": "四、JWT 设计与风险控制 > JWT 最小载荷",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "JWT 载荷应避免放入不必要的用户信息"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "jwt",
+        "security"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#四、JWT设计与风险控制>JWT最小载荷#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-010",
+      "query": "用户被封禁但 JWT 未过期怎么办？",
+      "queryType": "user_like_question",
+      "difficulty": "hard",
+      "logicalChunkId": "interview-qa#四、JWT设计与风险控制>封禁用户JWT#0",
+      "logicalSectionPath": "四、JWT 设计与风险控制 > 封禁用户 JWT",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "JWT 过期前仍需考虑用户状态变更的失效策略"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "jwt",
+        "security"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#四、JWT设计与风险控制>封禁用户JWT#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-011",
+      "query": "JWT 主动退出登录如何失效？",
+      "queryType": "content_rewrite",
+      "difficulty": "hard",
+      "logicalChunkId": "interview-qa#四、JWT设计与风险控制>JWT退出登录#0",
+      "logicalSectionPath": "四、JWT 设计与风险控制 > JWT 退出登录",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "退出登录需要服务端失效策略"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "jwt",
+        "security"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#四、JWT设计与风险控制>JWT退出登录#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-012",
+      "query": "全局异常处理为什么使用 RestControllerAdvice？",
+      "queryType": "title_to_content",
+      "difficulty": "easy",
+      "logicalChunkId": "interview-qa#五、异常处理与日志>全局异常处理#0",
+      "logicalSectionPath": "五、异常处理与日志 > 全局异常处理",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "全局异常处理集中响应转换和异常映射"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "observability"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#五、异常处理与日志>全局异常处理#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-013",
+      "query": "接口日志应该脱敏哪些字段？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#五、异常处理与日志>日志脱敏#0",
+      "logicalSectionPath": "五、异常处理与日志 > 日志脱敏",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "密码、token、验证码和联系方式等敏感字段需要脱敏"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "security",
+        "logging"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#五、异常处理与日志>日志脱敏#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-014",
+      "query": "为什么发送验证码适合用消息队列异步处理？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "interview-qa#六、消息队列与异步>验证码邮件异步#0",
+      "logicalSectionPath": "六、消息队列与异步 > 验证码邮件异步",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "消息队列将邮件发送从请求主链路解耦"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "mq",
+        "async"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#六、消息队列与异步>验证码邮件异步#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-015",
+      "query": "为什么 Redis List 不适合替代可靠消息队列？",
+      "queryType": "user_like_question",
+      "difficulty": "hard",
+      "logicalChunkId": "interview-qa#六、消息队列与异步>RedisList与消息队列#0",
+      "logicalSectionPath": "六、消息队列与异步 > Redis List 与消息队列",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "可靠消息队列需要确认、重试和死信等能力"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "mq",
+        "redis"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "interview-qa#六、消息队列与异步>RedisList与消息队列#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-016",
+      "query": "为什么 DATE(created_at) 会影响索引？",
+      "queryType": "content_rewrite",
+      "difficulty": "easy",
+      "logicalChunkId": "sql-tuning#一、项目里已经落地的SQL调优>时间范围查询#0",
+      "logicalSectionPath": "一、项目里已经落地的 SQL 调优 > 时间范围查询",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "对时间列做函数处理可能导致索引无法有效使用"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "index"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#一、项目里已经落地的SQL调优>时间范围查询#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-017",
+      "query": "项目里的笔记搜索是否只用 LIKE？",
+      "queryType": "topic_switch_guard",
+      "difficulty": "medium",
+      "logicalChunkId": "sql-tuning#一、项目里已经落地的SQL调优>全文索引#0",
+      "logicalSectionPath": "一、项目里已经落地的 SQL 调优 > 全文索引",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "笔记搜索使用全文索引，不只依赖普通模糊查询"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "full-text"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#一、项目里已经落地的SQL调优>全文索引#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-018",
+      "query": "联合索引在项目中有什么作用？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "sql-tuning#一、项目里已经落地的SQL调优>联合索引#0",
+      "logicalSectionPath": "一、项目里已经落地的 SQL 调优 > 联合索引",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "联合索引用于匹配高频组合查询条件"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "index"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#一、项目里已经落地的SQL调优>联合索引#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-019",
+      "query": "排行榜统计有哪些 SQL 技术？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "sql-tuning#一、项目里已经落地的SQL调优>排行榜统计#0",
+      "logicalSectionPath": "一、项目里已经落地的 SQL 调优 > 排行榜统计",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "排行榜统计使用聚合和窗口函数"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "aggregation"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#一、项目里已经落地的SQL调优>排行榜统计#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-020",
+      "query": "深分页 LIMIT OFFSET 有什么问题？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "sql-tuning#二、项目里已识别但还没完全收口的SQL优化点>深分页#0",
+      "logicalSectionPath": "二、项目里已识别但还没完全收口的 SQL 优化点 > 深分页",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "LIMIT OFFSET 深分页存在性能问题"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "pagination"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#二、项目里已识别但还没完全收口的SQL优化点>深分页#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-021",
+      "query": "SQL 索引脚本写了以后就一定在线上生效吗？",
+      "queryType": "hard_negative",
+      "difficulty": "hard",
+      "logicalChunkId": "sql-tuning#二、项目里已识别但还没完全收口的SQL优化点>索引执行状态#0",
+      "logicalSectionPath": "二、项目里已识别但还没完全收口的 SQL 优化点 > 索引执行状态",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "索引脚本存在不代表所有环境已执行"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "hard-negative"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#二、项目里已识别但还没完全收口的SQL优化点>索引执行状态#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-022",
+      "query": "如何稳妥表述项目里的 SQL 优化经验？",
+      "queryType": "user_like_question",
+      "difficulty": "hard",
+      "logicalChunkId": "sql-tuning#五、面试时最稳妥的表达方式>已经做过的#0",
+      "logicalSectionPath": "五、面试时最稳妥的表达方式 > 已经做过的",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [
+        "区分已经落地、具备能力和后续优化"
+      ],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "rejected",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "sql",
+        "interview"
+      ],
+      "retrievalGoldLogicalChunkIds": [
+        "sql-tuning#五、面试时最稳妥的表达方式>已经做过的#0"
+      ],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-023",
+      "query": "没有证据时能否回答数据库线上索引一定都已执行？",
+      "queryType": "no_answer",
+      "difficulty": "hard",
+      "logicalChunkId": "sql-tuning#二、项目里已识别但还没完全收口的SQL优化点>索引执行状态#0",
+      "logicalSectionPath": "二、项目里已识别但还没完全收口的 SQL 优化点 > 索引执行状态",
+      "sourceDocumentLogicalId": "sql-tuning",
+      "sourceDocumentSha256": "bce24d1cec2afe37621bd6dfd526a50082ba306471d24dc6b16161f4ca0101c6",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [],
+      "shouldAbstain": true,
+      "abstentionReason": "missing_evidence",
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "no-answer",
+        "abstention"
+      ],
+      "retrievalGoldLogicalChunkIds": [],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-024",
+      "query": "其他用户的验证码失败次数是多少？",
+      "queryType": "permission_boundary",
+      "difficulty": "hard",
+      "logicalChunkId": "interview-qa#三、验证码、Redis与安全>失败次数Redis#0",
+      "logicalSectionPath": "三、验证码、Redis 与安全 > 失败次数 Redis",
+      "sourceDocumentLogicalId": "interview-qa",
+      "sourceDocumentSha256": "bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": [],
+      "shouldAbstain": true,
+      "abstentionReason": "permission_denied",
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T10:30:00+08:00",
+      "labels": [
+        "permission-boundary",
+        "abstention"
+      ],
+      "retrievalGoldLogicalChunkIds": [],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-025",
+      "query": "Agent 发起工具调用后，系统按什么顺序执行？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "agent-harness#1.Agent执行主链路#0",
+      "logicalSectionPath": "1. Agent 执行主链路",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["工具执行前先经过 Harness pre-flight，允许调用执行，受阻调用返回 synthetic response"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "tool-calling"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#1.Agent执行主链路#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-026",
+      "query": "为什么工具保护既要在 Factory 包装，又要在 execute 前处理？",
+      "queryType": "content_rewrite",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#2.为什么需要两层工具保护#0",
+      "logicalSectionPath": "2. 为什么需要两层工具保护",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["Factory 覆盖不同来源工具，execute pre-flight 处理审批等待和调用拆分"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "tool-calling", "architecture"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#2.为什么需要两层工具保护#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-027",
+      "query": "高风险工具会直接执行吗？",
+      "queryType": "user_like_question",
+      "difficulty": "easy",
+      "logicalChunkId": "agent-harness#3.人工审批#0",
+      "logicalSectionPath": "3. 人工审批",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["命中审批配置的高风险工具会等待用户批准，拒绝或超时不会真实执行"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "approval"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#3.人工审批#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-028",
+      "query": "那同一轮里连续调用同一个高风险工具，需要逐个点批准吗？",
+      "queryType": "multi_turn_follow_up",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#3.人工审批#0",
+      "logicalSectionPath": "3. 人工审批",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [{"role":"user","content":"高风险工具会直接执行吗？"}],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["同一 step 内相同工具名的调用聚合为一次审批，批准后同名调用一并放行"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "approval", "multi-turn"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#3.人工审批#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-029",
+      "query": "工具连续报错后系统怎么保护？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "agent-harness#4.熔断与失败恢复#0",
+      "logicalSectionPath": "4. 熔断与失败恢复",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["连续失败达到阈值后熔断器进入 OPEN，恢复时间后以 HALF_OPEN 试探调用"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "circuit-breaker"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#4.熔断与失败恢复#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-030",
+      "query": "用户拒绝审批会让工具熔断吗？",
+      "queryType": "hard_negative",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#3.人工审批#0",
+      "logicalSectionPath": "3. 人工审批",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["审批拒绝或超时不属于工具故障，不计入熔断器失败次数"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "approval", "hard-negative"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#3.人工审批#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-031",
+      "query": "工具调用审计需要记录哪些结果状态？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "agent-harness#5.审计与可观测性#0",
+      "logicalSectionPath": "5. 审计与可观测性",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["审计 outcome 区分 SUCCESS、ERROR、REJECTED、EXPIRED 和 CIRCUIT_OPEN"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "audit"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#5.审计与可观测性#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-032",
+      "query": "前端什么时候会收到需要审批工具的事件？",
+      "queryType": "user_like_question",
+      "difficulty": "easy",
+      "logicalChunkId": "agent-harness#6.SSE状态语义#0",
+      "logicalSectionPath": "6. SSE 状态语义",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["产生待审批工具调用时推送 TOOL_APPROVAL_REQUIRED，并携带请求和工具信息"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "sse", "approval"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#6.SSE状态语义#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-033",
+      "query": "Agent 的审批和审计记录重启后一定还在吗？",
+      "queryType": "hard_negative",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#5.审计与可观测性#0",
+      "logicalSectionPath": "5. 审计与可观测性",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["当前 MVP 使用单机内存存储，进程重启后不保证状态恢复"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "audit", "hard-negative"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#5.审计与可观测性#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-034",
+      "query": "现在的记忆系统已经解决长对话摘要膨胀了吗？",
+      "queryType": "topic_switch_guard",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#7.用户记忆的当前边界#0",
+      "logicalSectionPath": "7. 用户记忆的当前边界",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["摘要膨胀问题已识别，二次压缩和 token 估算仍是规划中的改进，不能称为已上线"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "memory", "implementation-boundary"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#7.用户记忆的当前边界#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-035",
+      "query": "记忆提取如何减少无意义的大模型调用？",
+      "queryType": "content_rewrite",
+      "difficulty": "medium",
+      "logicalChunkId": "agent-harness#8.记忆改进的设计原则#0",
+      "logicalSectionPath": "8. 记忆改进的设计原则",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["规划中通过最少新增用户消息数与会话级去抖来减少无意义记忆提取"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "memory", "planned"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#8.记忆改进的设计原则#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-036",
+      "query": "为什么语义去重不能把相似的用户记忆一律删掉？",
+      "queryType": "user_like_question",
+      "difficulty": "medium",
+      "logicalChunkId": "agent-harness#8.记忆改进的设计原则#0",
+      "logicalSectionPath": "8. 记忆改进的设计原则",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["相似不等于相同，过宽语义去重阈值可能错误丢弃不同偏好或约束"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "memory", "deduplication"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#8.记忆改进的设计原则#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-037",
+      "query": "工具审计和异步消息都只传必要字段，分别解决什么问题？",
+      "queryType": "cross_document",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#5.审计与可观测性#0",
+      "logicalSectionPath": "5. 审计与可观测性",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": ["interview-qa#二、认证、授权与请求上下文>最小必要字段#0"],
+      "goldFacts": ["工具审计记录调用标识、输入、结果和结局以支持追溯", "异步消息只传最小必要字段以降低泄露和耦合"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "audit", "cross-document", "security"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#5.审计与可观测性#0", "interview-qa#二、认证、授权与请求上下文>最小必要字段#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-038",
+      "query": "模型不选择 Harness 就能绕过工具审批吗？",
+      "queryType": "hard_negative",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#1.Agent执行主链路#0",
+      "logicalSectionPath": "1. Agent 执行主链路",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["Harness 不暴露为模型可选工具，而在工具执行外围统一约束调用，不能通过不选择它绕过保护"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "security", "hard-negative"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#1.Agent执行主链路#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-039",
+      "query": "熔断器能保证 Agent 的回答一定真实吗？",
+      "queryType": "hard_negative",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#4.熔断与失败恢复#0",
+      "logicalSectionPath": "4. 熔断与失败恢复",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["熔断器处理工具持续失败的级联影响，不能替代事实核验、权限校验或输入校验"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "circuit-breaker", "hard-negative"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#4.熔断与失败恢复#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-040",
+      "query": "新增 Agent 文档可以直接作为线上事实知识库吗？",
+      "queryType": "topic_switch_guard",
+      "difficulty": "medium",
+      "logicalChunkId": "agent-harness#10.候选评测采样提示#0",
+      "logicalSectionPath": "10. 候选评测采样提示",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["该文档只适合作为候选评测采样来源，生成 case 后仍需稳定逻辑 chunk 与 gold 标注"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:00:00+08:00",
+      "labels": ["agent", "evaluation", "candidate-source"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#10.候选评测采样提示#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId": "reg-candidate-041",
+      "query": "面对未上线的记忆优化方案，Agent 应该怎样回答才不会把规划说成现状？",
+      "queryType": "user_like_question",
+      "difficulty": "hard",
+      "logicalChunkId": "agent-harness#9.回答边界示例#0",
+      "logicalSectionPath": "9. 回答边界示例",
+      "sourceDocumentLogicalId": "agent-harness-candidate",
+      "sourceDocumentSha256": "0c1152382a843ce6d449cbf8aaf9e621eef97c13d932da58fd182878153e6146",
+      "conversation": [],
+      "additionalGoldLogicalChunkIds": [],
+      "goldFacts": ["对尚未上线的记忆优化应说明问题已识别且存在设计方案，不能宣称系统已经保证或已上线"],
+      "shouldAbstain": false,
+      "abstentionReason": null,
+      "reviewStatus": "approved",
+      "reviewedBy": "codex_content_review",
+      "reviewedAt": "2026-08-13T11:30:00+08:00",
+      "labels": ["agent", "memory", "implementation-boundary"],
+      "retrievalGoldLogicalChunkIds": ["agent-harness#9.回答边界示例#0"],
+      "createdBy": "manual"
+    },
+    {
+      "caseId":"reg-candidate-042","query":"项目能直接称为只有邮箱验证码登录吗？","queryType":"hard_negative","difficulty":"medium","logicalChunkId":"interview-qa#认证边界>邮箱验证码登录表述#0","logicalSectionPath":"认证边界 > 邮箱验证码登录表述","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["项目同时支持密码登录和邮箱验证码登录，不能表述为只有验证码登录"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["auth","hard-negative"],"retrievalGoldLogicalChunkIds":["interview-qa#认证边界>邮箱验证码登录表述#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-043","query":"登录后的 JWT 在请求链路里如何被解析并做登录校验？","queryType":"user_like_question","difficulty":"medium","logicalChunkId":"interview-qa#认证链路>JWT自动登录#0","logicalSectionPath":"认证链路 > JWT 自动登录","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["TokenInterceptor 解析 JWT 并写入请求上下文，NeedLogin AOP 在业务方法前检查登录状态"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["auth","jwt"],"retrievalGoldLogicalChunkIds":["interview-qa#认证链路>JWT自动登录#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-044","query":"只校验已登录会不会出现越权？","queryType":"user_like_question","difficulty":"hard","logicalChunkId":"interview-qa#认证授权>NeedLogin越权风险#0","logicalSectionPath":"认证授权 > NeedLogin 越权风险","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["NeedLogin 解决认证而非细粒度授权，只校验登录状态仍可能有越权风险"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["auth","authorization"],"retrievalGoldLogicalChunkIds":["interview-qa#认证授权>NeedLogin越权风险#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-045","query":"为什么项目用 RequestScope 保存用户上下文而不是 ThreadLocal？","queryType":"content_rewrite","difficulty":"medium","logicalChunkId":"interview-qa#请求上下文>RequestScope与ThreadLocal#0","logicalSectionPath":"请求上下文 > RequestScope 与 ThreadLocal","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["RequestScope 由 Spring 管理且请求结束自动销毁，可减少 ThreadLocal 手动清理负担"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["auth","context"],"retrievalGoldLogicalChunkIds":["interview-qa#请求上下文>RequestScope与ThreadLocal#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-046","query":"JWT 解析后哪些信息不能只靠 token 判断？","queryType":"user_like_question","difficulty":"hard","logicalChunkId":"interview-qa#认证授权>JWT与最新状态#0","logicalSectionPath":"认证授权 > JWT 与最新状态","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["用户资料、角色和封禁状态等强一致性信息需按场景查询服务端最新数据"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["auth","jwt","consistency"],"retrievalGoldLogicalChunkIds":["interview-qa#认证授权>JWT与最新状态#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-047","query":"为什么登录校验要拆成拦截器加 AOP？","queryType":"content_rewrite","difficulty":"medium","logicalChunkId":"interview-qa#认证授权>拦截器与AOP分层#0","logicalSectionPath":"认证授权 > 拦截器与 AOP 分层","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["拦截器处理 token 解析，AOP 按注解做声明式登录检查，职责更清晰且避免一刀切"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["auth","aop"],"retrievalGoldLogicalChunkIds":["interview-qa#认证授权>拦截器与AOP分层#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-048","query":"六位验证码和成功后删除为什么还不算完整防暴力破解？","queryType":"user_like_question","difficulty":"medium","logicalChunkId":"interview-qa#验证码安全>基础防暴力破解#0","logicalSectionPath":"验证码安全 > 基础防暴力破解","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["还需要失败次数限制和 IP 限流，否则攻击者仍可持续尝试或批量试错"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["security","verification-code"],"retrievalGoldLogicalChunkIds":["interview-qa#验证码安全>基础防暴力破解#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-049","query":"重新发验证码时为什么不能直接清空错误次数？","queryType":"user_like_question","difficulty":"medium","logicalChunkId":"interview-qa#验证码安全>重新发送与失败计数#0","logicalSectionPath":"验证码安全 > 重新发送与失败计数","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["重复申请验证码后清空错误次数会让攻击者重置试错次数并绕过限制"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["security","verification-code"],"retrievalGoldLogicalChunkIds":["interview-qa#验证码安全>重新发送与失败计数#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-050","query":"验证码失败次数在 Redis 里怎样按场景隔离和过期？","queryType":"content_rewrite","difficulty":"hard","logicalChunkId":"interview-qa#验证码安全>失败计数Key与TTL#0","logicalSectionPath":"验证码安全 > 失败计数 Key 与 TTL","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["失败计数 key 按验证码场景和邮箱隔离，首次失败设置 TTL，达到最大次数后拒绝后续校验"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["security","redis"],"retrievalGoldLogicalChunkIds":["interview-qa#验证码安全>失败计数Key与TTL#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-051","query":"安全验证码为什么推荐 SecureRandom 而不是 Random？","queryType":"user_like_question","difficulty":"easy","logicalChunkId":"interview-qa#验证码安全>SecureRandom#0","logicalSectionPath":"验证码安全 > SecureRandom","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["SecureRandom 面向安全场景且更难预测，适合生成验证码和安全令牌"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["security","verification-code"],"retrievalGoldLogicalChunkIds":["interview-qa#验证码安全>SecureRandom#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-052","query":"发送验证码为什么应该用 POST？","queryType":"title_to_content","difficulty":"easy","logicalChunkId":"interview-qa#验证码安全>验证码接口POST#0","logicalSectionPath":"验证码安全 > 验证码接口 POST","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["发送验证码会发邮件和写入 Redis、限流状态，属于有副作用操作，应使用 POST 而非 GET"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["security","http"],"retrievalGoldLogicalChunkIds":["interview-qa#验证码安全>验证码接口POST#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-053","query":"角色会动态变化时应该放进 JWT 吗？","queryType":"user_like_question","difficulty":"hard","logicalChunkId":"interview-qa#JWT设计>动态角色#0","logicalSectionPath":"JWT 设计 > 动态角色","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["角色或封禁状态会动态变化时，将 role 放入 JWT 会有旧权限滞后问题，应以服务端最新角色为准"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["jwt","authorization"],"retrievalGoldLogicalChunkIds":["interview-qa#JWT设计>动态角色#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-054","query":"频繁查数据库判断封禁状态怎么优化又保证一致性？","queryType":"content_rewrite","difficulty":"hard","logicalChunkId":"interview-qa#缓存一致性>用户状态缓存#0","logicalSectionPath":"缓存一致性 > 用户状态缓存","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["可缓存用户状态到 Redis 供高频读取，但状态变更时需同步更新或删除缓存，以数据库为一致性基准"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["redis","consistency"],"retrievalGoldLogicalChunkIds":["interview-qa#缓存一致性>用户状态缓存#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-055","query":"更新用户状态时缓存和数据库的顺序应该怎样安排？","queryType":"user_like_question","difficulty":"medium","logicalChunkId":"interview-qa#缓存一致性>先更新库再删缓存#0","logicalSectionPath":"缓存一致性 > 先更新库再删缓存","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["应先更新数据库再删除缓存，避免旧数据库值在更新完成前被回填到缓存"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["cache","consistency"],"retrievalGoldLogicalChunkIds":["interview-qa#缓存一致性>先更新库再删缓存#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-056","query":"延迟双删是另一种独立缓存策略吗？","queryType":"hard_negative","difficulty":"medium","logicalChunkId":"interview-qa#缓存一致性>延迟双删#0","logicalSectionPath":"缓存一致性 > 延迟双删","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["延迟双删是在先更新数据库再删缓存基础上的增强，不是独立策略，也不能彻底保证强一致性"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["cache","hard-negative"],"retrievalGoldLogicalChunkIds":["interview-qa#缓存一致性>延迟双删#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-057","query":"whoami 每次重签 JWT 的好处和风险是什么？","queryType":"user_like_question","difficulty":"hard","logicalChunkId":"interview-qa#JWT设计>滑动续期#0","logicalSectionPath":"JWT 设计 > 滑动续期","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["滑动续期改善持续活跃用户体验，但旧新 token 可能同时有效并扩大安全边界"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["jwt","security"],"retrievalGoldLogicalChunkIds":["interview-qa#JWT设计>滑动续期#0"],"createdBy":"manual"
+    },
+    {
+      "caseId":"reg-candidate-058","query":"JWT 和 Session Cookie 在分布式场景下如何取舍？","queryType":"content_rewrite","difficulty":"hard","logicalChunkId":"interview-qa#JWT设计>JWT与Session#0","logicalSectionPath":"JWT 设计 > JWT 与 Session","sourceDocumentLogicalId":"interview-qa","sourceDocumentSha256":"bc5fa16d5097db349a726ebf0188f3b0cf06ed09a163661ad6ac62a645d62c63","conversation":[],"additionalGoldLogicalChunkIds":[],"goldFacts":["JWT 适合前后端分离并减少服务端会话状态维护，Session Cookie 则由服务端保存会话并通过 sessionId 查找"],"shouldAbstain":false,"abstentionReason":null,"reviewStatus":"approved","reviewedBy":"codex_content_review","reviewedAt":"2026-08-13T13:00:00+08:00","labels":["jwt","architecture"],"retrievalGoldLogicalChunkIds":["interview-qa#JWT设计>JWT与Session#0"],"createdBy":"manual"
+    }
+  ]
+}

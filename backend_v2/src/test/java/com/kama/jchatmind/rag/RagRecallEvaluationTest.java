@@ -65,6 +65,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.ToDoubleFunction;
 import java.util.stream.Collectors;
 
 @SpringBootTest(classes = RagRecallEvaluationTest.RagEvalTestConfig.class)
@@ -468,6 +469,10 @@ class RagRecallEvaluationTest {
         double weightedRecallAt10 = ratio(hitAt10Count, evaluated);
         double mrrAt3 = weightedAverage(primaryBreakdown, 3);
         double mrrAt10 = weightedAverage(primaryBreakdown, 10);
+        double contextPrecisionAt5 = weightedMetric(primaryBreakdown, EvaluationSummary::contextPrecisionAt5);
+        double contextPrecisionAt10 = weightedMetric(primaryBreakdown, EvaluationSummary::contextPrecisionAt10);
+        double contextRecallAt5 = weightedMetric(primaryBreakdown, EvaluationSummary::contextRecallAt5);
+        double contextRecallAt10 = weightedMetric(primaryBreakdown, EvaluationSummary::contextRecallAt10);
         HitDistribution hitDistribution = mergeHitDistributions(primaryBreakdown);
         Map<String, Integer> excludedReasons = mergeExcludedReasons(primaryBreakdown);
         List<String> missCases = primaryBreakdown.stream()
@@ -512,6 +517,10 @@ class RagRecallEvaluationTest {
                 hitAt10Count,
                 mrrAt3,
                 mrrAt10,
+                contextPrecisionAt5,
+                contextPrecisionAt10,
+                contextRecallAt5,
+                contextRecallAt10,
                 hitDistribution,
                 excludedReasons,
                 skippedDocumentReasons,
@@ -572,6 +581,10 @@ class RagRecallEvaluationTest {
         int hitAt10Count = hitCount(evaluatedCases, 10);
         double mrrAt3 = mrrAt(evaluatedCases, 3);
         double mrrAt10 = mrrAt(evaluatedCases, 10);
+        double contextPrecisionAt5 = contextPrecisionAt(evaluatedCases, 5);
+        double contextPrecisionAt10 = contextPrecisionAt(evaluatedCases, 10);
+        double contextRecallAt5 = contextRecallAt(evaluatedCases, 5);
+        double contextRecallAt10 = contextRecallAt(evaluatedCases, 10);
         HitDistribution hitDistribution = hitDistribution(evaluatedCases);
         List<String> missCases = evaluatedCases.stream()
                 .filter(item -> !item.hitAt(5))
@@ -611,6 +624,10 @@ class RagRecallEvaluationTest {
                 hitAt10Count,
                 mrrAt3,
                 mrrAt10,
+                contextPrecisionAt5,
+                contextPrecisionAt10,
+                contextRecallAt5,
+                contextRecallAt10,
                 hitDistribution,
                 excludedReasons,
                 Map.of(),
@@ -2054,6 +2071,39 @@ class RagRecallEvaluationTest {
         return values.stream().mapToDouble(Double::doubleValue).average().orElse(0D);
     }
 
+    private double contextPrecisionAt(List<EvaluatedCase> cases, int k) {
+        return cases.stream()
+                .mapToDouble(item -> RagAsMetrics.contextPrecision(
+                        item.topChunkIds().stream().limit(k).toList(),
+                        new LinkedHashSet<>(item.goldChunkIds())
+                ))
+                .average()
+                .orElse(0D);
+    }
+
+    private double contextRecallAt(List<EvaluatedCase> cases, int k) {
+        return cases.stream()
+                .mapToDouble(item -> RagAsMetrics.contextRecall(
+                        item.topChunkIds().stream().limit(k).toList(),
+                        new LinkedHashSet<>(item.goldChunkIds())
+                ))
+                .average()
+                .orElse(0D);
+    }
+
+    private double weightedMetric(
+            List<EvaluationSummary> summaries,
+            ToDoubleFunction<EvaluationSummary> metric
+    ) {
+        int evaluated = summaries.stream().mapToInt(EvaluationSummary::evaluated).sum();
+        if (evaluated == 0) {
+            return 0D;
+        }
+        return summaries.stream()
+                .mapToDouble(summary -> metric.applyAsDouble(summary) * summary.evaluated())
+                .sum() / evaluated;
+    }
+
     private void assertThreshold(double actual, double expected, String label) {
         if (actual < expected) {
             throw new AssertionError(label + " 低于阈值，actual=" + actual + ", expected=" + expected);
@@ -2134,6 +2184,10 @@ class RagRecallEvaluationTest {
             int hitAt10Count,
             double mrrAt3,
             double mrrAt10,
+            double contextPrecisionAt5,
+            double contextPrecisionAt10,
+            double contextRecallAt5,
+            double contextRecallAt10,
             HitDistribution hitDistribution,
             Map<String, Integer> excludedReasons,
             Map<String, Integer> skippedDocumentReasons,

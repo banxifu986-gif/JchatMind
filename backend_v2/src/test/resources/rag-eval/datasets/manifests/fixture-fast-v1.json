@@ -1,0 +1,18 @@
+{
+  "datasetId": "fixture-fast-v1",
+  "schemaVersion": "1",
+  "caseFile": "../cases/fixture-fast-v1.jsonl",
+  "caseSha256": "e4a255341737ce7f601db872c28a76f24e633e01c4a4d8f56f758878f2f876a6",
+  "corpusFiles": [
+    "../../fixtures/fixture-kb.md",
+    "../../fixtures/fixture-kb-returns.md",
+    "../../fixtures/fixture-kb-logistics.md",
+    "../../fixtures/fixture-kb-membership.md"
+  ],
+  "corpusSha256": "35638ee31b212a7610541e9f12cfe42e9964f534db86c63d28b7f6d16029e6d1",
+  "chunkingVersion": "markdown-section-v1",
+  "embeddingModel": "bge-m3",
+  "embeddingInputVersion": "title-title-content-v1",
+  "defaultTopK": 10,
+  "status": "frozen"
+}
