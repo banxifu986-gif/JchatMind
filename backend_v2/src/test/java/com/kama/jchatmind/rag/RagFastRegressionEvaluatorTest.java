@@ -31,7 +31,16 @@ class RagFastRegressionEvaluatorTest {
         assertEquals(report.contextPrecisionAt5(), report.contextPrecisionAt10(), 0.0001);
         assertTrue(report.mrrAt3() < 1.0);
         assertEquals(1.0, report.abstentionAccuracy(), 0.0001);
+        assertEquals("disabled", report.ragas().status());
+        assertEquals(report.contextPrecisionAt5(), report.ragas().contextPrecisionAt5(), 0.0001);
+        assertEquals(report.contextRecallAt5(), report.ragas().contextRecallAt5(), 0.0001);
+        assertEquals(0, report.ragas().evaluated());
+        assertEquals(0, report.ragas().skipped());
+        assertEquals(null, report.ragas().faithfulness());
+        assertEquals(null, report.ragas().answerRelevancy());
         assertTrue(Files.exists(reportPath));
-        assertTrue(Files.readString(reportPath).contains("fixture-fast-v1"));
+        String reportJson = Files.readString(reportPath);
+        assertTrue(reportJson.contains("fixture-fast-v1"));
+        assertTrue(reportJson.contains("\"ragas\""));
     }
 }

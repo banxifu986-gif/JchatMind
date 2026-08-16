@@ -89,7 +89,8 @@ final class RagFastRegressionEvaluator {
                 contextRecallAt5,
                 contextPrecisionAt10,
                 contextRecallAt10,
-                abstentionAccuracy
+                abstentionAccuracy,
+                RagAsReport.disabled(contextPrecisionAt5, contextRecallAt5)
         );
     }
 

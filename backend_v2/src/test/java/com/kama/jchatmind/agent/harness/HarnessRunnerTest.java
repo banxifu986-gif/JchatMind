@@ -81,8 +81,30 @@ class HarnessRunnerTest {
         assertEquals(HarnessDecision.Status.REJECTED, result.getDecision("call-1").getStatus());
     }
 
+    @Test
+    void shouldExpirePendingApprovalAfterTimeout() {
+        HarnessRunner runner = newHarnessRunner(0);
+        HarnessResult result = runner.beforeExecution(
+                "user-1",
+                "agent-1",
+                "session-1",
+                1,
+                List.of(new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{\"to\":\"a\"}"))
+        );
+
+        runner.awaitApprovals(result);
+
+        assertEquals(HarnessDecision.Status.EXPIRED, result.getDecision("call-1").getStatus());
+        assertTrue(runner.getPendingApprovals("session-1").isEmpty());
+    }
+
     private HarnessRunner newHarnessRunner() {
+        return newHarnessRunner(30);
+    }
+
+    private HarnessRunner newHarnessRunner(int timeoutSeconds) {
         HarnessProperties properties = defaultProperties();
+        properties.getHumanApproval().setTimeoutSeconds(timeoutSeconds);
         InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
         InMemoryAuditStore auditStore = new InMemoryAuditStore(properties);
         InMemoryCircuitBreakerRegistry circuitRegistry = new InMemoryCircuitBreakerRegistry(properties);
