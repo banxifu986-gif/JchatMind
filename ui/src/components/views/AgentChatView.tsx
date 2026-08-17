@@ -228,8 +228,15 @@ const AgentChatView: React.FC = () => {
     es.addEventListener("message", (event) => {
       const message = JSON.parse(event.data) as SseMessage;
       if (message.type === "AI_GENERATED_CONTENT") {
+        const isFinalAssistantMessage = message.payload.message.role === "assistant"
+          && !message.payload.message.metadata?.toolCalls?.length;
         setStreamingContent("");
         addMessage(message.payload.message);
+        if (isFinalAssistantMessage) {
+          setDisplayAgentStatus(false);
+          setAgentStatusText("");
+          setAgentStatusType(undefined);
+        }
         return;
       }
       if (message.type === "AI_CONTENT_DELTA") {

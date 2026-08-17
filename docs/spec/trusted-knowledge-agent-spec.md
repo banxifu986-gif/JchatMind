@@ -18,7 +18,7 @@
 
 | 阶段 | 实现级契约 | 必需测试入口 | 当前状态 |
 | --- | --- | --- | --- |
-| G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 可实施，基线待签收。 |
+| G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 已完成局部 L1/L3 证据，基线仍待签收。 |
 | G1 | 任务状态机、异步摄入、幂等、重试和进度事件必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-05` | 待阶段开始前补充接口、表结构和事件 schema。 |
 | G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答。 | `TC-G2-01` 至 `TC-G2-05` | 待阶段开始前补充 route 输入输出和评测数据。 |
 | G3 | Skill 与记忆必须有可验证 schema、所有权和失败不阻断主链路的约束。 | `TC-G3-01` 至 `TC-G3-04` | 待阶段开始前补充模型、接口和 UI 状态。 |
@@ -38,9 +38,19 @@
 | TC-G0-01 | 启动上下文测试，覆盖最小 Bean 图与循环依赖保护。 | 断言因缺少目标 Bean 图或循环依赖而失败，不因测试配置错误失败。 | 最小化配置后通过 `CircularDependencyStartupTest`，再运行相关启动测试。 |
 | TC-G0-02 | 聊天链路测试，断言消息持久化、状态完成和历史顺序。 | 未实现的链路或持久化断言明确失败。 | 只实现必要编排后运行聊天链路测试与 G0 手工旅程。 |
 | TC-G0-03 | 指标/replay 测试，断言 gold、报告字段和 fixture Recall@5。 | 新指标或报告字段缺失时失败，不能因外部模型不可用而错误。 | `RagAsMetricsTest`、`RagFastRegressionEvaluatorTest`、`RagRecallEvaluationTest`。 |
-| TC-G0-04 | SSE 恢复契约测试，断言事件顺序、重复事件去重和异常可见。 | 缺少恢复、去重或错误状态时出现预期断言失败。 | `SseServiceImplTest` 与隔离手工旅程。 |
+| TC-G0-04 | SSE 契约测试，覆盖 `AI_CONTENT_DELTA`、`AI_ERROR`、空 `ChatResponse` 帧、发送失败；恢复/去重仍为待补充契约。 | 空帧触发 `getResult()` 空指针，或缺少 `AI_CONTENT_DELTA`/`AI_ERROR` 事件时失败。 | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest`。 |
 | TC-G0-05 | 审批状态测试，断言批准、拒绝、超时均不绕过 Harness。 | 未进入或未正确退出 `WAITING_APPROVAL` 时失败。 | `HarnessRunnerTest` 及审批相关测试。 |
-| TC-G0-06 | 前端构建与手工旅程清单。 | G0 不引入浏览器测试依赖；构建或关键旅程不满足即失败。 | `npm run lint`、`npm run build` 与测试账号手工记录。 |
+| TC-G0-06 | 前端类型/静态契约与手工旅程，覆盖登录拦截、执行轨迹、审批卡片、回答分片、最终状态收尾和错误提示。 | 缺少 SSE 类型、事件处理、临时回答气泡或最终回答收尾时，TypeScript 构建或 Node 静态契约失败。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`npm.cmd run build` 与隔离测试账号手工记录。 |
+
+### 3.1.1 G0 已实施流式契约与续作边界（2026-08-17）
+
+- 后端在每个有效 `AssistantMessage.getText()` 分块时发送 `AI_CONTENT_DELTA`，前端在临时回答气泡中按到达顺序累积；流结束后仍由 `AI_GENERATED_CONTENT` 写入并替换临时气泡，最后发送 `AI_DONE`。
+- 兼容中转站产生的 `ChatResponse.getResult() == null` 空帧：空帧不得产生 SSE、不得参与最终消息或工具调用聚合，后续有效分块必须继续发送与持久化。
+- 任意 Agent 执行异常必须发送 `AI_ERROR`，不能错误发送 `AI_DONE`。`JChatMindStreamingSseTest` 的空帧用例和 `JChatMindErrorSseTest` 分别固定这两个回归点。
+- 若前端收到无 `metadata.toolCalls` 的 Assistant `AI_GENERATED_CONTENT`，必须立即清理“思考中”状态；这是 `AI_DONE` 因 SSE 断连未送达时的前端收尾兜底，不适用于仍含工具调用的中间消息。
+- `AI_THINKING` 是应用层执行状态，不是暴露模型原始 `reasoning_content` 的承诺；当前仅流转 Spring AI `AssistantMessage.getText()`，不显示或持久化独立推理字段。
+- 当前已通过后端回归命令：在 `backend_v2` 执行 `.\mvnw.cmd -q "-Dtest=SseMessageStreamingContractTest,JChatMindStreamingSseTest,JChatMindErrorSseTest,SseServiceImplTest" test`；在 `ui` 执行 `npm.cmd run build` 已通过。`npm.cmd run lint` 仍受既有 Hook 规则错误阻塞，不能作为已通过门禁。
+- 下一会话在开始 G1 前，必须先以已登录的隔离账号刷新聊天页，验证普通回答逐段显示、RAG 回答、错误提示和审批卡片批准/拒绝；将结果回填总计划 `TC-G0-06`。浏览器 L3 签收与 lint 基线完成前，不得宣布 G0 完成。
 
 ### 3.2 后续阶段的测试先行要求
 
