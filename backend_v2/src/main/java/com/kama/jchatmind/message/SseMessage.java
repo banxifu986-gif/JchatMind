@@ -27,6 +27,7 @@ public class SseMessage {
         private Integer callCount;
         private Long expiresAt;
         private Integer stepNumber;
+        private String contentDelta;
     }
 
     @Data
@@ -44,10 +45,12 @@ public class SseMessage {
     // 5. AI 完成
     public enum Type {
         AI_GENERATED_CONTENT,
+        AI_CONTENT_DELTA,
         AI_PLANNING,
         AI_THINKING,
         AI_EXECUTING,
         AI_DONE,
+        AI_ERROR,
         TOOL_APPROVAL_REQUIRED,
     }
 }

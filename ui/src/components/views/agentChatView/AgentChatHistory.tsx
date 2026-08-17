@@ -1,7 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Bubble } from "@ant-design/x";
 import XMarkdown from "@ant-design/x-markdown";
+import { Button, Space } from "antd";
 import {
+  CheckOutlined,
+  CloseOutlined,
+  SafetyCertificateOutlined,
   ToolOutlined,
   CheckCircleOutlined,
   RobotOutlined,
@@ -9,13 +13,27 @@ import {
   RightOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
+import type { PendingApprovalVO } from "../../../api/api.ts";
 import type { ChatMessageVO, SseMessageType, ToolCall, ToolResponse } from "../../../types";
+
+export interface AgentExecutionTraceItem {
+  id: number;
+  type: SseMessageType;
+  statusText: string;
+  stepNumber?: number;
+}
 
 interface AgentChatHistoryProps {
   messages: ChatMessageVO[];
   displayAgentStatus?: boolean;
   agentStatusText?: string;
   agentStatusType?: SseMessageType;
+  agentTrace?: AgentExecutionTraceItem[];
+  streamingContent?: string;
+  pendingApproval?: PendingApprovalVO | null;
+  approvalSubmitting?: boolean;
+  onApprove?: () => void;
+  onReject?: () => void;
 }
 
 // 工具调用展示组件（简化版，用于 assistant 消息内）
@@ -107,6 +125,12 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
   displayAgentStatus = false,
   agentStatusText = "",
   agentStatusType,
+  agentTrace = [],
+  streamingContent = "",
+  pendingApproval,
+  approvalSubmitting = false,
+  onApprove,
+  onReject,
 }) => {
   // 滚动容器引用
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -191,8 +215,31 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
         return "思考中";
       case "AI_EXECUTING":
         return "执行中";
+      case "AI_ERROR":
+        return "执行失败";
+      case "TOOL_APPROVAL_REQUIRED":
+        return "等待审批";
       default:
         return "处理中";
+    }
+  };
+
+  const getTraceLabel = (type: SseMessageType) => {
+    switch (type) {
+      case "AI_PLANNING":
+        return "规划";
+      case "AI_THINKING":
+        return "思考";
+      case "AI_EXECUTING":
+        return "工具";
+      case "TOOL_APPROVAL_REQUIRED":
+        return "审批";
+      case "AI_DONE":
+        return "完成";
+      case "AI_ERROR":
+        return "失败";
+      default:
+        return "状态";
     }
   };
 
@@ -260,7 +307,87 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
           </div>
         );
       })}
-      {displayAgentStatus && (
+      {streamingContent && (
+        <div className="mb-4">
+          <Bubble
+            content={
+              <XMarkdown streaming={{ enableAnimation: true, hasNextChunk: true }}>
+                {streamingContent}
+              </XMarkdown>
+            }
+            placement="start"
+          />
+        </div>
+      )}
+      {agentTrace.length > 0 && (
+        <div className="mb-3 border-l-2 border-blue-400 pl-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700">
+            <ThunderboltOutlined className="text-blue-600" />
+            <span>执行轨迹</span>
+          </div>
+          <div className="flex flex-col gap-1.5 text-xs">
+            {agentTrace.map((traceItem) => (
+              <div className="flex items-start gap-2 text-gray-600" key={traceItem.id}>
+                <span className="min-w-10 font-semibold text-blue-600">
+                  {getTraceLabel(traceItem.type)}
+                </span>
+                <span className="flex-1">{traceItem.statusText}</span>
+                {traceItem.stepNumber !== undefined && (
+                  <span className="text-gray-400">步骤 {traceItem.stepNumber}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {displayAgentStatus && agentStatusType === "TOOL_APPROVAL_REQUIRED" && pendingApproval && (
+        <div className="mb-3">
+          <Bubble
+            content={
+              <div className="flex flex-col gap-2">
+                <span className="font-semibold text-orange-600">
+                  <SafetyCertificateOutlined className="mr-1" />
+                  工具执行需要审批
+                </span>
+                <span className="text-xs text-gray-600">
+                  {pendingApproval.toolName}
+                  {pendingApproval.callCount > 1 ? `，共 ${pendingApproval.callCount} 次调用` : ""}
+                </span>
+                {pendingApproval.toolInput && (
+                  <details className="text-xs text-gray-600">
+                    <summary className="cursor-pointer">查看调用参数</summary>
+                    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-gray-50 p-2">
+                      {pendingApproval.toolInput}
+                    </pre>
+                  </details>
+                )}
+                <Space size="small">
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<CheckOutlined />}
+                    loading={approvalSubmitting}
+                    onClick={onApprove}
+                  >
+                    批准
+                  </Button>
+                  <Button
+                    danger
+                    size="small"
+                    icon={<CloseOutlined />}
+                    disabled={approvalSubmitting}
+                    onClick={onReject}
+                  >
+                    拒绝
+                  </Button>
+                </Space>
+              </div>
+            }
+            placement="start"
+          />
+        </div>
+      )}
+      {displayAgentStatus && agentStatusType !== "TOOL_APPROVAL_REQUIRED" && (
         <div className="mb-3">
           <div
             className="animate-pulse"
@@ -273,7 +400,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
               content={
                 <span className="flex items-center gap-2">
                   <span
-                    className="font-semibold text-blue-600"
+                    className={`font-semibold ${agentStatusType === "AI_ERROR" ? "text-red-600" : "text-blue-600"}`}
                     style={{
                       animation:
                         "pulse 0.7s cubic-bezier(0.4, 0, 0.6, 1) infinite",

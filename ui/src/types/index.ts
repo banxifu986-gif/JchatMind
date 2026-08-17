@@ -34,15 +34,25 @@ export interface ChatMessageVO {
 
 export type SseMessageType =
   | "AI_GENERATED_CONTENT"
+  | "AI_CONTENT_DELTA"
   | "AI_PLANNING"
   | "AI_THINKING"
   | "AI_EXECUTING"
-  | "AI_DONE";
+  | "AI_DONE"
+  | "AI_ERROR"
+  | "TOOL_APPROVAL_REQUIRED";
 
 export interface SseMessagePayload {
   message: ChatMessageVO;
   statusText: string;
   done: boolean;
+  approvalRequestId?: string;
+  toolName?: string;
+  toolInput?: string;
+  callCount?: number;
+  expiresAt?: number;
+  stepNumber?: number;
+  contentDelta?: string;
 }
 
 export interface SseMessageMetadata {

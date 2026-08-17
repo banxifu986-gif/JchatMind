@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.concurrent.ConcurrentMap;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -39,6 +40,11 @@ class SseServiceImplTest {
 
         assertDoesNotThrow(() -> service.send("session-1", buildMessage()));
         assertFalse(clients.containsKey("session-1"));
+    }
+
+    @Test
+    void shouldExposeErrorEventTypeForFailedAgentRuns() {
+        assertEquals(SseMessage.Type.AI_ERROR, SseMessage.Type.valueOf("AI_ERROR"));
     }
 
     private static SseMessage buildMessage() {

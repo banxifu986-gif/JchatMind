@@ -302,6 +302,35 @@ export async function deleteDocument(documentId: string): Promise<void> {
   return del<void>(`/documents/${documentId}`);
 }
 
+export interface PendingApprovalVO {
+  id: string;
+  sessionId: string;
+  toolName: string;
+  toolInput: string;
+  callCount: number;
+  status: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface GetPendingApprovalsResponse {
+  approvals: PendingApprovalVO[];
+}
+
+export async function getPendingApprovals(
+  sessionId: string,
+): Promise<GetPendingApprovalsResponse> {
+  return get<GetPendingApprovalsResponse>(`/harness/pending/${sessionId}`);
+}
+
+export async function approveHarnessRequest(requestId: string): Promise<void> {
+  return post<void>(`/harness/approve/${requestId}`);
+}
+
+export async function rejectHarnessRequest(requestId: string): Promise<void> {
+  return post<void>(`/harness/reject/${requestId}`);
+}
+
 export type ToolType = "FIXED" | "OPTIONAL";
 
 export interface ToolVO {

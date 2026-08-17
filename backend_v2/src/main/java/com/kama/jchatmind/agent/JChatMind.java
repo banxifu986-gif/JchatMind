@@ -213,13 +213,7 @@ public class JChatMind {
                 .messages(this.chatMemory.get(this.chatSessionId))
                 .build();
 
-        this.lastChatResponse = this.chatClient
-                .prompt(prompt)
-                .system(thinkPrompt)
-                .toolCallbacks(this.availableTools.toArray(new ToolCallback[0]))
-                .call()
-                .chatClientResponse()
-                .chatResponse();
+        this.lastChatResponse = streamChatResponse(prompt, thinkPrompt);
 
         Assert.notNull(lastChatResponse, "Last chat client response cannot be null");
 
@@ -232,6 +226,75 @@ public class JChatMind {
         logToolCalls(toolCalls);
 
         return !toolCalls.isEmpty();
+    }
+
+    private ChatResponse streamChatResponse(Prompt prompt, String thinkPrompt) {
+        StringBuilder fullContent = new StringBuilder();
+        List<ChatResponse> responseChunks = this.chatClient
+                .prompt(prompt)
+                .system(thinkPrompt)
+                .toolCallbacks(this.availableTools.toArray(new ToolCallback[0]))
+                .stream()
+                .chatResponse()
+                .filter(this::hasAssistantOutput)
+                .doOnNext(response -> appendContentDelta(response, fullContent))
+                .collectList()
+                .block();
+
+        Assert.notEmpty(responseChunks, "Streamed chat response cannot be empty");
+
+        ChatResponse lastResponse = responseChunks.get(responseChunks.size() - 1);
+        AssistantMessage lastOutput = lastResponse.getResult().getOutput();
+        List<AssistantMessage.ToolCall> toolCalls = responseChunks.stream()
+                .map(ChatResponse::getResult)
+                .map(Generation::getOutput)
+                .map(AssistantMessage::getToolCalls)
+                .filter(toolCallList -> !toolCallList.isEmpty())
+                .reduce((first, second) -> second)
+                .orElse(List.of());
+        AssistantMessage output = AssistantMessage.builder()
+                .content(fullContent.toString())
+                .media(lastOutput.getMedia())
+                .properties(lastOutput.getMetadata())
+                .toolCalls(toolCalls)
+                .build();
+
+        return ChatResponse.builder()
+                .generations(List.of(new Generation(output, lastResponse.getResult().getMetadata())))
+                .metadata(lastResponse.getMetadata())
+                .build();
+    }
+
+    private void appendContentDelta(ChatResponse response, StringBuilder fullContent) {
+        if (!hasAssistantOutput(response)) {
+            return;
+        }
+
+        AssistantMessage output = response.getResult().getOutput();
+        String contentDelta = output.getText();
+        if (!StringUtils.hasText(contentDelta)) {
+            return;
+        }
+
+        fullContent.append(contentDelta);
+        SseMessage message = SseMessage.builder()
+                .type(SseMessage.Type.AI_CONTENT_DELTA)
+                .payload(SseMessage.Payload.builder()
+                        .contentDelta(contentDelta)
+                        .stepNumber(currentStepNumber)
+                        .build())
+                .build();
+        try {
+            sseService.send(this.chatSessionId, message);
+        } catch (Exception e) {
+            log.warn("发送回答分块 SSE 失败: {}", e.getMessage());
+        }
+    }
+
+    private boolean hasAssistantOutput(ChatResponse response) {
+        return response != null
+                && response.getResult() != null
+                && response.getResult().getOutput() != null;
     }
 
     private String buildThinkPrompt() {
@@ -573,7 +636,7 @@ public class JChatMind {
         } catch (Exception e) {
             agentState = AgentState.ERROR;
             log.error("Error running agent", e);
-            sendStatus(SseMessage.Type.AI_DONE, "任务结束", currentStepNumber);
+            sendStatus(SseMessage.Type.AI_ERROR, "Agent 执行失败，请稍后重试", currentStepNumber);
             throw new RuntimeException("Error running agent", e);
         }
     }
