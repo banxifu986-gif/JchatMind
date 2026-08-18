@@ -11,30 +11,33 @@ import {
 import { useUser } from "./useUser.ts";
 
 export function useAgents() {
-  const { isLogin } = useUser();
-  const [agents, setAgents] = useState<AgentVO[]>([]);
+  const { isLogin, user } = useUser();
+  const [agentState, setAgentState] = useState<{
+    userId: number | null;
+    agents: AgentVO[];
+  }>({ userId: null, agents: [] });
 
   useEffect(() => {
-    if (!isLogin) {
-      setAgents([]);
+    if (!isLogin || !user) {
       return;
     }
+    const userId = user.userId;
 
     async function fetchData() {
       try {
         const resp = await getAgents();
-        setAgents(resp.agents);
+        setAgentState({ userId, agents: resp.agents });
       } catch {
-        setAgents([]);
+        setAgentState({ userId, agents: [] });
       }
     }
 
     fetchData().then();
-  }, [isLogin]);
+  }, [isLogin, user]);
 
   async function refreshAgents() {
     const resp = await getAgents();
-    setAgents(resp.agents);
+    setAgentState({ userId: user?.userId ?? null, agents: resp.agents });
   }
 
   async function createAgentHandle(agent: CreateAgentRequest) {
@@ -56,7 +59,7 @@ export function useAgents() {
   }
 
   return {
-    agents,
+    agents: agentState.userId === user?.userId ? agentState.agents : [],
     createAgentHandle,
     deleteAgentHandle,
     updateAgentHandle,

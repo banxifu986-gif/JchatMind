@@ -24,14 +24,20 @@ import type { ChatMessageVO, SseMessage, SseMessageType } from "../../types";
 
 const SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL;
 
-const AgentChatView: React.FC = () => {
+interface AgentChatViewProps {
+  sessionTraceCache?: Map<string, AgentExecutionTraceItem[]>;
+}
+
+const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   const { chatSessionId } = useParams<{ chatSessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state;
+  const initialAgentTrace = chatSessionId
+    ? sessionTraceCache?.get(chatSessionId) ?? []
+    : [];
   const initProcessedRef = useRef(false);
   const seenMessageIdsRef = useRef<Set<string>>(new Set());
-  const traceSequenceRef = useRef(0);
   const streamingSessionIdRef = useRef<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
@@ -43,11 +49,17 @@ const AgentChatView: React.FC = () => {
   const [displayAgentStatus, setDisplayAgentStatus] = useState(false);
   const [agentStatusText, setAgentStatusText] = useState("");
   const [agentStatusType, setAgentStatusType] = useState<SseMessageType>();
-  const [agentTrace, setAgentTrace] = useState<AgentExecutionTraceItem[]>([]);
+  const [agentTrace, setAgentTrace] = useState<AgentExecutionTraceItem[]>(initialAgentTrace);
   const [streamingContent, setStreamingContent] = useState("");
   const [pendingApproval, setPendingApproval] =
     useState<PendingApprovalVO | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (chatSessionId) {
+      sessionTraceCache?.set(chatSessionId, agentTrace);
+    }
+  }, [agentTrace, chatSessionId, sessionTraceCache]);
 
   const addMessage = (message: ChatMessageVO) => {
     if (seenMessageIdsRef.current.has(message.id)) return;
@@ -62,26 +74,28 @@ const AgentChatView: React.FC = () => {
   ) => {
     setAgentTrace((previousTrace) => {
       const traceItem: AgentExecutionTraceItem = {
-        id: traceSequenceRef.current++,
+        id: (previousTrace.at(-1)?.id ?? -1) + 1,
         type,
         statusText,
         stepNumber,
       };
 
+      let nextTrace: AgentExecutionTraceItem[];
       if (type === "AI_PLANNING") {
-        return [traceItem];
+        nextTrace = [traceItem];
+      } else {
+        const lastItem = previousTrace.at(-1);
+        if (
+          lastItem?.type === type
+          && lastItem.statusText === statusText
+          && lastItem.stepNumber === stepNumber
+        ) {
+          return previousTrace;
+        }
+        nextTrace = [...previousTrace, traceItem].slice(-20);
       }
 
-      const lastItem = previousTrace.at(-1);
-      if (
-        lastItem?.type === type
-        && lastItem.statusText === statusText
-        && lastItem.stepNumber === stepNumber
-      ) {
-        return previousTrace;
-      }
-
-      return [...previousTrace, traceItem].slice(-20);
+      return nextTrace;
     });
   }, []);
 
@@ -135,7 +149,7 @@ const AgentChatView: React.FC = () => {
     }).then(() => getChatMessages());
 
     navigate(location.pathname, { replace: true });
-  }, [state?.init, chatSessionId, agentId]);
+  }, [state?.init, state?.initMessage, chatSessionId, agentId, getChatMessages, navigate, location.pathname]);
 
   const handleSendMessage = async (value: string | { text: string }) => {
     const message = typeof value === "string" ? value : value.text;
@@ -178,6 +192,7 @@ const AgentChatView: React.FC = () => {
 
     try {
       setAgentTrace([]);
+      sessionTraceCache?.set(chatSessionId, []);
       streamingSessionIdRef.current = chatSessionId;
       setStreamingContent("");
       await createChatMessage({

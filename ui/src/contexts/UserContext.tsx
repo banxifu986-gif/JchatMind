@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthContext,
   TOKEN_KEY,
@@ -26,63 +26,82 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(() =>
     window.localStorage.getItem(TOKEN_KEY),
   );
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (token) {
-      whoamiCall(token).then((result) => {
-        if (result) {
-          setUser(result.user);
-          if (result.token !== token) {
-            setToken(result.token);
-            window.localStorage.setItem(TOKEN_KEY, result.token);
-          }
-          window.localStorage.setItem(USER_KEY, JSON.stringify(result.user));
-        } else {
-          setToken(null);
-          setUser(null);
-          window.localStorage.removeItem(TOKEN_KEY);
-          window.localStorage.removeItem(USER_KEY);
-        }
-        setLoading(false);
-      });
-    } else {
-      setLoading(false);
-    }
+  const tokenRef = useRef(token);
+  const [loading, setLoading] = useState(() =>
+    Boolean(window.localStorage.getItem(TOKEN_KEY)),
+  );
+  const updateToken = useCallback((newToken: string | null) => {
+    tokenRef.current = newToken;
+    setToken(newToken);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!token) {
+      return;
+    }
+
+    whoamiCall(token).then((result) => {
+      if (cancelled || tokenRef.current !== token) {
+        return;
+      }
+      if (result) {
+        setUser(result.user);
+        if (result.token !== token) {
+          updateToken(result.token);
+          window.localStorage.setItem(TOKEN_KEY, result.token);
+        }
+        window.localStorage.setItem(USER_KEY, JSON.stringify(result.user));
+      } else {
+        updateToken(null);
+        setUser(null);
+        window.localStorage.removeItem(TOKEN_KEY);
+        window.localStorage.removeItem(USER_KEY);
+      }
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, updateToken]);
+
   const login = useCallback((newToken: string, newUser: UserInfo) => {
-    setToken(newToken);
+    updateToken(newToken);
     setUser(newUser);
     window.localStorage.setItem(TOKEN_KEY, newToken);
     window.localStorage.setItem(USER_KEY, JSON.stringify(newUser));
-  }, []);
+  }, [updateToken]);
 
   const logout = useCallback(() => {
-    setToken(null);
+    updateToken(null);
     setUser(null);
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(USER_KEY);
-  }, []);
+  }, [updateToken]);
 
   const refreshUser = useCallback(async () => {
     if (!token) return;
-    const result = await whoamiCall(token);
+    const currentToken = token;
+    const result = await whoamiCall(currentToken);
+    if (tokenRef.current !== currentToken) {
+      return;
+    }
     if (result) {
       setUser(result.user);
-      if (result.token !== token) {
-        setToken(result.token);
+      if (result.token !== currentToken) {
+        updateToken(result.token);
         window.localStorage.setItem(TOKEN_KEY, result.token);
       }
     }
-  }, [token]);
+  }, [token, updateToken]);
 
   const value: AuthContextType = useMemo(
     () => ({
       user,
       token,
       isLogin: !!user,
-      loading,
+      loading: Boolean(token) && loading,
       login,
       logout,
       refreshUser,

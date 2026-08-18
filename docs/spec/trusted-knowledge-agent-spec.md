@@ -2,7 +2,7 @@
 
 > 状态：当前唯一实施 Spec
 > 对应计划：[可信研发知识协作 Agent 升级总计划](../plans/active/trusted-knowledge-agent-roadmap.md)
-> 当前实施阶段：G0 基线与观测
+> 当前实施阶段：G0 验收完成，等待 G1 实施授权
 
 ## 1. 文档定位与范围
 
@@ -18,7 +18,7 @@
 
 | 阶段 | 实现级契约 | 必需测试入口 | 当前状态 |
 | --- | --- | --- | --- |
-| G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 已完成局部 L1/L3 证据，基线仍待签收。 |
+| G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 2026-08-18 已完成全部 G0 必需证据；G1 尚未开始。 |
 | G1 | 任务状态机、异步摄入、幂等、重试和进度事件必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-05` | 待阶段开始前补充接口、表结构和事件 schema。 |
 | G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答。 | `TC-G2-01` 至 `TC-G2-05` | 待阶段开始前补充 route 输入输出和评测数据。 |
 | G3 | Skill 与记忆必须有可验证 schema、所有权和失败不阻断主链路的约束。 | `TC-G3-01` 至 `TC-G3-04` | 待阶段开始前补充模型、接口和 UI 状态。 |
@@ -40,7 +40,7 @@
 | TC-G0-03 | 指标/replay 测试，断言 gold、报告字段和 fixture Recall@5。 | 新指标或报告字段缺失时失败，不能因外部模型不可用而错误。 | `RagAsMetricsTest`、`RagFastRegressionEvaluatorTest`、`RagRecallEvaluationTest`。 |
 | TC-G0-04 | SSE 契约测试，覆盖 `AI_CONTENT_DELTA`、`AI_ERROR`、空 `ChatResponse` 帧、发送失败；恢复/去重仍为待补充契约。 | 空帧触发 `getResult()` 空指针，或缺少 `AI_CONTENT_DELTA`/`AI_ERROR` 事件时失败。 | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest`。 |
 | TC-G0-05 | 审批状态测试，断言批准、拒绝、超时均不绕过 Harness。 | 未进入或未正确退出 `WAITING_APPROVAL` 时失败。 | `HarnessRunnerTest` 及审批相关测试。 |
-| TC-G0-06 | 前端类型/静态契约与手工旅程，覆盖登录拦截、执行轨迹、审批卡片、回答分片、最终状态收尾和错误提示。 | 缺少 SSE 类型、事件处理、临时回答气泡或最终回答收尾时，TypeScript 构建或 Node 静态契约失败。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`npm.cmd run build` 与隔离测试账号手工记录。 |
+| TC-G0-06 | 前端类型/静态契约与手工旅程，覆盖登录拦截、执行轨迹、审批卡片、回答分片、最终状态收尾、错误提示、新会话隔离和同会话轨迹恢复。 | 缺少 SSE 类型、事件处理、临时回答气泡、最终回答收尾、按会话隔离的 UI 瞬态状态或同会话已接收轨迹恢复时，TypeScript 构建或 Node 静态契约失败。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`node ui/tests/hook-state-in-effect.contract.mjs`、`node ui/tests/new-chat-session.contract.mjs`、`node ui/tests/session-trace-cache.contract.mjs`、`npm.cmd run lint`、`npm.cmd run build` 与隔离测试账号手工记录。 |
 
 ### 3.1.1 G0 已实施流式契约与续作边界（2026-08-17）
 
@@ -48,9 +48,13 @@
 - 兼容中转站产生的 `ChatResponse.getResult() == null` 空帧：空帧不得产生 SSE、不得参与最终消息或工具调用聚合，后续有效分块必须继续发送与持久化。
 - 任意 Agent 执行异常必须发送 `AI_ERROR`，不能错误发送 `AI_DONE`。`JChatMindStreamingSseTest` 的空帧用例和 `JChatMindErrorSseTest` 分别固定这两个回归点。
 - 若前端收到无 `metadata.toolCalls` 的 Assistant `AI_GENERATED_CONTENT`，必须立即清理“思考中”状态；这是 `AI_DONE` 因 SSE 断连未送达时的前端收尾兜底，不适用于仍含工具调用的中间消息。
+- `/chat` 与 `/chat/:chatSessionId` 必须以 `chatSessionId ?? "new"` 作为聊天视图的 React `key`；切换至新会话必须重置初始化防重标记、SSE 临时正文和审批卡片，且不得显示旧会话轨迹；切回同一会话必须恢复当前 SPA 生命周期内已收到的执行轨迹。`new-chat-session.contract.mjs` 与 `session-trace-cache.contract.mjs` 固定此边界。离开会话期间的 SSE 不回放，刷新页面不保留内存轨迹；Ban 已于 2026-08-18 手工签收 RAG 会话切换后轨迹恢复、新会话无旧轨迹及其首条消息持久化，本项不保存截图。
+- Ban 已于 2026-08-18 在隔离 RAG 会话中手工观察到最终回答气泡从部分正文持续增长至五点完整回答；前端静态契约将该渲染行为对应到 `AI_CONTENT_DELTA`。`KnowledgeTool` 命中隔离文档，最终态归档为 `backend_v2/target/tc-g0-06-l3-rag-streaming-final-20260818.png`。该截图只证明最终态，正文分片的签收依据为 Ban 的连续页面观察。
 - `AI_THINKING` 是应用层执行状态，不是暴露模型原始 `reasoning_content` 的承诺；当前仅流转 Spring AI `AssistantMessage.getText()`，不显示或持久化独立推理字段。
-- 当前已通过后端回归命令：在 `backend_v2` 执行 `.\mvnw.cmd -q "-Dtest=SseMessageStreamingContractTest,JChatMindStreamingSseTest,JChatMindErrorSseTest,SseServiceImplTest" test`；在 `ui` 执行 `npm.cmd run build` 已通过。`npm.cmd run lint` 仍受既有 Hook 规则错误阻塞，不能作为已通过门禁。
-- 下一会话在开始 G1 前，必须先以已登录的隔离账号刷新聊天页，验证普通回答逐段显示、RAG 回答、错误提示和审批卡片批准/拒绝；将结果回填总计划 `TC-G0-06`。浏览器 L3 签收与 lint 基线完成前，不得宣布 G0 完成。
+- 当前已通过后端回归命令：在 `backend_v2` 执行 `.\mvnw.cmd -q "-Dtest=SseMessageStreamingContractTest,JChatMindStreamingSseTest,JChatMindErrorSseTest,SseServiceImplTest" test`；在 `ui` 执行六项 G0 静态契约、`hook-state-in-effect.contract.mjs`、`npm.cmd run lint` 与 `npm.cmd run build` 均已通过。lint 仅保留依赖数据过期提示，不再有 Hook 规则诊断；未在本阶段升级依赖。
+- `TC-G0-06` 的隔离账号 L3 旅程已签收普通回答逐段显示、RAG 正文增长、`AI_ERROR`、审批批准/拒绝、最终状态收尾、新会话首条消息持久化及同会话轨迹恢复，详细证据在总计划验收台账。
+- 2026-08-18 已补齐并复核 `TC-G0-01` 至 `TC-G0-05`：最小及完整应用上下文、真实 Spring 聊天事件边界、SSE/Harness 组合回归、RAG 指标和冻结 replay 均通过。`RagRecallEvaluationTest` 使用隔离 PostgreSQL 与本机 `bge-m3:latest` 完成四文档受控 fixture 检索，`Recall@5=1.0`，Surefire 无失败或错误；它只证明 gold chunk 的 Top-5 覆盖及当前入库/embedding/检索链路可回归，不能外推为真实用户问题、真实 KB 规模、权限隔离、引用准确性或答案忠实性已验证。为避免 A/B 诊断将相同检索集重复三遍，验收命令显式关闭了 A/B 对比，未改变 fixture、embedding 或检索实现。
+- 因此 G0 必需证据已齐备。G1 不会被该结论自动启动；知识库 owner/tenant/ACL 硬权限模型仍是首个实现前置任务，必须先定义 schema、fixture 和越权绑定/检索、删除后引用、空绑定、多 KB 过滤的 RED 用例。
 
 ### 3.2 后续阶段的测试先行要求
 
@@ -65,6 +69,22 @@ G1 起，每个 `TC-ID` 在实现前必须补充测试类/文件、方法名、�
 - L2 只连接隔离 Docker 中的 PostgreSQL、Redis、RabbitMQ 和 Ollama，使用可清理测试账号与知识库。
 - L3 从 G1 起使用 Playwright；截图和报告写入构建产物，不提交生产数据或凭据。
 - 默认报告路径为 `backend_v2/target/surefire-reports/`、`backend_v2/target/rag-eval/` 和 Playwright 报告目录。
+
+#### 3.3.1 G0 L3 隔离资源与复用边界（2026-08-17）
+
+已创建可清理的本机验收资源：账号 `g0l3_20260817_114535`（userId `9`）、知识库 `G0 L3 隔离知识库 20260817-114535`（`7005d6b2-85d8-4639-87ae-82740070dd27`）、Agent `G0 L3 隔离验收 Agent 20260817-114535`（`9b1c349a-270b-4972-aaec-7a58a6965367`）与 Markdown 文档 `g0-l3-rag-20260817-114535.md`（`505cd70f-0993-4d23-8524-4afa2aff6351`）。文档唯一标记为 `G0-L3-RAG-20260817-114535`；Agent 仅绑定该 KB，当前唯一可选工具为 `dataBaseTool`。密码、JWT 和其他凭据不得写入本文或提交到仓库。
+
+隔离账号下另有临时 Agent `agent`，仅用于 `TC-G0-06` 的 `AI_ERROR` 浏览器旅程；它不作为普通/RAG/审批或 G1 的可复用 fixture，完成证据回填后可删除。
+
+| 复用范围 | 是否可复用 | 使用规则 |
+| --- | --- | --- |
+| `TC-G0-06` 浏览器旅程 | 可复用 | 用于普通回答、RAG 标记命中、`AI_ERROR` 展示、审批批准/拒绝及最终状态收尾；每次旅程分别保存截图和日志，不能以资源创建替代签收。 |
+| `TC-G0-04` L3 可见性补充 | 可复用 | 可观察正文分片和错误事件的页面呈现；SSE 空帧、发送失败、顺序与错误语义仍以既有 L0/L1 自动化回归为准。 |
+| `TC-G0-05` 审批页面补充 | 可复用 | 仅用于观察 `dataBaseTool` 的审批卡片、批准和拒绝；Harness 的 L1 批准/拒绝/超时正式验收仍必须使用 `HarnessRunnerTest` 及相关测试。 |
+| `TC-G0-01` 至 `TC-G0-03` | 不可复用 | 启动图、聊天持久化集成、RAG 指标和冻结 replay 分别需要最小 TestConfig、受控 mock 或冻结 fixture；本资源不能替代其数据口径。 |
+| G1 权限、幂等和摄入验收 | 不可单独复用 | G1 尚未定义硬权限模型；越权、跨用户/跨 KB 和重复上传必须新建至少第二个隔离账号、KB 与文档，并在 G1 的 schema/RED 用例确定后再建 fixture。 |
+
+资源仅服务本地隔离环境；完成 G0 后可删除 Agent、KB 与账号。删除前若需要复用，须先确认文档、KB 与 Agent 绑定仍存在，并重新记录执行日期和证据路径。
 
 ## 4. RAGAS 指标专项
 

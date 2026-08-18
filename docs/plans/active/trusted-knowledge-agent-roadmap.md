@@ -174,16 +174,16 @@ Webhook 服务于外部系统集成：入站触发文档索引或任务；出站
 
 G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 在有量化收益和时间预算时推进，不以“功能数量”作为完成标准。
 
-### 5.1 G0 当前续作入口（2026-08-17）
+### 5.1 G0 结项状态（2026-08-18）
 
 当前代码已具备登录后发送拦截、`AI_CONTENT_DELTA` 回答分片、`AI_ERROR` 失败事件、执行轨迹与审批卡片。中转站的 `ChatResponse.getResult() == null` 空帧已由后端忽略，避免中断后续回答分片；无工具调用的最终 Assistant 消息会在 `AI_DONE` 丢失时主动收起“思考中”状态；两项行为均由回归测试固定。
 
-新会话继续实施时，按以下顺序执行，不得提前进入 G1：
+本轮 G0 已按以下证据结项：
 
-1. 先在 `backend_v2` 运行 `.\mvnw.cmd -q "-Dtest=SseMessageStreamingContractTest,JChatMindStreamingSseTest,JChatMindErrorSseTest,SseServiceImplTest" test`，再在 `ui` 运行 `npm.cmd run build`，确认 G0 当前代码基线。
-2. 使用已登录的隔离测试账号，在聊天页重新验证普通回答的逐段显示、知识库检索回答、`AI_ERROR` 提示、审批卡片的批准/拒绝；把截图和日志相对路径回填 `TC-G0-06`，不得用普通用户或真实业务数据。
-3. 单独复现并修复当前 `npm.cmd run lint` 的既有 Hook 规则失败，再更新前端门禁结论；不能把构建通过当作 lint 通过。
-4. 继续补齐 `TC-G0-01` 至 `TC-G0-05` 的未验收边界和 G0 L3 手工签收。全部 G0 必需用例及证据满足第 6 节后，才可为 G1 补充 schema、fixture 和 RED 用例。
+1. `TC-G0-01` 启动图、`TC-G0-02` 聊天消息/事件链路、`TC-G0-04` SSE 契约与 `TC-G0-05` Harness 审批、代理、熔断回归均已通过；命令与报告见第 6.4 节的 2026-08-18 行。
+2. `TC-G0-03` 的 L0 指标、L1 冻结 replay 和本机 Ollama 的受控 fixture 链路已通过。四文档 fixture 的汇总 `Recall@5=1.0` 仅表示已知 gold chunk 在该受控集合的 Top-5 覆盖，不代表真实用户问题、真实知识库规模、权限隔离、引用准确性或答案忠实性已达标；为避免同一检索集重复三遍，验收命令关闭 A/B 诊断，但未缩小 fixture、未替换 embedding 或检索链路。
+3. 已使用隔离测试账号完成普通回答逐段显示、RAG 命中与正文增长、`AI_ERROR`、审批批准/拒绝、最终状态收尾，以及新会话首条消息持久化和同会话轨迹恢复。`npm.cmd run lint` 与 `npm.cmd run build` 均通过，结论独立记录，lint 仅有依赖数据过期提示。
+4. G0 阶段门禁现已满足。本结论不自动开始 G1；G1 的首个实现前置仍是知识库 owner/tenant/ACL 硬权限模型、对应 schema/fixture 与 RED 用例，详见本计划第 8 节和唯一 Spec。
 
 ## 6. 验收指标与门禁
 
@@ -229,7 +229,7 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 | TC-G0-03 | G0 / L0-L1 | 运行指标公式、冻结 replay 与 fixture 检索评测。 | 指标计算正确；replay 报告可读；fixture Recall@5 为 `1.0`。 | `RagAsMetricsTest`、`RagFastRegressionEvaluatorTest`、`RagRecallEvaluationTest` |
 | TC-G0-04 | G0 / L0-L3 | 模拟正文分片、空响应帧、SSE 发送失败和执行异常；重连/重复事件为后续边界。 | 空帧不阻断后续分片；`AI_CONTENT_DELTA` 顺序完整；`AI_ERROR` 可见；恢复/去重不在本次已签收范围。 | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest`；G0 手工旅程 |
 | TC-G0-05 | G0 / L1 | 对高风险工具分别执行批准、拒绝和超时路径。 | 状态进入并退出 `WAITING_APPROVAL`；工具不绕过 Harness；审计结果可追溯。 | `HarnessRunnerTest` 及审批相关测试 |
-| TC-G0-06 | G0 / L3 | 在测试账号和测试知识库中执行创建 Agent、聊天、检索、审批和回答分片可见性旅程。 | 页面构建与静态契约通过；用户能看到消息、分片、正确结束的状态、失败提示和审批卡片；lint 需单独通过。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`npm.cmd run build`、`npm.cmd run lint`、手工清单 |
+| TC-G0-06 | G0 / L3 | 在测试账号和测试知识库中执行创建 Agent、聊天、检索、审批和回答分片可见性旅程。 | 页面构建与静态契约通过；用户能看到消息、分片、正确结束的状态、失败提示和审批卡片；lint 需单独通过。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`node ui/tests/hook-state-in-effect.contract.mjs`、`node ui/tests/new-chat-session.contract.mjs`、`node ui/tests/session-trace-cache.contract.mjs`、`npm.cmd run build`、`npm.cmd run lint`、手工清单 |
 | TC-G1-01 | G1 / L0-L2 | 创建任务后依次覆盖排队、运行、取消、重试、失败和死信。 | 状态机合法；重试上限、错误摘要和 DLQ 一致。 | 待该阶段实现的任务中心测试 |
 | TC-G1-02 | G1 / L1-L2 | 使用相同幂等键重复提交，随后重放已完成任务。 | 只产生一个业务结果；重复请求返回同一任务或明确冲突。 | 待该阶段实现的幂等集成测试 |
 | TC-G1-03 | G1 / L2 | 分别上传 PDF、纯文本、HTML 与损坏文件。 | 正常文件可解析、索引并定位引用；损坏文件失败可重试。 | 待该阶段实现的摄入集成测试 |
@@ -264,11 +264,29 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 | TC-G0-03 | `fixture-fast-v1`; `ragas.enabled=false` | `backend_v2/target/surefire-reports/`; `backend_v2/target/rag-eval/fast/fixture-fast-v1-report.json` | L0 Context Precision/Recall、Recall@5 与既有冻结 replay 一致；L2 fixture 待执行 | 2026-08-15 | Codex | 部分通过（TC-G0-03a/03b；TC-G0-03c 待隔离 Docker） |
 | TC-G0-04 | mock `SseEmitter`；无外部服务 | `backend_v2/target/surefire-reports/` | 未连接与发送 IOException 均安全处理；重连/去重事件 schema 未定义 | 2026-08-15 | Codex | 未验收（基础保护测试通过；恢复契约待补充） |
 | TC-G0-04 | mock `ChatClient`、`SseService`；包含 `ChatResponse.getResult() == null` 空帧 | `backend_v2/target/surefire-reports/` | `AI_CONTENT_DELTA` 枚举、每个有效文本分块、完整消息持久化与 `AI_ERROR` 均通过；空帧此前稳定复现空指针，修复后被忽略 | 2026-08-17 | Codex | 部分通过（L0 流式与错误契约通过；L3 浏览器分片、重连/去重待验收） |
+| TC-G0-04 | mock `ChatClient`、`SseService`；无外部服务 | `backend_v2/target/surefire-reports/` | 执行 `cd backend_v2; .\mvnw.cmd -q "-Dtest=SseMessageStreamingContractTest,JChatMindStreamingSseTest,JChatMindErrorSseTest,SseServiceImplTest" test`，退出码 `0`；错误分支日志为受控断言 | 2026-08-17 | Codex | 部分通过（定向 SSE 回归通过；L3 分片可见性、重连/去重仍待验收） |
 | TC-G0-05 | 内存审批 store；`timeoutSeconds=0` | `backend_v2/target/surefire-reports/` | L0 批准/拒绝/超时状态符合 Harness 约束；ToolCallbackProxy L1 待执行 | 2026-08-15 | Codex | 部分通过（HarnessRunnerTest；代理执行路径待验收） |
 | TC-G0-06 | `ui`；本地 Node/npm.cmd | `ui/dist/index.html` | `npm.cmd run lint`、`npm.cmd run build` 通过；隔离测试账号、知识库与后端手工旅程待执行 | 2026-08-16 | Codex | 部分通过（前端构建门禁已通过；L3 手工旅程待隔离环境） |
 | TC-G0-06 | 隔离账号 `g0-e2e-20260816170837`；隔离 KB/Agent/文档；本地 Docker、Node/npm.cmd | `ui/dist/index.html`; `backend_v2/target/tc-g0-06-95301e96-1215-45ba-823c-61fd29aade6c-sse.log`; `backend_v2/target/g0-backend-mcp-disabled-v2.log` | Docker 与前后端端口可用；lint/build 与 SSE 事件类型契约通过；真实 SSE 已连接、用户消息已持久化，但 Java Agent 调用 DeepSeek POST 持续 `ConnectException`。无鉴权根路径 HEAD 返回 `401`，`/chat/completions` 的 HEAD/POST 均超时，故无检索回答或审批请求 | 2026-08-17 | Codex | 未验收（外部模型端点接入不可用；L3 手工聊天、检索与审批可见性待其恢复后重试） |
 | TC-G0-06 | 隔离账号 `g0-e2e-20260816170837`；隔离 KB/Agent/文档；中转站 `/v1`；`deepseek-v4-flash` | `backend_v2/target/tc-g0-06-smartfan-flash-102c43a5-c0e4-42f3-adbf-7c5aad2ccf10-sse.log`; `backend_v2/target/tc-g0-06-approval-a45d8486-56ee-4dcc-9495-7ef0f8fa4c62-sse.log`; `backend_v2/target/g0-backend-smartfan-v1-flash.log` | `KnowledgeTool` 命中隔离文档并回答 `G0-06-RAG-ISOLATED-SUCCESS`、消息持久化且 `AI_DONE`；`databaseQuery` 先发出 `TOOL_APPROVAL_REQUIRED`、待审批 API 返回同一受限常量 SELECT，批准后工具结果和最终回答持久化。监听的 150 秒 `curl` 超时早于批准后的尾部 SSE；浏览器 EventSource 为 30 分钟。 | 2026-08-17 | Codex | 部分通过（真实 RAG、SSE、Harness 审批及错误事件已验证；L3 浏览器手工消息、状态、失败提示与审批卡片待操作签收） |
 | TC-G0-06 | 本地 Node/npm.cmd；已登录隔离会话；中转站流式空帧和 `AI_DONE` 丢失场景 | `ui/dist/index.html`; `backend_v2/target/surefire-reports/`; `backend_v2/target/g0-backend-smartfan-v1-flash.log` | `npm.cmd run build` 通过；前端具备回答分片、执行轨迹、审批、错误状态与最终回答状态收尾静态契约。后端日志曾记录空帧空指针与 SSE 客户端断连；空帧已由 L0 回归覆盖，最终 Assistant 消息可独立清理残留状态。刷新后的浏览器真实分片尚待签收。`npm.cmd run lint` 仍有既有 Hook 规则失败。 | 2026-08-17 | Codex | 部分通过（构建与静态契约通过；浏览器流式复验和 lint 基线待完成） |
+| TC-G0-06 | 本地 Node/npm.cmd；Docker PostgreSQL/Redis/RabbitMQ/Ollama 已运行 | `ui/dist/index.html`; `backend_v2/target/surefire-reports/` | 四项 G0 前端静态契约与 `hook-state-in-effect.contract.mjs`、`npm.cmd run lint`、`npm.cmd run build` 均退出码 `0`；lint 不再报告 Hook 规则问题，仅有依赖数据过期提示，未升级依赖。当前无前后端应用进程且无可交互浏览器工具，未执行隔离账号 L3 旅程。 | 2026-08-17 | Codex | 部分通过（前端静态、lint 与构建门禁通过；普通/RAG 分片、AI_ERROR、审批卡片和最终状态的浏览器签收待可用环境） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`（userId `9`）；KB `7005d6b2-85d8-4639-87ae-82740070dd27`；Agent `9b1c349a-270b-4972-aaec-7a58a6965367`；Markdown 文档 `505cd70f-0993-4d23-8524-4afa2aff6351` | API 回读：`/api/knowledge-bases`、`/api/agents`、`/api/documents/kb/7005d6b2-85d8-4639-87ae-82740070dd27` | Agent 仅绑定该 KB，唯一可选工具为 `dataBaseTool`；文档标记为 `G0-L3-RAG-20260817-114535`。资源可用于普通/RAG 分片、错误展示、审批与最终状态的浏览器旅程；尚未执行旅程或生成截图。凭据不写入仓库文档。 | 2026-08-17 | Codex | 前置数据已就绪（待 L3 手工签收；复用与非复用边界见 Spec 3.3.1） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；KB/Agent/文档沿用上行资源 | `backend_v2/target/tc-g0-06-l3-rag-retrieval-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-approval-select-1-20260817-114535.png` | RAG 截图显示 `KnowledgeTool` 命中隔离 KB 文档并返回标记 `G0-L3-RAG-20260817-114535`。审批截图显示执行轨迹从“等待审批: databaseQuery”继续到 `databaseQuery` 的 `SELECT 1` 结果，并以 `terminate` 完成。截图只记录完成态，未单独证明逐段渲染；未覆盖拒绝审批和 `AI_ERROR`。 | 2026-08-17 | Ban | 部分通过（RAG 检索与审批后只读执行可见；普通回答分片、RAG 分片过程、拒绝、错误提示及最终状态收尾仍待签收） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；KB/Agent/文档沿用上行资源 | `backend_v2/target/tc-g0-06-l3-approval-rejected-20260817-114535.png` | 拒绝审批后，页面显示 `[APPROVAL_REJECTED]`，最终回答明确 `SELECT 1` 未执行，执行轨迹以“完成 / 任务完成”结束。该图签收拒绝分支和工具未绕过审批；不替代审批卡片待决态、回答分片过程或 `AI_ERROR` 的截图。 | 2026-08-17 | Ban | 部分通过（拒绝审批可见；其余 L3 项仍待签收） |
+| TC-G0-06 | 前端聊天路由；隔离账号/KB/Agent 可供复验 | `node ui/tests/new-chat-session.contract.mjs`；Ban 手工签收（未截图） | 新会话 bug 根因是 React Router 复用聊天视图实例，`initProcessedRef` 与执行轨迹跨会话保留，导致首条初始化消息未持久化且旧轨迹显示在空会话中。契约先 RED 后 GREEN；`/chat` 与 `/chat/:chatSessionId` 现按会话 ID 重挂载视图。Ban 于 2026-08-18 手工确认新会话首条消息已持久化，且不显示旧会话轨迹；本项不保存截图。 | 2026-08-18 | Ban | 通过（自动契约与 L3 浏览器复验已签收） |
+| TC-G0-06 | 前端会话轨迹缓存；隔离账号/KB/Agent 可供复验 | `node ui/tests/session-trace-cache.contract.mjs`; `node ui/tests/new-chat-session.contract.mjs`; `node ui/tests/execution-trace.contract.mjs`; `ui` 的 `npm.cmd run lint`、`npm.cmd run build`；Ban 手工签收（未截图） | 原先会话 ID 重挂载会清空仅由 SSE 保存的 `agentTrace`。契约先 RED 后 GREEN；布局现按会话 ID 缓存已收到的轨迹，切回同一会话恢复轨迹，发送新一轮消息仅清空当前会话，新会话不会继承旧轨迹。离开期间的 SSE 不回放，刷新页面不保留内存缓存。Ban 于 2026-08-18 手工确认 RAG 会话 A 切至新会话 B 再返回 A 后，A 恢复已收到轨迹且 B 不显示 A 的轨迹；新会话首条消息也已持久化；本项不保存截图。 | 2026-08-18 | Ban | 通过（静态契约、lint、构建与浏览器复验已签收） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；KB/Agent/文档沿用上行资源 | `backend_v2/target/tc-g0-06-l3-rag-marker-final-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-rag-retrieval-detail-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-approval-pending-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-approval-approved-progress-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-thinking-before-answer-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-rag-tool-executing-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-rag-redis-final-20260817-114535.png` | `KnowledgeTool` 已检索隔离文档并显示唯一标记，展开明细可见命中文档内容；审批卡片在待决态展示“批准/拒绝”，批准后工具结果出现并继续思考。普通问题和 RAG 图均只到“思考中”或“执行中”，未显示 Assistant 正文逐段追加；Redis 回答图显示 RAG 后完整回答，但不单独证明逐段渲染或显式完成轨迹。 | 2026-08-17 | Ban | 部分通过（RAG 检索、审批卡片待决与批准后继续执行可见；普通/RAG 正文分片、`AI_ERROR`、新会话浏览器复验仍待签收） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；普通问答 `Kafka是什么` | `backend_v2/target/tc-g0-06-l3-normal-streaming-early-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-normal-streaming-mid-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-normal-final-kafka-20260817-114535.png` | 同一回答按时间从首段定义扩展到核心概念，再扩展到应用场景和对比结论，证明 Assistant 正文在页面逐段追加。完成图未包含回答末尾的状态区域，不能单独签收“思考中”已收起。 | 2026-08-17 | Ban | 部分通过（普通正文分片已签收；RAG 正文分片、最终状态收尾、`AI_ERROR`、新会话浏览器复验仍待签收） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；同一 RAG 会话 `G0 L3 隔离检索验收标记是什么？` | `backend_v2/target/tc-g0-06-l3-rag-lifecycle-thinking-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-rag-lifecycle-tool-20260817-114535.png`; `backend_v2/target/tc-g0-06-l3-rag-lifecycle-final-20260817-114535.png` | 同一会话依次显示“思考中”、`KnowledgeTool` 执行后的“思考中”、带唯一标记的最终回答和执行轨迹“完成 / 任务完成”。最终图没有残留“思考中”，签收 RAG 工具链后的最终状态收尾；中间未显示正在增长的 Assistant 正文，不能替代 RAG 正文分片证据。 | 2026-08-17 | Ban | 部分通过（最终状态收尾已签收；RAG 正文分片、`AI_ERROR`、新会话浏览器复验仍待签收） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；临时 Agent `agent`；普通问答 `只回复 OK` | `backend_v2/target/tc-g0-06-l3-ai-error-20260817-114535.png` | 页面显示“Agent 执行失败，请稍后重试” toast、执行轨迹“失败”及错误状态气泡；该状态替换了此前“思考中”，未显示 `AI_DONE`。 | 2026-08-17 | Ban | 部分通过（`AI_ERROR` 浏览器可见性已签收；RAG 正文分片和新会话浏览器复验仍待签收） |
+| TC-G0-06 | 隔离账号 `g0l3_20260817_114535`；同一 RAG 问题 `请只根据知识库，分五点完整说明 G0-L3-RAG-20260817-114535 的含义、用途、隔离边界、验证步骤和注意事项。` | `backend_v2/target/tc-g0-06-l3-rag-streaming-final-20260818.png`；Ban 手工连续观察（未保存中间阶段截图） | 同一会话先后两次调用 `KnowledgeTool` 并命中隔离文档；Ban 观察到 `terminate` 最终回答气泡从部分正文持续增长至五点完整回答。归档截图记录最终态、知识库来源和“完成 / 任务完成”；它不单独冒充中间分片截图。 | 2026-08-18 | Ban | 通过（RAG 正文分片与最终状态收尾已手工签收） |
+| TC-G0-01 | `test` profile；最小 Bean 图与完整应用上下文 | `backend_v2/target/surefire-reports/` | 执行 G0 后端组合命令，启动、循环依赖保护均通过。 | 2026-08-18 | Codex | 通过 |
+| TC-G0-02 | 真实 `ApplicationEventPublisher`；mock Mapper/Converter/Agent/记忆服务 | `backend_v2/target/surefire-reports/` | `ChatMessageFacadeServiceImplTest`、`ChatEventListenerTest`、`ChatMessageEventFlowIntegrationTest` 断言会话归属、消息持久化、事件字段、历史顺序、Agent 执行和 Agent 失败后的记忆提取；三项合并命令退出码 `0`。 | 2026-08-18 | Codex | 通过 |
+| TC-G0-03 | `rag-eval`；四文档受控 fixture；本机 Ollama `bge-m3:latest`；MCP client 禁用；A/B 诊断禁用 | `backend_v2/target/rag-eval/report.json`；`backend_v2/target/surefire-reports/TEST-com.kama.jchatmind.rag.RagRecallEvaluationTest.xml` | `RagAsMetricsTest`、`RagEvaluationDatasetLoaderTest`、`RagFastRegressionEvaluatorTest` 退出码 `0`。`RagRecallEvaluationTest` 使用本机真实 embedding 运行 1357.197 秒，fixture `total=64`、`evaluated=56`、`excluded=8`（预期空 rewrite）、`Recall@5=1.0`、无 miss；该指标仅验收受控 gold 覆盖和链路可回归，不宣称真实 RAG 效果。Surefire `failures=0/errors=0`。 | 2026-08-18 | Codex | 通过 |
+| TC-G0-04 | mock `ChatClient`、`SseService`、`SseEmitter` | `backend_v2/target/surefire-reports/` | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest` 与 G0 后端组合命令退出码 `0`。空帧、顺序分片、`AI_ERROR` 与发送失败均为受控断言；L3 可见性已由既有 Ban 签收补齐。 | 2026-08-18 | Codex | 通过（重连/去重仍为 G5 范围） |
+| TC-G0-05 | 内存审批/审计/熔断存储；mock 工具回调 | `backend_v2/target/surefire-reports/` | `HarnessRunnerTest`、`InMemoryApprovalStoreTest`、`CircuitBreakerTest`、`CircuitBreakerInterceptorTest`、`HarnessExecutionContextHolderTest`、`HarnessToolCallbackProxyTest` 与 G0 后端组合命令退出码 `0`。批准、拒绝、超时、代理上下文与熔断均受覆盖；L3 批准/拒绝已由 Ban 签收。 | 2026-08-18 | Codex | 通过 |
+| TC-G0-06 | 隔离账号/KB/Agent/文档；本地 Node/npm.cmd | `ui/dist/index.html`；`backend_v2/target/tc-g0-06-l3-rag-streaming-final-20260818.png` | 7 项 Node 静态契约、`npm.cmd run lint`、`npm.cmd run build` 均退出码 `0`。lint 仅有 `baseline-browser-mapping` 数据过期提示；L3 普通/RAG 分片、`AI_ERROR`、审批、收尾、新会话隔离与轨迹恢复均沿用上方 Ban 签收证据。 | 2026-08-18 | Codex / Ban | 通过 |
 | TC-G1-01 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G1-02 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G1-03 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
@@ -296,7 +314,7 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 本计划已为 G0-G5 的每项交付定义正向、失败/拒绝或恢复/边界测试，并将每个阶段退出条件绑定到 `TC-ID`、隔离环境和通过判定。RAG 指标细则由现有 Spec 维护；任务、Router、记忆、Webhook、并发和多实例 SSE 的测试均明确为对应阶段实现后的必需交付。
 
-当前仅 G0 的部分后端、前端静态契约与 RAG 测试入口已存在，G0 基线尚未签收；最新续作顺序见第 5.1 节。G1-G5 的能力和测试均未实现。任何“待该阶段实现”项目在真实代码、执行命令和报告路径补齐前均不得标记为已覆盖。
+当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收；G1-G5 的能力和测试均未实现，且 G1 尚未开始。任何“待该阶段实现”项目在真实代码、执行命令和报告路径补齐前均不得标记为已覆盖。
 
 ## 7. 风险与决策规则
 

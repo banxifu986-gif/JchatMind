@@ -68,7 +68,14 @@ import java.util.Set;
 import java.util.function.ToDoubleFunction;
 import java.util.stream.Collectors;
 
-@SpringBootTest(classes = RagRecallEvaluationTest.RagEvalTestConfig.class)
+@SpringBootTest(
+        classes = RagRecallEvaluationTest.RagEvalTestConfig.class,
+        properties = {
+                "spring.ai.mcp.client.enabled=false",
+                "ollama.base-url=http://localhost:11434",
+                "ollama.embedding-model=bge-m3:latest"
+        }
+)
 @ActiveProfiles("rag-eval")
 class RagRecallEvaluationTest {
 
