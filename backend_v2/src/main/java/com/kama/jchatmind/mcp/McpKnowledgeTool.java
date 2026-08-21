@@ -6,8 +6,11 @@ import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.rag.RagRouteDecision;
+import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -29,6 +32,7 @@ public class McpKnowledgeTool {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeBaseAccessService knowledgeBaseAccessService;
     private final McpPrincipalAccessService mcpPrincipalAccessService;
+    private final RagRouter ragRouter;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public McpKnowledgeTool(
@@ -37,10 +41,22 @@ public class McpKnowledgeTool {
             KnowledgeBaseAccessService knowledgeBaseAccessService,
             McpPrincipalAccessService mcpPrincipalAccessService
     ) {
+        this(ragService, knowledgeBaseMapper, knowledgeBaseAccessService, mcpPrincipalAccessService, new RagRouter());
+    }
+
+    @Autowired
+    public McpKnowledgeTool(
+            RagService ragService,
+            KnowledgeBaseMapper knowledgeBaseMapper,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            McpPrincipalAccessService mcpPrincipalAccessService,
+            RagRouter ragRouter
+    ) {
         this.ragService = ragService;
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.knowledgeBaseAccessService = knowledgeBaseAccessService;
         this.mcpPrincipalAccessService = mcpPrincipalAccessService;
+        this.ragRouter = ragRouter;
     }
 
     @org.springframework.ai.tool.annotation.Tool(
@@ -67,6 +83,19 @@ public class McpKnowledgeTool {
                 );
                 return "";
             }
+            RagRouteDecision route = ragRouter.decide(query, accessibleKbIds, true, false, true);
+            if (route.route() == RagRouteDecision.Route.ABSTAIN
+                    || route.route() == RagRouteDecision.Route.CLARIFY
+                    || route.route() == RagRouteDecision.Route.DIRECT) {
+                mcpPrincipalAccessService.recordKnowledgeQuery(
+                        caller,
+                        resolveCorrelationId(),
+                        "ALLOW",
+                        accessibleKbIds,
+                        "route_" + route.route().name().toLowerCase()
+                );
+                return route.reason();
+            }
             List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, DEFAULT_RETRIEVAL_LIMIT);
             mcpPrincipalAccessService.recordKnowledgeQuery(
                     caller,
@@ -75,6 +104,9 @@ public class McpKnowledgeTool {
                     accessibleKbIds,
                     "retrieved"
             );
+            if (results == null || results.isEmpty()) {
+                return "当前授权知识范围内没有足够证据，无法可靠回答。";
+            }
             return formatResults(results, buildKbNameMap(accessibleKbIds));
         } catch (BizException e) {
             mcpPrincipalAccessService.recordKnowledgeQuery(
@@ -138,10 +170,13 @@ public class McpKnowledgeTool {
         String kbName = resolveKbName(result.getKbId(), kbIdToName);
         String sourceName = extractMetadataText(result.getMetadata(), "sourceName");
         String contentPath = extractMetadataText(result.getMetadata(), "contentPath");
+        String pageNumber = extractMetadataText(result.getMetadata(), "pageNumber");
         String content = StringUtils.hasText(result.getContent()) ? result.getContent().trim() : "";
         return "知识库: " + kbName + "\n"
                 + "来源: " + defaultText(sourceName) + "\n"
                 + "路径: " + defaultText(contentPath) + "\n"
+                + "引用: " + defaultText(result.getChunkId())
+                + (StringUtils.hasText(pageNumber) ? " | 页码: " + pageNumber : "") + "\n"
                 + "内容: " + content;
     }
 
@@ -157,7 +192,7 @@ public class McpKnowledgeTool {
         try {
             JsonNode root = objectMapper.readTree(metadata);
             JsonNode node = root.get(fieldName);
-            return node != null && node.isTextual() ? node.asText() : "";
+            return node != null && node.isValueNode() ? node.asText() : "";
         } catch (Exception e) {
             return "";
         }

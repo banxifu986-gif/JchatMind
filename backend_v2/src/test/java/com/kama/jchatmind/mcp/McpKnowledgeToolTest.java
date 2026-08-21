@@ -4,6 +4,7 @@ import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -141,6 +142,98 @@ class McpKnowledgeToolTest {
                     "knowledge_base_access_denied"
             );
             verifyNoInteractions(ragService);
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldRejectExternalLookupBeforePrivateRetrieval() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class),
+                new RagRouter()
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+
+            String response = tool.search("查询最新官方文档", List.of("kb-own"));
+
+            assertThat(response).contains("许可");
+            verifyNoInteractions(ragService);
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldRefuseWhenMcpRetrievalHasNoEvidence() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class),
+                new RagRouter()
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of());
+
+            String response = tool.search("查询", List.of("kb-own"));
+
+            assertThat(response).contains("没有足够证据");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldFormatStableCitationForMcpEvidence() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class),
+                new RagRouter()
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            RagRetrievalResult evidence = new RagRetrievalResult();
+            evidence.setChunkId("chunk-1");
+            evidence.setKbId("kb-own");
+            evidence.setContent("证据正文");
+            evidence.setMetadata("{\"sourceName\":\"设计文档.pdf\",\"contentPath\":\"第 2 页\",\"pageNumber\":2}");
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
+                    .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("研发知识库").build()));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of(evidence));
+
+            String response = tool.search("查询", List.of("kb-own"));
+
+            assertThat(response).contains("引用: chunk-1").contains("页码: 2").contains("证据正文");
         } finally {
             RequestContextHolder.resetRequestAttributes();
         }
