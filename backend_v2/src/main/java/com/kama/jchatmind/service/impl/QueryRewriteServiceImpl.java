@@ -129,7 +129,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         );
         effectiveContext = adjustContextForRewrite(effectiveContext, contextApplyMode, topicSwitchSignal);
 
-        List<String> retrievalQueries = buildRetrievalQueries(
+        RetrievalQueryPlan retrievalPlan = buildRetrievalPlan(
                 sanitizedQuery,
                 effectiveContext,
                 intent,
@@ -143,7 +143,8 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 .titleQuery(titleQuery)
                 .intent(intent)
                 .contextApplyMode(contextApplyMode)
-                .retrievalQueries(retrievalQueries)
+                .retrievalQueries(retrievalPlan.queries())
+                .retrievalQuerySources(retrievalPlan.sources())
                 .build();
     }
 
@@ -179,7 +180,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         return QueryRewriteResult.ContextApplyMode.SOFT;
     }
 
-    private List<String> buildRetrievalQueries(
+    private RetrievalQueryPlan buildRetrievalPlan(
             String sanitizedQuery,
             RagRetrievalContext context,
             QueryRewriteResult.Intent intent,
@@ -187,6 +188,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             boolean topicSwitchSignal
     ) {
         List<String> queries = new ArrayList<>();
+        List<String> sources = new ArrayList<>();
         String llmRewrittenQuery = maybeRewriteWithLlm(
                 sanitizedQuery,
                 context,
@@ -196,22 +198,30 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         );
         if (StringUtils.hasText(llmRewrittenQuery)) {
             queries.add(llmRewrittenQuery);
-        }
-        if (intent == QueryRewriteResult.Intent.FOLLOW_UP
+            sources.add("llm");
+        } else if (intent == QueryRewriteResult.Intent.FOLLOW_UP
                 && contextApplyMode == QueryRewriteResult.ContextApplyMode.HARD
                 && context != null
                 && context.hasContext()) {
             String standalone = buildStandaloneFollowUpQuery(context, sanitizedQuery);
             if (StringUtils.hasText(standalone)) {
                 queries.add(standalone);
+                sources.add("standalone");
             }
         }
         queries.add(sanitizedQuery);
-        return queries.stream()
-                .filter(StringUtils::hasText)
-                .map(this::sanitizeQuery)
-                .distinct()
-                .toList();
+        sources.add("original");
+        List<String> normalizedQueries = new ArrayList<>();
+        List<String> normalizedSources = new ArrayList<>();
+        for (int i = 0; i < queries.size(); i++) {
+            String normalized = sanitizeQuery(queries.get(i));
+            if (!StringUtils.hasText(normalized) || normalizedQueries.contains(normalized)) {
+                continue;
+            }
+            normalizedQueries.add(normalized);
+            normalizedSources.add(sources.get(i));
+        }
+        return new RetrievalQueryPlan(List.copyOf(normalizedQueries), List.copyOf(normalizedSources));
     }
 
     private String maybeRewriteWithLlm(
@@ -716,6 +726,9 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             RagRetrievalContext context,
             double score
     ) {
+    }
+
+    private record RetrievalQueryPlan(List<String> queries, List<String> sources) {
     }
 
     @FunctionalInterface

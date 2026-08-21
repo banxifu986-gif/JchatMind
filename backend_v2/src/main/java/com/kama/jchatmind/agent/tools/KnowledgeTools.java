@@ -105,14 +105,15 @@ public class KnowledgeTools implements Tool {
             return false;
         }
         if (top.getRrfScore() != null) {
-            double nextScore = results.size() > 1 && results.get(1) != null
-                    && results.get(1).getRrfScore() != null
-                    ? results.get(1).getRrfScore()
-                    : 0D;
+            if (results.size() > 1 && (results.get(1) == null || results.get(1).getRrfScore() == null)) {
+                return false;
+            }
+            double nextScore = results.size() > 1 ? results.get(1).getRrfScore() : 0D;
             return top.getRrfScore() >= MIN_CONTEXT_RRF_SCORE
                     && (results.size() == 1 || top.getRrfScore() - nextScore >= MIN_CONTEXT_RRF_GAP);
         }
-        return top.getDistance() != null && top.getDistance() <= MAX_CONTEXT_VECTOR_DISTANCE;
+        Double vectorDistance = top.getVectorDistance() != null ? top.getVectorDistance() : top.getDistance();
+        return vectorDistance != null && vectorDistance <= MAX_CONTEXT_VECTOR_DISTANCE;
     }
 
     private RagRetrievalContext buildContextFromTopResult(RagRetrievalResult result) {
@@ -171,6 +172,9 @@ public class KnowledgeTools implements Tool {
             return List.of();
         }
         if (CollectionUtils.isEmpty(kbIds)) {
+            if (isExplicitSessionScope(retrievalContext)) {
+                return List.of(retrievalContext.getKbId());
+            }
             return new ArrayList<>(allowedKbMap.keySet());
         }
         return kbIds.stream()
@@ -179,6 +183,15 @@ public class KnowledgeTools implements Tool {
                 .filter(allowedKbMap::containsKey)
                 .distinct()
                 .toList();
+    }
+
+    private boolean isExplicitSessionScope(RagRetrievalContext retrievalContext) {
+        return retrievalContext != null
+                && StringUtils.hasText(retrievalContext.getKbId())
+                && allowedKbMap.containsKey(retrievalContext.getKbId())
+                && !StringUtils.hasText(retrievalContext.getSourceType())
+                && !StringUtils.hasText(retrievalContext.getSourceName())
+                && !StringUtils.hasText(retrievalContext.getContentPath());
     }
 
     private RagRetrievalContext alignRetrievalContext(

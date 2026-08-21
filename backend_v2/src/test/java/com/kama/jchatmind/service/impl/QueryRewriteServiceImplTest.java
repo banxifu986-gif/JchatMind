@@ -39,6 +39,7 @@ class QueryRewriteServiceImplTest {
         assertEquals(QueryRewriteResult.Intent.FOLLOW_UP, result.getIntent());
         assertEquals(QueryRewriteResult.ContextApplyMode.HARD, result.getContextApplyMode());
         assertEquals(List.of("resume.md interview > answer answer", "answer"), result.getRetrievalQueries());
+        assertEquals(List.of("standalone", "original"), result.getRetrievalQuerySources());
         assertFalse(result.isTitleQuery());
     }
 
@@ -252,11 +253,11 @@ class QueryRewriteServiceImplTest {
         assertEquals(
                 List.of(
                         "resume.md interview answer detail",
-                        "resume.md interview > answer answer",
                         "answer"
                 ),
                 result.getRetrievalQueries()
         );
+        assertEquals(List.of("llm", "original"), result.getRetrievalQuerySources());
     }
 
     @Test
@@ -283,6 +284,7 @@ class QueryRewriteServiceImplTest {
                 List.of("resume.md interview > answer answer", "answer"),
                 result.getRetrievalQueries()
         );
+        assertEquals(List.of("standalone", "original"), result.getRetrievalQuerySources());
     }
 
     @Test

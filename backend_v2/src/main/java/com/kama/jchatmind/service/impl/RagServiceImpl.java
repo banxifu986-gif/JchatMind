@@ -177,6 +177,10 @@ public class RagServiceImpl implements RagService {
                 : rewritten.getRetrievalQueries() == null || rewritten.getRetrievalQueries().isEmpty()
                 ? List.of(originalQuery)
                 : rewritten.getRetrievalQueries();
+        List<String> retrievalQuerySources = rewritten.getRetrievalQuerySources() == null
+                || rewritten.getRetrievalQuerySources().size() != retrievalQueries.size()
+                ? Collections.nCopies(retrievalQueries.size(), "unknown")
+                : rewritten.getRetrievalQuerySources();
         Map<String, String> embeddingLiteralCache = new LinkedHashMap<>();
 
         int scopeMultiplier = scopeMultiplier(kbIds.size());
@@ -192,9 +196,10 @@ public class RagServiceImpl implements RagService {
         List<RetrievalChannel> channels = new ArrayList<>();
         for (int i = 0; i < retrievalQueries.size(); i++) {
             String retrievalQuery = retrievalQueries.get(i);
+            String querySource = retrievalQuerySources.get(i);
             String queryEmbedding = embeddingLiteral(embeddingLiteralCache, retrievalQuery);
             channels.add(new RetrievalChannel(
-                    "vector_" + i,
+                    "vector_" + querySource,
                     annotateVectorCandidates(findVectorCandidates(
                             kbIds,
                             queryEmbedding,

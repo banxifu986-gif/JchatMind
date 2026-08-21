@@ -27,6 +27,9 @@ public class QueryRewriteResult {
     @Builder.Default
     private List<String> retrievalQueries = List.of();
 
+    @Builder.Default
+    private List<String> retrievalQuerySources = List.of();
+
     public enum Intent {
         FOLLOW_UP,
         NAVIGATION,

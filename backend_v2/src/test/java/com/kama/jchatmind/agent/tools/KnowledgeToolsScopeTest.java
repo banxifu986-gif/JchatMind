@@ -93,4 +93,114 @@ class KnowledgeToolsScopeTest {
                         org.mockito.ArgumentMatchers.eq("7")
                 );
     }
+
+    @Test
+    void shouldFailClosedWhenTopTwoRrfScoresCannotBeCompared() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalResult top = new RagRetrievalResult();
+        top.setChunkId("chunk-1");
+        top.setKbId("kb-1");
+        top.setMetadata("{\"sourceName\":\"文档\"}");
+        top.setRrfScore(0.04D);
+        RagRetrievalResult incompleteSecond = new RagRetrievalResult();
+        incompleteSecond.setChunkId("chunk-2");
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3))
+                .thenReturn(List.of(top, incompleteSecond));
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("问题", null);
+
+        org.mockito.Mockito.verify(sessionService, org.mockito.Mockito.never())
+                .updateRetrievalContext(
+                        org.mockito.ArgumentMatchers.eq("session-1"),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("7")
+                );
+    }
+
+    @Test
+    void shouldUseVectorDistanceFallbackWhenDistanceIsNotMapped() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalResult result = new RagRetrievalResult();
+        result.setChunkId("chunk-1");
+        result.setKbId("kb-1");
+        result.setMetadata("{\"sourceName\":\"文档\"}");
+        result.setVectorDistance(0.2D);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(result));
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("问题", null);
+
+        org.mockito.Mockito.verify(sessionService).updateRetrievalContext(
+                org.mockito.ArgumentMatchers.eq("session-1"),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("7")
+        );
+    }
+
+    @Test
+    void shouldPreferVectorDistanceWhenBothDistancesArePresent() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalResult result = new RagRetrievalResult();
+        result.setChunkId("chunk-1");
+        result.setKbId("kb-1");
+        result.setMetadata("{\"sourceName\":\"文档\"}");
+        result.setDistance(0.1D);
+        result.setVectorDistance(0.8D);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(result));
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("问题", null);
+
+        org.mockito.Mockito.verify(sessionService, org.mockito.Mockito.never())
+                .updateRetrievalContext(
+                        org.mockito.ArgumentMatchers.eq("session-1"),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("7")
+                );
+    }
+
+    @Test
+    void shouldHonorExplicitSessionKnowledgeBaseScopeWithoutSourceContext() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalContext explicitScope = RagRetrievalContext.builder().kbId("kb-1").build();
+        when(sessionService.getRetrievalContext("session-1", "7")).thenReturn(explicitScope);
+        when(ragService.retrieve(List.of("kb-1"), "问题", explicitScope, 3)).thenReturn(List.of());
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(
+                        KnowledgeBaseDTO.builder().id("kb-1").build(),
+                        KnowledgeBaseDTO.builder().id("kb-2").build()
+                ));
+
+        tool.knowledgeQuery("问题", null);
+
+        verify(ragService).retrieve(List.of("kb-1"), "问题", explicitScope, 3);
+    }
+
+    @Test
+    void shouldIgnoreExplicitSessionScopeWhenKnowledgeBaseIsNoLongerAuthorized() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalContext staleScope = RagRetrievalContext.builder().kbId("kb-revoked").build();
+        when(sessionService.getRetrievalContext("session-1", "7")).thenReturn(staleScope);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of());
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("问题", null);
+
+        verify(ragService).retrieve(List.of("kb-1"), "问题", null, 3);
+    }
 }
