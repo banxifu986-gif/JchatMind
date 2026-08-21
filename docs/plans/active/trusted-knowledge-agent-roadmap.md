@@ -253,6 +253,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 原生 BM25 的 schema/查询契约如下：业务事实仍以 `chunk_bge_m3` 为唯一来源；如插件需要索引投影，投影字段必须在同一摄入事务内从 chunk 构造并带 `chunk/indexVersion`，不能形成第二份可独立写入的业务数据。索引必须可按 `kb_id`、`sourceName`、`sourceType` 和规范化 `contentPath` 过滤；`HARD` 上下文的全部过滤条件必须在 BM25 `LIMIT` 前执行。中文、英文、代码标识符、路径和版本号的 analyzer/预分词规则要先由冻结语料评测，不能假设任何插件的默认 tokenizer 满足中文技术文档。
 
+**2026-08-22 G2-0 基线记录。** `g2-pre-bm25-v1` 冻结集含 9 个合成技术 case（7 个可回答、2 个拒答），覆盖中文术语、代码标识符、标题/正文精确匹配、follow-up、topic switch、无答案、越权及 PDF 页码语义；PDF fixture 不宣称 OCR、图片、表格或公式能力。`RagG2PreBm25BaselineL2Test` 在名称固定为 `g2ragbaseline` 的隔离 PostgreSQL 14.22 数据库中插入 5,000 个候选，执行 `ANALYZE`、一次不计入统计的预热读取及 20 次 JDBC 全量候选读取。该次运行报告为 `target/rag-eval/g2-pre-bm25-v1-pre-migration-l2.json`：p95 为 22ms，`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` 为 `Seq Scan -> Sort -> WindowAgg`，估算 4,975 行、实际 5,000 行。该基线只刻画迁移前全量候选扫描，不能外推为 Agent、embedding、生成或生产业务库的端到端性能；后续 G2-1/G2-2 必须以同一冻结集比较并保留等价证据。
+
 | 顺序 | 改造与边界 | 完成判据 |
 | --- | --- | --- |
 | G2-0 | 冻结迁移前评测集、查询计划和延迟基线；新增中文术语/代码、标题、正文精确匹配、multi-turn follow-up、topic switch、无答案、越权和 PDF 页码 case。 | 数据集、gold、KB 范围、模型、检索配置和报告版本可复跑；不把现有 4 文档 fixture 当成真实规模结论。 |
