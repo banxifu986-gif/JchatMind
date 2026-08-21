@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.AgentKnowledgeBaseMapper">
+
+    <select id="selectKbIdsByAgentId" resultType="java.lang.String">
+        SELECT kb_id
+        FROM agent_knowledge_base
+        WHERE agent_id = CAST(#{agentId} AS uuid)
+        ORDER BY bound_at, kb_id
+    </select>
+
+    <delete id="deleteByAgentId">
+        DELETE FROM agent_knowledge_base
+        WHERE agent_id = CAST(#{agentId} AS uuid)
+    </delete>
+
+    <insert id="insertBatch">
+        INSERT INTO agent_knowledge_base (agent_id, kb_id, bound_by_user_id, bound_at)
+        VALUES
+        <foreach collection="kbIds" item="kbId" separator=",">
+            (CAST(#{agentId} AS uuid), CAST(#{kbId} AS uuid), CAST(#{boundByUserId} AS bigint), NOW())
+        </foreach>
+    </insert>
+</mapper>

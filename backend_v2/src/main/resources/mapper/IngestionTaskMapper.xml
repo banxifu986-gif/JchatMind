@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.IngestionTaskMapper">
+
+    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.IngestionTask">
+        <id property="id" column="task_id" jdbcType="VARCHAR"/>
+        <result property="ownerId" column="owner_id" jdbcType="BIGINT"/>
+        <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
+        <result property="documentId" column="document_id" jdbcType="VARCHAR"/>
+        <result property="idempotencyKey" column="idempotency_key" jdbcType="VARCHAR"/>
+        <result property="taskType" column="task_type" jdbcType="VARCHAR"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
+        <result property="attemptCount" column="attempt_count" jdbcType="INTEGER"/>
+        <result property="maxAttempts" column="max_attempts" jdbcType="INTEGER"/>
+        <result property="errorSummary" column="error_summary" jdbcType="VARCHAR"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+        <result property="startedAt" column="started_at" jdbcType="TIMESTAMP"/>
+        <result property="completedAt" column="completed_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.IngestionTask">
+        INSERT INTO ingestion_task (
+            task_id, owner_id, kb_id, document_id, idempotency_key, task_type,
+            status, attempt_count, max_attempts, error_summary,
+            created_at, updated_at, started_at, completed_at
+        ) VALUES (
+            CAST(#{id} AS uuid), #{ownerId}, CAST(#{kbId} AS uuid), CAST(#{documentId} AS uuid),
+            #{idempotencyKey}, #{taskType}, #{status}, #{attemptCount}, #{maxAttempts}, #{errorSummary},
+            #{createdAt}, #{updatedAt}, #{startedAt}, #{completedAt}
+        )
+        ON CONFLICT (owner_id, idempotency_key) DO NOTHING
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT task_id, owner_id, kb_id, document_id, idempotency_key, task_type,
+               status, attempt_count, max_attempts, error_summary,
+               created_at, updated_at, started_at, completed_at
+        FROM ingestion_task
+        WHERE task_id = CAST(#{taskId} AS uuid)
+    </select>
+
+    <select id="selectByOwnerIdAndIdempotencyKey" resultMap="BaseResultMap">
+        SELECT task_id, owner_id, kb_id, document_id, idempotency_key, task_type,
+               status, attempt_count, max_attempts, error_summary,
+               created_at, updated_at, started_at, completed_at
+        FROM ingestion_task
+        WHERE owner_id = #{ownerId}
+          AND idempotency_key = #{idempotencyKey}
+    </select>
+
+    <select id="lockOwnerIdempotencyKey" resultType="java.lang.Integer">
+        SELECT 1
+        FROM (
+            SELECT pg_advisory_xact_lock(
+                hashtextextended(CONCAT(#{ownerId}, ':', #{idempotencyKey}), 0)
+            )
+        ) lock_guard
+    </select>
+
+    <update id="updateStatusIfCurrent">
+        UPDATE ingestion_task
+        SET status = #{nextStatus},
+            attempt_count = #{attemptCount},
+            error_summary = #{errorSummary},
+            updated_at = CURRENT_TIMESTAMP,
+            started_at = CASE WHEN #{nextStatus} = 'RUNNING' THEN CURRENT_TIMESTAMP ELSE started_at END,
+            completed_at = CASE WHEN #{nextStatus} IN ('FAILED', 'DEAD_LETTER', 'CANCELLED', 'SUCCEEDED')
+                THEN CURRENT_TIMESTAMP ELSE completed_at END
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status = #{currentStatus}
+    </update>
+</mapper>

@@ -1,6 +1,6 @@
 # 可信研发知识协作 Agent 升级总计划
 
-> 状态：规划中（持续更新）  
+> 状态：G1 L0/L1、隔离 PostgreSQL/RabbitMQ/HTTP/JWT/MCP L2、Edge Playwright L3、advisory lock/文件补偿、Rabbit 消费恢复、Markdown/HTML/PDF 结构化提取与真实 embedding、PDF 成功/损坏 golden case、外部 embedding 依赖失败后的 RabbitMQ 自动恢复、任务 SSE HTTP 多连接、单实例事件序号/有限回放及浏览器 Bearer SSE 重连、终态内存清理、真实模型驱动 Agent 工具调用、模型驱动会话临时范围收窄、生产业务库迁移和生产 MCP 主体协议调用均已完成；多实例 SSE/持久化恢复和图片/OCR 仍待独立验收
 > 创建日期：2026-08-14  
 > 产品定位：面向个人开发者和小型研发团队的可信知识协作 Agent。  
 > 本文是当前唯一维护的跨模块计划，负责需求、设计、实施和验收的主索引。历史专项方案已归档；当前实施范围和验收以本文与现有 Spec 为准。
@@ -71,11 +71,11 @@ flowchart LR
 
 RAG 检索必须受范围约束，但“Agent 手动选择知识库”只表示默认检索策略，不能替代资源授权。范围按以下三层收敛，后层只能缩小前层，不能扩大：
 
-1. **硬权限范围**：由知识库的 `ownerId`、团队/租户和 ACL 计算。知识库 CRUD、文档访问、索引和检索均须在后端按当前用户校验；无权或不存在的知识库 ID 必须明确拒绝，不能静默忽略。
-2. **Agent 默认范围**：Agent 的 `allowedKbs` 必须是硬权限范围的子集，用于限定该 Agent 默认参与检索的业务域。创建或更新 Agent 时，服务端须校验 ID 存在、去重且当前用户可访问。
+1. **硬权限范围**：当前已实现的是 `ownerId` 精确匹配的单用户私有模型。知识库 CRUD、文档访问、索引和检索均须在后端按当前用户校验；无权或不存在的知识库 ID 必须统一拒绝，不能静默忽略。团队/租户和 ACL 是未来扩展，尚未构成授权路径。
+2. **Agent 默认范围**：关系表 `agent_knowledge_base` 的绑定必须是硬权限范围的子集，用于限定该 Agent 默认参与检索的业务域。API 的 `allowedKbs` 是关系表投影；创建或更新 Agent 时，服务端校验 ID 存在、去重且当前用户可访问。
 3. **会话临时范围**：用户可在当前会话从 Agent 默认范围中继续缩小到项目或单一知识库；模型工具请求也只能在该收窄集合内生效，不能通过传入任意 `kbIds` 扩权。
 
-当前 JSONB `allowedKbs` 可作为个人开发者和小团队 MVP 的 Agent 默认范围实现；出现共享知识库、角色授权、反向查询、审计或删除级联需求时，迁移为 `agent_knowledge_base` 关系表。G1 开始任何知识库、任务或 Router 实现前，必须先补齐硬权限范围及越权绑定、越权检索、删除后引用、空绑定和多知识库过滤的测试。
+JSONB `allowedKbs` 已从 `agent` 持久化模型移除，不能作为授权或绑定事实来源。`agent_knowledge_base` 已迁移为 Agent 默认范围的唯一持久化关系，并以 `agent_id`、`kb_id` 外键在删除 Agent/KB 时级联清理当前绑定；表中仅有当前绑定的操作者/时间，不替代完整审计。共享知识库、角色授权、tenant、绑定历史审计和通用 KB 物理级联仍须另行设计。G1 开始任何知识库、任务或 Router 实现前，必须先补齐硬权限范围及越权绑定、越权检索、删除后引用、空绑定和多知识库过滤的测试。
 
 ### 3.2 统一元数据
 
@@ -130,11 +130,15 @@ Router 只做结构化决策，不直接生成最终答案。其输出至少包�
 
 Router 必须与“全链路固定检索”做消融对比，按问题类型报告质量、p95 延迟和 token 成本；无稳定收益不得默认启用更复杂链路。
 
+当前 `RagRouter` 已有规则实现和单元测试，但尚未由 `KnowledgeTools`、MCP 或 `RagService` 的生产入口消费；它不能据此被写作“动态路由已上线”。G2 要先把 Router 变成受 owner/Agent 默认范围/会话临时范围约束的检索计划输入，再决定是否调用私有检索、精选公开源或外部工具。路由不得自行扩大 `kbIds`，也不得以“无证据”为由绕过拒答和外部调用许可。
+
 ### 4.4 多模态摄入与检索
 
 按 PDF/纯文本/HTML/图片的顺序扩展。表格要保留标题、行列与单元格关系；图片要通过 OCR/说明文本和位置元数据参与检索。视频、音频和通用视觉理解不在一期范围。
 
 每新增一种格式都必须独立验证：解析正确性、重复入库幂等性、权限隔离、召回质量、引用定位和失败可重试。
+
+G2 借鉴 [RAG-Anything](https://github.com/HKUDS/RAG-Anything) 的是“先保留文档层级、位置和元素关系，再按文本、图片、表格、公式分流处理并在检索时按证据类型排序”的方法，而不是直接引入 LightRAG、通用知识图谱或新的 Python 运行时。当前 PDF 仅有逐页文本和 `pageNumber`；图片/OCR、表格单元格关系、公式和可回跳的资产坐标仍未实现。下一步先定义同一文档下的资产及其与文本 chunk 的关系、稳定定位与引用契约，再逐项增加 OCR、表格和图像能力；图谱不是本阶段前置条件。RAG-Anything 也不替代本项目的用户长期记忆治理，记忆仍按 G3 的来源、确认、冲突和删除规则演进。
 
 ### 4.5 Plan-Execute-Verify 与多 Agent
 
@@ -167,7 +171,7 @@ Webhook 服务于外部系统集成：入站触发文档索引或任务；出站
 | --- | --- | --- | --- |
 | G0 基线与观测 | 先保证现有主链路可验证 | 聊天/RAG/SSE/审批联调、Trace ID、延迟与错误指标 | 关键旅程可回归，已有 RAG 基线不退化 |
 | G1 任务与摄入基础 | 长任务可恢复，知识库可扩展 | 任务中心、RabbitMQ Worker、PDF/文本/HTML、索引状态与 SSE 进度 | 上传不阻塞请求，失败可重试，文档可定位引用 |
-| G2 自适应可信 RAG | 让检索策略由证据和问题驱动 | Router、精选公开源、图文/表格检索、引用与拒答 | 相比固定链路有可复现收益，拒答和权限 case 通过 |
+| G2 自适应可信 RAG | 让检索策略由证据和问题驱动 | PostgreSQL 原生 BM25、校准的改写/RRF、生产 Router 接线、图文/表格证据模型、引用与拒答 | 相比固定链路有可复现收益，拒答和权限 case 通过 |
 | G3 Skill 与记忆治理 | 任务可复用，长期上下文受控 | 内置 Skill、摘要收口、节流、去重、冲突和用户管理 UI | 记忆不阻断对话，任务结果满足输出 Schema |
 | G4 验证与协作 | 复杂任务可被校验和审计 | Planner/Verifier、受限多 Agent、Webhook | 质量收益覆盖额外成本，工具权限和审计可追溯 |
 | G5 扩展性收口 | 并发与多实例稳定 | 会话顺序调度、专用线程池、背压、缓存、SSE 分发与压测 | 通过约定负载下的延迟、错误率和恢复验收 |
@@ -184,6 +188,77 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 2. `TC-G0-03` 的 L0 指标、L1 冻结 replay 和本机 Ollama 的受控 fixture 链路已通过。四文档 fixture 的汇总 `Recall@5=1.0` 仅表示已知 gold chunk 在该受控集合的 Top-5 覆盖，不代表真实用户问题、真实知识库规模、权限隔离、引用准确性或答案忠实性已达标；为避免同一检索集重复三遍，验收命令关闭 A/B 诊断，但未缩小 fixture、未替换 embedding 或检索链路。
 3. 已使用隔离测试账号完成普通回答逐段显示、RAG 命中与正文增长、`AI_ERROR`、审批批准/拒绝、最终状态收尾，以及新会话首条消息持久化和同会话轨迹恢复。`npm.cmd run lint` 与 `npm.cmd run build` 均通过，结论独立记录，lint 仅有依赖数据过期提示。
 4. G0 阶段门禁现已满足。本结论不自动开始 G1；G1 的首个实现前置仍是知识库 owner/tenant/ACL 硬权限模型、对应 schema/fixture 与 RED 用例，详见本计划第 8 节和唯一 Spec。
+
+### 5.2 G1 owner-only 硬权限与任务摄入 L0/L1 子项（2026-08-19）
+
+本次完成 G1 的知识库硬权限、Agent 绑定迁移前置，以及任务中心和异步摄入的 L0/L1 契约；不等同于 G1 全部结项。模型选择为单用户私有 KB：新 KB 写入 `owner_id`，后端以当前用户和 owner 相等作为唯一可访问条件；本地库已完成历史清理和 `owner_id NOT NULL` 收紧，不存在自动归属给当前用户、管理员或 Agent 的兼容路径。
+
+已完成的服务端约束：
+
+1. KB CRUD、文档查询/创建/上传/更新/删除、Markdown 索引触发与文档删除前的 chunk 索引删除均先校验 KB owner。
+2. `agent_knowledge_base` 是 Agent 默认 KB 范围的唯一持久化来源；Agent 创建和更新时，API `allowedKbs` 中每个传入 ID 必须存在且为当前用户可访问集合，重复 ID 被去重。显式空列表允许保存并表示该 Agent 不可检索私有 KB；未传该字段的局部更新保留既有关系绑定。
+3. Agent 运行时再次校验 Agent owner，并从关系表读取后过滤失权或已删除的 KB；模型/会话传入的 `kbIds` 只能从这个过滤后的默认集合继续收窄。
+4. MCP V1 已以独立主体凭据指纹解析单一内部 `user_id`，再复用 KB owner 校验；认证拒绝、允许检索和越权拒绝均写入追加式审计，且不记录原始凭据或查询正文。生产库已执行 MCP 主体访问迁移并为 `principal_id=1` 建立单一有效 grant（`user_id=10`）；未解析出主体的调用统一拒绝私有 KB，不信任调用方传入的 `kbIds`。
+5. 本地迁移已执行 owner 外键/检查、`agent_knowledge_base` 迁移和 `owner_id NOT NULL` 收紧；保留 `RAG Recall Fixture KB` 及其 4 条评测文档、32 个 chunk，删除其余 17 个候选 KB、46,979 条文档、49,152 个 chunk 和候选文件目录。评测 KB 归属测试账号 `g0l3_20260817_114535`（`user_id=9`，凭据不入库）。
+6. `ingestion_task` 已定义 owner 范围、owner + 幂等键唯一约束和状态机；上传请求必须携带 `Idempotency-Key`，在文档或文件写入前拒绝空键，成功时返回 `documentId` 和 `taskId`。预检以 PostgreSQL 事务级 advisory lock 串行化同一 owner+key，并由上传事务持有至任务创建结束；相同 owner、KB、文档和键重放同一任务，跨资源复用同一键拒绝。
+7. 上传不再同步调用解析或 embedding；新提交和手动重试均在事务提交后发布消息。RabbitMQ 消费者领取任务后由处理器在数据库事务内清理旧 chunk、解析、embedding 并写回，任一 chunk 未写入即抛错回滚本次数据库替换；Markdown、HTML 按章节处理，PDF 由 PDFBox 按页提取文本并写入 `pageNumber` metadata，`txt` 或无章节内容退回单原文 chunk。消费者在领取、成功、重试和死信时发布任务进度事件；任务 SSE 连接先复用任务 owner 校验。取消只适用于 `QUEUED`、`RETRYING`，`RUNNING` 被拒绝；任务查询、取消、重试均按任务 owner 校验。前端已实现对活动任务的 Bearer `fetch + ReadableStream` 订阅、`Last-Event-ID` 重连及事件 `kbId` 校验，两秒轮询保留为跨实例/长断线兜底；隔离全栈的 Edge 用例已确认预先建立的第二条 Bearer SSE 在页面触发真实重试后收到 `RUNNING`，取消/重试失败仍有错误提示。
+
+2026-08-19 已完成一项受限 L2 schema 验收：新建独立 PostgreSQL 验收库并只复制结构、未复制业务行；依序实际执行 owner、`agent_knowledge_base`、`ingestion_task` 与 MCP 五份迁移。两条不可登录测试用户验证旧 JSONB 只迁入同 owner 且去重的绑定；无 owner KB、同 owner 重复幂等键、同 MCP 主体第二条未撤销 grant 均被真实约束拒绝；删除测试 KB 后对应 `agent_knowledge_base`、文档、chunk、摄入任务均为 0 行。RabbitMQ 仅只读确认现有 `ingestion.queue`、`ingestion.retry.queue`、`ingestion.dlq` 的 DLX/TTL 拓扑及一个消费者，未向共享开发队列投递消息。
+
+2026-08-19 的运行时检查曾记录业务库缺少任务/MCP 表；该历史结论已被本轮受控生产迁移和真实协议验收 supersede。当前业务库已存在 `agent_knowledge_base`、`ingestion_task`、`mcp_principal`、`mcp_principal_credential`、`mcp_principal_user_grant` 与 `mcp_access_audit`，四个依赖容器均运行。
+
+已完成的隔离运行时 L2/L3 不覆盖 tenant、共享 ACL、角色授权、反向查询、完整绑定历史审计、KB 删除时文件的通用应用层物理级联或其他外部依赖故障路径。真实 HTTP/JWT 已验证 A/B 跨用户拒绝、同 owner 顺序幂等重放、RabbitMQ 投递/重试/死信及 MCP 主体授权；Edge Playwright 已验证登录、上传、轮询、当前 KB 隔离、跨账号无泄露和取消/重试冲突提示。Factory 运行时的隔离 Spring 探针进一步以真实 PostgreSQL 关系数据装配 `JChatMindFactory`；安全复审后的 `G1ModelDrivenSessionScopeRuntimeL2Test` 又以外部 DS Chat、真实 `JChatMindFactory`/`KnowledgeTools` 和独立 PostgreSQL 连续两次验证：Agent 绑定 A1/A2 而会话 `retrievalContext.kbId=A1` 时，模型实际发出的 `KnowledgeTool` 参数只有 `query`、没有 `kbIds`，记录到的有效范围仅为 A1，且持久化顺序为 `user -> assistant(tool call) -> tool -> assistant`；最后一个工具消息后的最终 Assistant 含 A1 证据标记且不含 A2 标记。测试数据源只接受 `jdbc:postgresql://127.0.0.1:<49152-65535>/g1_model_scope_<12 位十六进制 nonce>`，数据库名后缀必须与本次 `g1.pg.nonce` 精确相同；临时容器使用 trust 认证与固定 `g1scope` 用户名，不读取 PostgreSQL 用户名或密码。该用例以测试专用 `RagService` 隔离并记录范围，不能替代真实 embedding/召回质量或模型显式越权参数的独立验收。本轮已恢复外部聊天模型和 Ollama embedding 成功路径，生产 MCP 使用 `STREAMABLE` `/mcp` 协议完成 `initialize`、`tools/list` 和受限知识库 `tools/call`；原始凭据只在进程内使用，数据库仅保留指纹。Playwright 使用本机 Edge，不下载 Chromium；lint/build 从不作为 L3 功能证据。`agent_knowledge_base` 的外键只负责当前绑定级联；API `allowedKbs` 仍仅表示 Agent 默认范围，绝不是授权模型。受控 fixture 的 `Recall@5=1.0` 仍只代表 gold chunk 的 Top-5 覆盖与链路可回归，不证明真实 RAG 泛化或共享授权安全性。
+
+**Ban 已确认的后续边界（2026-08-18）。** 共享暂不扩展，保持 owner-only，禁止隐式 tenant 或 ACL 放行。MCP V1 使用“独立、可轮换的主体凭据 -> 单个内部 `user_id`”映射，凭据仅存指纹/状态并追加审计；不能继续用共享 API Key 充当可审计主体。KB 删除仍需独立的受控删除任务：提交时先做 owner 授权和审计，数据库中的文档/chunk/绑定在受控事务内清理，文件使用可重试、幂等的异步清理；该删除语义尚未实现。验收补第二个隔离账号的 L2 跨用户测试及 Playwright L3。其他环境只允许人工认领 owner 后迁移，禁止自动回填或默认放行。
+
+### 5.3 G1 真实成功摄入与进度发布子项（2026-08-20）
+
+独立 PostgreSQL、独立 RabbitMQ 和独立上传目录中，`G1IngestionSuccessRuntimeL2Test` 先 RED 暴露 HTML 标题未结构化解析：任务虽成功但仅产生一个原始 HTML fallback chunk，而期望两个标题 chunk。最小修复仅为 `MarkdownParserService` 增加 HTML 标题解析，并由默认摄入处理器按 `filetype=html` 调用；随后 GREEN 三项真实运行时测试均通过。Markdown 和 HTML 均生成两个带结构 metadata 的 chunk，调用本机 Ollama `bge-m3:latest` 后持久化非空 1024 维 embedding，真实 Rabbit 消费者推进任务为 `SUCCEEDED` 且进程内进度服务记录最终 `ingestion-progress` 事件。脱敏结论位于 `backend_v2/target/g1-runtime-l2/ingestion-success-summary.txt`；隔离容器和上传目录已删除。
+
+`G1IngestionTaskSseHttpRuntimeL2Test` 随后以真实嵌入式 HTTP、项目 JWT 拦截器、独立 PostgreSQL 和两条同 owner SSE 连接完成补验。它先 RED：两条连接均拿到 `QUEUED`，发布 `RUNNING` 后第一条五秒超时，证明任务到单 emitter 的覆盖缺陷；最小 GREEN 改为任务级 emitter 集合并精确注销连接。两项 HTTP 测试均通过：两条授权连接收到 `RUNNING`，另一 owner 的响应不含任务、KB 或文档标识。脱敏摘要为 `backend_v2/target/g1-runtime-l2/sse-http-summary.txt`，隔离容器已删除。
+
+2026-08-20 已实现浏览器任务 SSE 并获得有效 RED：Edge 对真实隔离全栈执行 `node .\node_modules\@playwright\test\cli.js test tests/g1-runtime.spec.ts --project=edge --grep "retry progress published"`，在已建立并收到 `DEAD_LETTER` 快照的第二条 Bearer SSE 上由 UI 触发真实重试；15 秒内流仍只收到 `["DEAD_LETTER"]`、没有随后 `RUNNING`，而轮询 UI 已到 `RETRYING`，定位为 Spring 选择三参消费者构造器并注入空进度服务。最小修复仅将 `@Autowired` 移至四参生产构造器；前端使用 Bearer `fetch + ReadableStream`，生命周期以 `AbortController` 清理，两秒轮询仅为断线兜底。洁净重建时隔离 schema 缺少三个既有 UUID 主键默认值，先阻止 KB 创建；仅在临时库补齐默认值后，同一 Edge 命令在独立 PostgreSQL、独立 RabbitMQ、隔离后端和 Vite 中退出码 `0`，第二条已连接流收到随后 `RUNNING`。脱敏结论位于 `backend_v2/target/g1-runtime-l2/ui-sse-browser-summary.txt`；当前隔离容器、临时目录、进程和临时输出在本子项收尾删除。
+
+这些证据证明单实例中消费者发布和已认证 HTTP 客户端接收 SSE，且 Edge 浏览器已在连接建立后接收真实重试事件；当前进度服务保留任务级有限事件历史，客户端可按 `Last-Event-ID` 请求缺失事件，但多实例分发、跨进程顺序恢复和持久化仍待对应阶段验收。2026-08-21 真实模型运行时使用隔离账号 `user_id=10`、Agent `cf4f1b88-c0ad-4656-b8fb-ec1958f07e09` 和会话 `04337853-d6a1-4883-89df-5b6d72de04b0`，实际完成知识库工具调用并在最终回答中返回 HTML 文档路径 `Codex Runtime Guide > Tool Calling` 与精确标记；同轮真实 MCP `STREAMABLE` 协议调用也完成初始化、工具发现和授权检索。生产迁移与主体 grant 已执行，凭据明文未写入文档或仓库。PDF 成功/损坏输入及外部 embedding 自动恢复的真实 golden case 已签收，图片/OCR 仍未签收。
+
+### 5.4 PDF 摄入与单实例 SSE 恢复子项（2026-08-21）
+
+`MarkdownParserServiceImpl` 现使用 Apache PDFBox 2.0.24 逐页提取文本；每个非空页生成一个结构化 chunk，标题为 `第 N 页`，并把 `pageNumber` 写入 chunk metadata，embedding 输入继续复用统一的路径/标题/正文拼接。损坏或加密 PDF 以稳定的 `IllegalArgumentException`/业务错误结束，交由既有 Rabbit 重试和死信状态机处理；已有 Markdown/HTML 行为保持不变。`DefaultIngestionTaskProcessorTest` 与 `MarkdownParserServiceImplTest` 固定了页码 metadata、双页文本和损坏文件拒答。
+
+`IngestionTaskProgressEvent` 增加单调 `sequence`；进度服务以任务级锁串行化回放、连接注册和实时发送，对同一任务保留最多 64 条事件历史，终态且无连接 30 分钟后在后续任务活动时清理。SSE 帧写入标准 `id`，Controller 接受 `Last-Event-ID` 并回放其后的事件。首次连接为任务创建唯一初始快照，多个连接共享同一序号；前端只接收递增序号并在断线后重连，终态或取消时由 `AbortController` 停止。该实现明确为单实例内存语义，不宣称跨实例或进程重启后的恢复。
+
+### 5.5 G1 外部 embedding 自动恢复子项（2026-08-21）
+
+`G1EmbeddingRecoveryRuntimeL2Test` 使用随机命名的 PostgreSQL 数据库、RabbitMQ 容器/vhost/用户和上传目录；首次 `RagService.embed` 明确请求不可达端点，第二次及后续请求才连接本机 Ollama `bge-m3:latest`。真实消费者首次处理后任务进入 `RETRYING(1)`，retry queue 有消息、chunk 为 0 且物理文件仍为 1 份；测试不手工再次发送消息，由 RabbitMQ 的 TTL/DLX 自动回投。回投后任务最终为 `SUCCEEDED(1)`，两个 Markdown chunk 均有非空 1024 维 embedding，物理文件仍为 1 份。隔离容器、数据库、vhost、用户与目录均在 `finally` 中删除。
+
+该用例覆盖“外部 embedding 短暂不可用后自动恢复”的端到端边界，不外推为所有外部服务故障、多实例 SSE、持久化事件恢复或图片/OCR 的验收。
+
+### 5.6 G2 RAG 优化实施次序（尚未开始）
+
+当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
+
+1. `findTitleBm25Candidates` 与 `findContentBm25Candidates` 通过 Mapper 把授权 KB 的候选 chunk 拉回 JVM，再由应用计算 BM25。数据量随 KB 增长线性放大，且数据库无法利用原生倒排索引、按范围先过滤再取 Top-N。
+2. `HARD` 会话上下文已下推到向量查询，但词法候选先按整个 KB 取 Top-N、RRF 后才过滤。全局高分 chunk 可挤掉上下文内候选，既浪费读取也会造成召回假阴性。
+3. 改写后的多个向量查询与原问在 RRF 中等权；而标题/正文 BM25 固定使用原问。低信息追问既可能让改写通道过度影响排序，也无法让受控的 standalone query 补足正文词法召回。
+4. `RagRouter` 目前没有生产调用点；单元测试通过只证明分类规则，不证明授权范围、外部许可、拒答和实际召回链路正确。
+5. 多格式摄入已覆盖 Markdown/HTML/PDF 文本，但没有图片、表格或公式的独立资产、相对位置和跨元素关系，无法形成 RAG-Anything 所强调的可定位多模态证据。
+6. 未传 `kbIds` 时，`KnowledgeTools` 会以会话上次命中的 `retrievalContext.kbId` 隐式收窄可搜 KB。这与“默认搜索 Agent 所有可访问 KB、会话仅提供偏置”的产品语义不同，会令跨 KB 的 topic switch 在改写器识别前已经不可能召回。安全收窄本身正确，但默认范围必须显式定义，不能由上一条结果悄然决定。
+7. `RERANK_CANDIDATE_LIMIT` 未在 RRF 后实际截断，线性 rank penalty 会使深层候选即使词面和结构信号全满也永远无法升到 Top-1。多通道扩展后，该排序器并不具有预期的“重新排序”能力。
+8. 有会话上下文的短新实体/标题可能被判为 `FOLLOW_UP`，进而关闭所有标题通道；任意 `/` 或 `\\` 又可能被判为导航并触发无上限的 title/path 候选扫描，还可能误施加 `HARD` 约束。
+9. `KnowledgeTools` 在任何非空 Top-1 后都会覆盖 session retrieval context；低相关或无答案检索会把错误来源写回下一轮，形成 context 自我强化。
+
+**BM25 目标与选型边界。** G2 要把标题和正文 BM25 迁为 PostgreSQL 内的原生倒排查询，应用层只接收 `chunkId`、通道、通道内 rank、可选 lexical score 与必要展示字段，继续使用 RRF 融合排名，不把 BM25 原始分数直接与向量距离比较。首个隔离 PoC 优先验证 ParadeDB 的 `pg_search`：其定位覆盖 PostgreSQL 内的全文、向量和混合检索；但其 AGPL-3.0 许可证、目标 PostgreSQL 版本、镜像中 pgvector 扩展和备份恢复兼容性必须在引入前完成审查。VectorChord-bm25 是备选原生 BM25 索引，需同样验证许可证、目标 PostgreSQL 版本、索引维护和运维包兼容性。不得同时把两个插件带入生产，也不得以长期双读/双写作为迁移方案；PoC 仅在隔离数据库对同一冻结数据集比较，达到门禁后选择唯一 provider 并删除 JVM 全量 BM25 路径。
+
+原生 BM25 的 schema/查询契约如下：业务事实仍以 `chunk_bge_m3` 为唯一来源；如插件需要索引投影，投影字段必须在同一摄入事务内从 chunk 构造并带 `chunk/indexVersion`，不能形成第二份可独立写入的业务数据。索引必须可按 `kb_id`、`sourceName`、`sourceType` 和规范化 `contentPath` 过滤；`HARD` 上下文的全部过滤条件必须在 BM25 `LIMIT` 前执行。中文、英文、代码标识符、路径和版本号的 analyzer/预分词规则要先由冻结语料评测，不能假设任何插件的默认 tokenizer 满足中文技术文档。
+
+| 顺序 | 改造与边界 | 完成判据 |
+| --- | --- | --- |
+| G2-0 | 冻结迁移前评测集、查询计划和延迟基线；新增中文术语/代码、标题、正文精确匹配、multi-turn follow-up、topic switch、无答案、越权和 PDF 页码 case。 | 数据集、gold、KB 范围、模型、检索配置和报告版本可复跑；不把现有 4 文档 fixture 当成真实规模结论。 |
+| G2-1 | 在隔离 PostgreSQL 分别验证 `pg_search` 与 VectorChord-bm25 的最小索引、删除/重建、过滤、EXPLAIN、备份恢复和许可证/镜像兼容性，形成唯一 provider 决策。 | 正文与标题 lexical Top-N 不再调用 `select*LexicalCandidatesByKbIds` 全量取数；无 scope 泄露；数据库索引和查询计划证据可复查。 |
+| G2-2 | 将唯一 provider 接入 Mapper，令 `HARD` 过滤先于每个词法通道的 Top-N；保留标题精确/Trigram 的独立行为，BM25 只替换应用内 BM25。 | 上下文外的全局高分 chunk 不能挤掉范围内 gold；owner/Agent/会话收窄语义不变；删除或重索引无 stale hit。 |
+| G2-3 | 先冻结 KB 范围语义：推荐“未传 `kbIds` 搜索全部 Agent 已授权 KB，会话 context 只作排序偏置”；若产品需要 sticky scope，必须由显式会话/用户参数收窄，不能隐式沿用上一条 Top-1。随后把改写计划拆为原问、受控 standalone 补全和通道 provenance；原问始终保留，最多一个补充查询，只有明确 follow-up 标记与上下文证据同时成立时才进入正文/向量通道。 | 跨 KB topic switch 可在默认范围内召回；短新标题、代码标识符和 API 路径不会误关标题通道或触发导航扫描；改写失败、超时或越界时退回原问。 |
+| G2-3a | 将同源标题通道与多 query 向量通道先做组内去重/校准，再参与跨组 RRF；RRF 后明确截断可 rerank 的候选数，rank penalty 改为有界函数或移除。保存 session context 前要求相关性阈值和 Top-1/Top-2 gap；无答案、拒答或低置信结果不更新。 | RRF 第 35 名的精确命中在候选预算内仍可被 rerank 提升；重复通道不会无限叠加投票；错误 Top-1 不污染下一轮。 |
+| G2-4 | 将 Router 接入受控检索入口，完成 evidence threshold、拒答、外部许可和引用输出；再按资产契约扩展 OCR、表格和图像。 | Router 相对固定链路有可复现收益；权限、无答案和外部许可全通过；每个非文本引用可定位到文档、页码/坐标与关联文本。 |
 
 ## 6. 验收指标与门禁
 
@@ -230,16 +305,20 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 | TC-G0-04 | G0 / L0-L3 | 模拟正文分片、空响应帧、SSE 发送失败和执行异常；重连/重复事件为后续边界。 | 空帧不阻断后续分片；`AI_CONTENT_DELTA` 顺序完整；`AI_ERROR` 可见；恢复/去重不在本次已签收范围。 | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest`；G0 手工旅程 |
 | TC-G0-05 | G0 / L1 | 对高风险工具分别执行批准、拒绝和超时路径。 | 状态进入并退出 `WAITING_APPROVAL`；工具不绕过 Harness；审计结果可追溯。 | `HarnessRunnerTest` 及审批相关测试 |
 | TC-G0-06 | G0 / L3 | 在测试账号和测试知识库中执行创建 Agent、聊天、检索、审批和回答分片可见性旅程。 | 页面构建与静态契约通过；用户能看到消息、分片、正确结束的状态、失败提示和审批卡片；lint 需单独通过。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`node ui/tests/hook-state-in-effect.contract.mjs`、`node ui/tests/new-chat-session.contract.mjs`、`node ui/tests/session-trace-cache.contract.mjs`、`npm.cmd run build`、`npm.cmd run lint`、手工清单 |
-| TC-G1-01 | G1 / L0-L2 | 创建任务后依次覆盖排队、运行、取消、重试、失败和死信。 | 状态机合法；重试上限、错误摘要和 DLQ 一致。 | 待该阶段实现的任务中心测试 |
-| TC-G1-02 | G1 / L1-L2 | 使用相同幂等键重复提交，随后重放已完成任务。 | 只产生一个业务结果；重复请求返回同一任务或明确冲突。 | 待该阶段实现的幂等集成测试 |
-| TC-G1-03 | G1 / L2 | 分别上传 PDF、纯文本、HTML 与损坏文件。 | 正常文件可解析、索引并定位引用；损坏文件失败可重试。 | 待该阶段实现的摄入集成测试 |
-| TC-G1-04 | G1 / L2 | 重复上传及跨用户/跨知识库访问相同文档。 | 重复入库幂等；资源与检索结果严格隔离。 | 待该阶段实现的权限与幂等测试 |
-| TC-G1-05 | G1 / L3 | Playwright 执行上传、索引进度、失败重试和查询。 | UI 与 SSE 进度一致；索引完成后可查询并展示来源。 | G1 引入的 Playwright 测试 |
-| TC-G2-01 | G2 / L0-L1 | 为 `DIRECT`、`PRIVATE_RAG`、`HYBRID_RAG`、`MULTIMODAL_RAG`、`EXTERNAL_TOOL`、`CLARIFY`、`ABSTAIN` 提供固定输入。 | Router 输出合法 schema、预期 route、KB 范围和原因。 | 待该阶段实现的 Router 契约测试 |
-| TC-G2-02 | G2 / L1-L2 | 覆盖无权限、无证据和未授权外部调用。 | 不泄露私有来源；返回拒答/澄清；不调用外部工具。 | 待该阶段实现的权限与拒答测试 |
-| TC-G2-03 | G2 / L2 | 在冻结数据集比较固定检索与 Router 链路。 | 质量、p95、token 成本和数据集版本进入报告；未证明收益不得默认切换。 | RAG 评测入口与 G2 对比报告 |
-| TC-G2-04 | G2 / L2 | 对 PDF、图片和表格 golden case 检索并生成引用。 | 召回、页码/坐标定位和来源层级正确。 | 待该阶段实现的多模态评测 |
-| TC-G2-05 | G2 / L1-L2 | 对无答案及权限越界 case 生成响应。 | 拒答准确，不伪造引用或越权事实。 | 待该阶段实现的拒答评测 |
+| TC-G1-01 | G1 / L0-L2 | 创建任务后覆盖排队、运行、取消、重试、失败和死信。 | 状态机只允许 `QUEUED`/`RETRYING` 取消，拒绝 `RUNNING` 取消；损坏 PDF/文件经处理器进入 `RETRYING`、预算耗尽后 `DEAD_LETTER` 和 DLQ。 | `IngestionTaskStateMachineTest`、`IngestionTaskLifecycleTest`、`IngestionTaskServiceImplTest`、`RabbitIngestionTaskPublisherTest`、`IngestionTaskControllerTest`；隔离 L2 记录。 |
+| TC-G1-02 | G1 / L0-L2 | 同 owner 使用相同幂等键重复提交，或跨资源复用相同键。 | 真实 HTTP 顺序重放和独立 PostgreSQL 高并发均确认同资源返回同一文档/任务、跨 KB 拒绝；屏障与数据库可观测状态确认 advisory lock 确有竞争等待，回滚后释放且无持久化残留。 | `IngestionTaskServiceImplTest`、`IngestionTaskPersistenceContractTest`、`IngestionTaskMigrationContractTest`、`DocumentFacadeServiceImplTest`、`G1AdvisoryLockRuntimeL2Test`。 |
+| TC-G1-03 | G1 / L0-L2 | 上传 Markdown、纯文本、HTML 与 PDF，或读取/解析失败。 | Markdown/HTML/PDF L0 结构化分块和页码 metadata 通过；真实 Markdown/HTML 均完成标题分块、1024 维 embedding 与 chunk 持久化；损坏 PDF 稳定失败并可重试。HTML 标题提取先 RED（单个原始 chunk）后 GREEN（两个结构化 chunk）。 | `DefaultIngestionTaskProcessorTest`、`MarkdownParserServiceImplTest`、`DocumentFacadeServiceImplTest`、`G1IngestionSuccessRuntimeL2Test`。 |
+| TC-G1-04 | G1 / L0-L2 | 越权 KB/文档/任务访问、重复上传和跨用户范围。 | 两个隔离用户经真实 JWT 对 A 的读取、更新、删除、上传、任务查询和 Agent 绑定均收到统一拒绝且不泄露资源标识或内容；KB 删除后关联资源不可再访问。 | `DocumentFacadeServiceImplTest`、`IngestionTaskServiceImplTest`、`IngestionTaskControllerTest` 及隔离 HTTP L2。 |
+| TC-G1-04a | G1 / L0-L1 | 对无 owner、非 owner、缺失、重复和已删除 KB 执行 Agent 绑定、KB/文档 CRUD、索引删除、Factory 和 MCP 检索；验证关系表迁移、替换绑定与空绑定。 | 服务端统一拒绝越权；空绑定不检索；运行时仅保留 owner 范围；无身份 MCP 不访问私有 KB；绑定不再持久化为 Agent JSONB。 | `McpKnowledgeToolTest`、`AgentFacadeServiceImplTest`、`AgentKnowledgeBaseBindingServiceTest`、`AgentKnowledgeBasePersistenceContractTest`、`AgentKnowledgeBaseMigrationContractTest`、`KnowledgeBaseFacadeServiceImplTest`、`DocumentFacadeServiceImplTest`、`JChatMindFactoryOwnershipTest`、`KnowledgeToolsScopeTest` |
+| TC-G1-05 | G1 / L0-L3 | 前端上传、任务 SSE/轮询兜底、失败重试和查询。 | Edge Playwright 已真实登录、上传、轮询至 `DEAD_LETTER`、切换 KB、跨账号直达拒绝、取消/重试冲突错误提示；第二条已连接 Bearer SSE 在真实重试后收到 `RUNNING`。L0/L1 额外验证事件序号单调、`Last-Event-ID` 回放和断线重连；真实 HTTP SSE 已验证同 owner 多连接广播和跨 owner 无泄露。 | `ui/tests/g1-runtime.spec.ts`、`ui/playwright.config.ts`、`G1IngestionTaskSseHttpRuntimeL2Test`、`IngestionTaskProgressServiceTest`；静态契约、lint、build 仅作回归门禁。 |
+| TC-G2-01 | G2 / L0-L1 | 为 `DIRECT`、`PRIVATE_RAG`、`HYBRID_RAG`、`MULTIMODAL_RAG`、`EXTERNAL_TOOL`、`CLARIFY`、`ABSTAIN` 提供固定输入。 | Router 输出合法 schema、预期 route、KB 范围和原因。该用例只签收规则组件，不代表已接入生产检索。 | `RagRouterTest`（已通过） |
+| TC-G2-02 | G2 / L1-L2 | 在隔离 PostgreSQL 对 ParadeDB `pg_search` 与 VectorChord-bm25 执行正文/标题 BM25、删除/重建、`kb_id` 和上下文过滤、`EXPLAIN`，并复跑冻结数据。 | 选择唯一合规 provider；结果含 chunk/rank/provenance；不再由 `select*LexicalCandidatesByKbIds` 把整库文本拉到 JVM；许可证、镜像和恢复结论入报告。 | 待该阶段实现的插件集成测试、迁移脚本与基准报告 |
+| TC-G2-03 | G2 / L1-L2 | 构造上下文外 chunk 全局 BM25 更高、上下文内 chunk 为 gold 的 `HARD` case，并覆盖 owner、Agent 默认范围和会话收窄。 | 所有 BM25 通道在 `LIMIT` 前过滤；范围内 gold 不被范围外候选挤掉，且无越权 chunk/元数据泄露。 | 待该阶段实现的 Mapper/真实 PostgreSQL 集成测试 |
+| TC-G2-04 | G2 / L0-L2 | 覆盖原问、follow-up standalone 补全、改写超时/无效输出和 topic switch；记录向量、标题、正文 BM25 的 query provenance 与 RRF 贡献。 | 原问始终参与；补充 query 不超过预算；标题精确不被改写污染；RRF 不直接比较异构原始分数。 | 待该阶段实现的 `QueryRewriteServiceImpl`、`RagServiceImpl` 单元与冻结 replay |
+| TC-G2-05 | G2 / L1-L2 | 从真实 `KnowledgeTools`/MCP 入口调用 Router，覆盖无权限、无证据和未授权外部调用，并与固定检索做消融比较。 | 不泄露私有来源；拒答/澄清/外部许可正确；质量、p95、token 成本和数据集版本进入报告，未证明收益不得默认切换。 | 待该阶段实现的授权集成测试、RAG 评测入口与 G2 对比报告 |
+| TC-G2-06 | G2 / L2 | 对 PDF、图片、表格与公式 golden case 检索并生成引用。 | 召回、页码/坐标、资产-文本关系和来源层级正确；当前仅 PDF 文本/页码可作为前置，不得提前宣称图片/OCR 已覆盖。 | 待该阶段实现的多模态摄入、检索与引用评测 |
+| TC-G2-07 | G2 / L0-L2 | 对默认多 KB 范围、显式会话收窄、跨 KB topic switch、短新标题/代码标识符、`/api/...` 和 Markdown 路径分别检索。 | 默认范围与产品契约一致；不以旧 Top-1 隐式缩窄；follow-up/导航误判不关闭标题通道、不触发无上限扫描或错误 `HARD` 过滤。 | 待该阶段实现的 `KnowledgeTools`、`QueryRewriteServiceImpl`、真实 PostgreSQL 回归测试 |
+| TC-G2-08 | G2 / L0-L2 | 构造 RRF 深层精确候选、重复通道、低相关 Top-1 和后一轮 follow-up。 | rerank 候选预算明确且排名惩罚有界；组内重复不放大；低置信或无答案结果不更新 retrieval context。 | 待该阶段实现的 `RagServiceImpl`、`KnowledgeTools` 单元与会话集成测试 |
 | TC-G3-01 | G3 / L0-L1 | 提交合法/非法 Skill 输入、超出白名单工具及审批策略。 | Schema 校验明确；未授权工具不可执行。 | 待该阶段实现的 Skill 契约测试 |
 | TC-G3-02 | G3 / L0-L2 | 覆盖记忆节流、去重、冲突、过期、确认和删除。 | 不自动覆盖用户事实；候选状态、来源和隔离信息完整。 | 待该阶段实现的记忆生命周期测试 |
 | TC-G3-03 | G3 / L3 | Playwright 执行查看、确认、编辑、删除和清空记忆。 | UI 与后端状态一致，且仅展示当前用户数据。 | G3 Playwright 测试 |
@@ -287,16 +366,35 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 | TC-G0-04 | mock `ChatClient`、`SseService`、`SseEmitter` | `backend_v2/target/surefire-reports/` | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest` 与 G0 后端组合命令退出码 `0`。空帧、顺序分片、`AI_ERROR` 与发送失败均为受控断言；L3 可见性已由既有 Ban 签收补齐。 | 2026-08-18 | Codex | 通过（重连/去重仍为 G5 范围） |
 | TC-G0-05 | 内存审批/审计/熔断存储；mock 工具回调 | `backend_v2/target/surefire-reports/` | `HarnessRunnerTest`、`InMemoryApprovalStoreTest`、`CircuitBreakerTest`、`CircuitBreakerInterceptorTest`、`HarnessExecutionContextHolderTest`、`HarnessToolCallbackProxyTest` 与 G0 后端组合命令退出码 `0`。批准、拒绝、超时、代理上下文与熔断均受覆盖；L3 批准/拒绝已由 Ban 签收。 | 2026-08-18 | Codex | 通过 |
 | TC-G0-06 | 隔离账号/KB/Agent/文档；本地 Node/npm.cmd | `ui/dist/index.html`；`backend_v2/target/tc-g0-06-l3-rag-streaming-final-20260818.png` | 7 项 Node 静态契约、`npm.cmd run lint`、`npm.cmd run build` 均退出码 `0`。lint 仅有 `baseline-browser-mapping` 数据过期提示；L3 普通/RAG 分片、`AI_ERROR`、审批、收尾、新会话隔离与轨迹恢复均沿用上方 Ban 签收证据。 | 2026-08-18 | Codex / Ban | 通过 |
-| TC-G1-01 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
-| TC-G1-02 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
-| TC-G1-03 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
-| TC-G1-04 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
-| TC-G1-05 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
+| TC-G1-01 | mock Mapper/Publisher/RabbitTemplate；无真实队列或数据库 | `backend_v2/target/surefire-reports/` | RED 已确认任务状态机、任务服务和控制器入口缺失；GREEN 组合命令覆盖状态迁移、领取/取消/重试/死信和脱敏任务查询，退出码 `0`。 | 2026-08-18 | Codex | 部分通过（L0/L1；不替代 L2 消费或恢复验收） |
+| TC-G1-02 | mock Mapper/Publisher；任务 SQL/Mapper 文本契约；无真实数据库 | `backend_v2/target/surefire-reports/` | RED 已确认同键重放、跨资源冲突和持久化契约缺失；GREEN 组合命令覆盖 owner + 幂等键冲突回读和迁移唯一键，退出码 `0`。 | 2026-08-18 | Codex | 部分通过（L0/L1；未执行真实并发/L2） |
+| TC-G1-03 | 临时 txt 文件；mock Storage/Parser/RAG/Mapper；无真实模型 | `backend_v2/target/surefire-reports/` | RED 已确认默认处理器缺失及无标题纯文本不会入 chunk；GREEN 覆盖旧 chunk 删除、文本回退单 chunk、Markdown section 写入，退出码 `0`。 | 2026-08-18 | Codex | 部分通过（L0/L1；PDF、损坏文件、真实模型/L2 未验收） |
+| TC-G1-04 | mock owner/文档/任务服务；无第二隔离账号或真实数据库 | `backend_v2/target/surefire-reports/` | RED 已确认跨 owner 任务查询与空幂等键写入前保护缺失；GREEN 覆盖任务 owner 拒绝和上传前拒绝空键，退出码 `0`。 | 2026-08-18 | Codex | 部分通过（与 TC-G1-04a 共同覆盖 L0/L1；跨用户 L2 未验收） |
+| TC-G1-04a | mock Mapper/Converter/Storage/RAG；迁移脚本文本契约；无真实模型或网络 | `backend_v2/target/surefire-reports/` | RED 已分别确认 MCP 未拒绝、Agent 未校验/去重、KB/文档全局访问、文档未清 chunk、Factory 可加载越权 KB，以及 Agent JSONB/关系表缺失。GREEN 命令为 `cd backend_v2; .\mvnw.cmd -q "-Dtest=AgentKnowledgeBaseBindingServiceTest,AgentKnowledgeBasePersistenceContractTest,AgentKnowledgeBaseMigrationContractTest,AgentFacadeServiceImplTest,JChatMindFactoryOwnershipTest,KnowledgeToolsScopeTest" test`，退出码 `0`。 | 2026-08-18 | Codex | 通过（L0/L1 owner-only 硬权限与关系表迁移；不替代 TC-G1-04 的 L2 幂等/跨用户真实库验收） |
+| TC-G1-04b | mock MCP 主体/KB/RAG；MCP 迁移与 Mapper 源码契约；无真实凭据、数据库或网络 | `backend_v2/target/surefire-reports/` | RED 已确认主体审计入口、允许/拒绝检索审计及关联 ID 缺失；GREEN 命令为 `cd backend_v2; .\mvnw.cmd -q "-Dtest=McpPrincipalMigrationContractTest,McpPrincipalAccessPersistenceContractTest,McpPrincipalAccessServiceTest,McpAccessAuditPersistenceContractTest,McpPrincipalAuditServiceContractTest,McpServerConfigTest,McpKnowledgeToolAuthorizationContractTest,McpKnowledgeToolTest" test`，退出码 `0`。 | 2026-08-18 | Codex | 通过（L0/L1 MCP 主体映射、owner-only 检索和追加审计；迁移未执行，不替代 L2） |
+| TC-G1-05 | Node 静态契约；本地 TypeScript/Vite；无浏览器或真实后端 | `ui/dist/` | `document-upload-idempotency.contract.mjs` 和 `ingestion-task-progress.contract.mjs` 先 RED 后 GREEN；`npm.cmd run lint`、`npm.cmd run build` 退出码 `0`。当前 UI 轮询任务，不产生 SSE 进度。 | 2026-08-18 | Codex | 部分通过（L0 前端契约和静态构建；Playwright L3 未验收） |
+| TC-G1-05 | 本机 `@playwright/test 1.62.1`；已安装 Edge；本地 UI `http://127.0.0.1:5173` | Playwright Node 冒烟命令；`ui/package.json`、`ui/package-lock.json` | Playwright 以 `msedge` channel 无头访问 UI，响应 `200`、标题 `JChatMind`；Chromium 托管二进制下载未完成，未登录、未上传、未执行 G1 功能旅程。 | 2026-08-19 | Codex | 部分通过（浏览器运行入口通过；非 L3 功能验收） |
+| TC-G1-01 | 独立 PostgreSQL `g1_l2`、独立 RabbitMQ vhost、`18080` 隔离后端；临时用户和 PDF 均在验收后清理 | 临时 L2 脚本运行输出；隔离任务/队列计数 | 真实 HTTP 上传进入隔离 RabbitMQ；不支持 PDF 依次到 `RETRYING` 与 `DEAD_LETTER`，`attemptCount=3`，DLQ 可见消息。此前消费者接收 JSON 字符串 UUID 导致任务停在 `QUEUED`，先 RED 后修复解包并回归。 | 2026-08-19 | Codex | 通过（真实消费、重试和死信；不替代正常 embedding 成功路径） |
+| TC-G1-02 | 同上 | 临时 L2 脚本运行输出 | 同 owner 同 key 重放返回同一 `documentId/taskId`；同 owner 跨 KB 重用同 key 被拒绝。此前 `pg_advisory_xact_lock` 映射到 `void` 触发 MyBatis 500，先 RED 后返回锁哨兵值。 | 2026-08-19 | Codex | 通过（真实顺序重放；未做高并发阻塞/回滚测量） |
+| TC-G1-03 | 同上 | 隔离任务状态、RabbitMQ DLQ 计数 | 不支持 PDF 的真实处理失败被记录为受控错误摘要并重试至死信；未调用外部模型或网络。 | 2026-08-19 | Codex | 部分通过（失败通路；Markdown/HTML 正常 embedding 与 chunk 成功路径未执行） |
+| TC-G1-04 | 两个临时用户 A/B、各自 KB；临时文档、任务和 Agent | 临时 HTTP/JWT L2 脚本运行输出 | B 对 A 的文档读/写/删/上传、任务读取和 Agent 绑定均被统一拒绝且无资源身份或内容泄露；A 删除 KB 后文档、chunk、任务、绑定无 orphan。 | 2026-08-19 | Codex | 通过（HTTP/JWT owner 隔离与删除级联；Agent 聊天模型驱动工具调用未执行） |
+| TC-G1-04b | 生产 PostgreSQL `mcp_principal*`/`mcp_access_audit`；MCP `STREAMABLE` `/mcp`；主体 `1 -> user_id=10`；凭据仅存指纹 | 本轮受控协议脚本控制台摘要（原始凭据不输出） | 无效凭据返回 `401`；有效主体 `initialize`、`tools/list`、`mcpKnowledgeQuery` 均返回 `200`；工具结果包含 HTML 路径和精确标记；认证与知识检索审计追加成功。 | 2026-08-21 | Codex | 通过（生产迁移、主体授权、真实 MCP 协议和受限检索） |
+| TC-G1-05 | 独立后端 `18080`、Vite `5174`、本机 Edge；临时 A/B/C 用户与 KB | `backend_v2/target/g1-playwright/report/`、`backend_v2/target/g1-playwright/test-results/` | `ui/tests/g1-runtime.spec.ts` 先 RED（缺失项目配置与新建 KB 后详情页陈旧列表），后 GREEN：登录、上传、任务轮询至死信、当前 KB 不显示前一 KB 文档、跨账号直达 A 的 KB 无泄露、取消/重试双击冲突的错误提示均实际通过。 | 2026-08-19 | Codex | 通过（Edge 功能旅程；不是 Chromium 冒烟、静态契约、lint 或 build） |
+| TC-G1-05 | 独立 PostgreSQL、独立 RabbitMQ、隔离后端 `18084`、隔离 Vite `5178`、本机 Edge；临时账号/文件均在收尾删除 | `backend_v2/target/g1-runtime-l2/ui-sse-browser-summary.txt` | `node .\node_modules\@playwright\test\cli.js test tests/g1-runtime.spec.ts --project=edge --grep "retry progress published"` 先 RED：已连接第二条 Bearer SSE 在真实重试后仅保留 `DEAD_LETTER`；四参消费者注入修复后，临时 schema 补齐 UUID 默认值并重跑，退出码 `0`，该流收到后续 `RUNNING`。 | 2026-08-20 | Codex | 通过（浏览器连接后真实重试事件；不覆盖重连、多实例或持久化恢复） |
+| TC-G1-06 | 独立 PostgreSQL、独立 RabbitMQ、真实 listener/MyBatis/Spring 事务；PostgreSQL trigger 受控制造旧 chunk 删除失败 | `backend_v2/target/g1-runtime-l2/rabbit-consumer-recovery-summary.txt` | `G1RabbitConsumerDatabaseRecoveryRuntimeL2Test` 两次真实运行均 `1 test, 0 failures, 0 errors`：数据库失败回滚后任务依次为 `RETRYING(1/2)`、`DEAD_LETTER(3)`；文档/任务/chunk/物理文件保持单份，retry queue 与 DLQ 均有消息。前置测试配置曾因未注册 pgvector handler、JDK 代理注入失败，修正后业务 RED 未复现，未修改生产代码。 | 2026-08-20 | Codex | 通过（真实消费者数据库失败恢复；不替代正常 embedding 成功、模型驱动 Agent 或跨外部模型/embedding 端到端恢复） |
+| TC-G1-07 | 独立 PostgreSQL、独立 RabbitMQ、真实 listener/MyBatis/Spring 事务、本机 Ollama `bge-m3:latest`、独立上传目录 | `backend_v2/target/g1-runtime-l2/ingestion-success-summary.txt`；`backend_v2/target/g1-runtime-l2/pdf-ingestion-l2-summary.txt` | HTML 先 RED：标题未解析导致仅 1 个原始 chunk；最小 GREEN 后 Markdown/HTML 均持久化 2 个结构化 chunk 和非空 1024 维 embedding。两页 PDF 直调断言两个 chunk、非空 embedding 和 `pageNumber=1/2`；Rabbit 摄入另断言 `sourceType=pdf`、1024 维 embedding 和 `SUCCEEDED`。损坏 PDF 首次真实投递到 `RETRYING(1)` 且 retry queue 有消息，测试手工重投到真实消费者后观察 `RETRYING(2)` 和 `DEAD_LETTER(3)`，DLQ 有消息且文档、任务、物理文件均单份、chunk 为 0；未验证 retry TTL/DLX 自动回投。 | 2026-08-21 | Codex | 通过（PDF 成功/失败 golden case 已签收；不替代跨外部模型/embedding 恢复） |
+| TC-G1-08 | 独立 PostgreSQL、嵌入式 HTTP、项目 JWT 拦截器、同 owner 两条 SSE 连接；单实例内存进度服务 | `backend_v2/target/g1-runtime-l2/ingestion-success-summary.txt`；`backend_v2/target/g1-runtime-l2/sse-http-summary.txt`；Surefire `IngestionTaskProgressServiceTest` | 消费者领取和完成任务后发布 `ingestion-progress`，真实成功摄入断言最终事件为 `SUCCEEDED`；HTTP RED 先观察单 emitter 覆盖导致第一连接超时，GREEN 后两条授权连接均收到 `RUNNING`，另一 owner 不收到资源标识。新增 L0 边界断言终态、无连接且超过 30 分钟的任务会在下一次活动时清理 latest/history/sequence/lock。 | 2026-08-21 | Codex | 通过（单实例消费者到已认证 HTTP 客户端及终态内存清理；多实例和持久化恢复不在本项范围） |
+| TC-G1-09 | 生产 PostgreSQL；真实外部聊天模型；本机 Ollama `bge-m3:latest`；隔离账号/Agent/会话 | `backend_v2/target/codex-real-runtime.log`；MCP 协议控制台摘要 | 真实 Agent 实际发起 `KnowledgeTool` 调用并按 `user -> assistant(tool call) -> tool -> assistant` 持久化；HTML 摄入生成结构化 chunk 与 1024 维 embedding；MCP `STREAMABLE` `initialize`、`tools/list`、`tools/call` 成功且不泄露原始凭据。 | 2026-08-21 | Codex | 通过（真实模型、HTML 结构化提取、embedding 成功路径和生产 MCP 主体协议） |
+| TC-G1-09 | 独立临时 PostgreSQL；外部 DS Chat；Agent 绑定 A1/A2；会话 `retrievalContext.kbId=A1`；测试专用记录型 `RagService` | `backend_v2/target/surefire-reports/com.kama.jchatmind.agent.G1ModelDrivenSessionScopeRuntimeL2Test.txt` | 两次独立运行均为 `1 test, 0 failures, 0 errors`；模型工具参数仅有 `query`，有效 KB 仅 A1，消息顺序为 `user -> assistant(tool call) -> tool -> assistant`，工具与最终回答不含 A2 证据标记 | 2026-08-21 | Codex | 通过（真实 DS 工具调用下的会话临时范围收窄；不替代真实向量召回、模型显式越权参数或跨组件恢复验收） |
+| TC-G1-10 | 随机 PostgreSQL 数据库、RabbitMQ 容器/vhost/用户、上传目录；首次 embedding 不可达，后续连接本机 Ollama `bge-m3:latest` | `backend_v2/target/surefire-reports/com.kama.jchatmind.ingestion.G1EmbeddingRecoveryRuntimeL2Test.txt` | 首次真实消费者处理进入 `RETRYING(1)`，retry queue 有消息且无 chunk；测试不手工重投，由 TTL/DLX 自动回投。回投后 `SUCCEEDED(1)`，两个 chunk 均持久化非空 1024 维 embedding，物理文件仍为 1 份；退出码 `0`。 | 2026-08-21 | Codex | 通过（外部 embedding 短暂不可用后的自动恢复；不替代其他外部依赖、多实例 SSE 或持久化恢复） |
 | TC-G2-01 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-02 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-03 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-04 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-05 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
+| TC-G2-06 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
+| TC-G2-07 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
+| TC-G2-08 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G3-01 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G3-02 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G3-03 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
@@ -314,18 +412,21 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 本计划已为 G0-G5 的每项交付定义正向、失败/拒绝或恢复/边界测试，并将每个阶段退出条件绑定到 `TC-ID`、隔离环境和通过判定。RAG 指标细则由现有 Spec 维护；任务、Router、记忆、Webhook、并发和多实例 SSE 的测试均明确为对应阶段实现后的必需交付。
 
-当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收；G1-G5 的能力和测试均未实现，且 G1 尚未开始。任何“待该阶段实现”项目在真实代码、执行命令和报告路径补齐前均不得标记为已覆盖。
+当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收。G1 已完成隔离 PostgreSQL/RabbitMQ/HTTP/JWT/MCP 的 L2 子项和 Edge Playwright L3 功能旅程；真实运行时发现并修复了 advisory lock 结果映射、Rabbit UUID JSON 字符串解包、MCP 根路径过滤、新建 KB 后详情页陈旧列表、Factory 加载会话时 `BIGINT user_id` 的参数类型错误，以及任务 SSE 单 emitter 覆盖前一连接与 Spring 误选三参消费者构造器的缺陷。后两项分别由同 owner HTTP 多连接及浏览器已连接流的真实重试 GREEN 验证，跨 owner 不泄露资源。`TC-G1-06` 进一步以真实 Rabbit 消费入口和 PostgreSQL 受控失败验证处理器事务回滚、任务重试/死信及无重复持久化副作用；`TC-G1-07` 已验证 Markdown/HTML/PDF 真实 embedding 成功、HTML 结构化提取、PDF 页码 metadata 与损坏 PDF 的真实重试/死信；`TC-G1-08` 已覆盖单实例终态内存清理边界；`TC-G1-09` 已验证真实模型 Agent 工具调用、模型不传 `kbIds` 时的会话 A1 范围收窄、生产业务库迁移、生产主体授权和 `STREAMABLE` MCP 协议调用。2026-08-21 的全量后端回归为 `222 tests, 0 failures, 2 errors, 20 skipped`；L2 专用配置不再被默认 Spring Boot 配置发现，未再出现 ApplicationContext Bean 重名错误。仅剩的两个错误仍是 `MultiCprEvaluationTest` 与 `RagRecallEvaluationTest` 创建 fixture KB 时缺失 `owner_id` 的既有基线，不属于本轮 G1 变更。跨组件故障恢复、多实例 SSE 分发、重连恢复和持久化事件恢复仍待对应阶段验收。G2-G5 仍未实现或未验收。
 
 ## 7. 风险与决策规则
 
 | 风险 | 规则 |
 | --- | --- |
+| 历史 KB 无可靠 owner | 本地已按 Ban 确认删除 17 个候选 KB，仅为评测 KB 明确 owner 后收紧 `NOT NULL`；其他环境不得自动回填或默认放行，必须先人工认领或清理。 |
+| MCP 私有检索身份不明 | V1 只接受有效主体凭据指纹解析出的单一 `user_id`，再走 owner-only 校验；生产主体已建立并通过 `STREAMABLE` `/mcp` 实测，无有效 grant 时仍拒绝私有 KB，不能从工具参数取得主体。 |
 | 多 Agent 只增加复杂度 | 先以服务/验证器实现职责；固定评测证明收益后再拆 Agent |
 | 公开资料污染私有结论 | 路由、检索结果和回答引用均显式标识来源层级 |
 | 异步任务无限堆积 | 有界队列、并发配额、拒绝策略、超时、重试和 DLQ 必须同时具备 |
 | 多模态质量不可控 | 每种格式独立建立 golden case，不以 OCR 文本存在即视为可用 |
 | 记忆误写或过期 | 候选与确认分离，冲突保留审计，敏感信息默认不自动持久化 |
 | Spring AI 大版本迁移破坏现有链路 | 单开升级分支，完成依赖、启动、MCP、工具调用和回归兼容性矩阵后才合并 |
+| 真实模型与外部依赖波动 | 外部聊天模型和 Ollama embedding 的 Markdown/HTML/PDF 成功路径已在隔离账号/文档上实测，损坏 PDF 的真实重试/死信也已签收；模型驱动会话收窄、跨组件故障恢复和多实例恢复仍需独立故障注入与恢复语义验收。 |
 
 ## 8. 关联文档与更新规则
 
@@ -343,3 +444,17 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 | 2026-08-14 | 私有知识库优先，公开资料分层使用 | 私有、时效、权限和可追溯事实才是 RAG 的核心价值 |
 | 2026-08-14 | 任务中心先于 Skill、Webhook 和多 Agent | 任务状态、恢复、权限和可观测性是后续编排的基础 |
 | 2026-08-14 | 多 Agent 不作为默认路径 | 普通问答无法证明多角色协作的额外成本合理 |
+| 2026-08-18 | G1 先采用 owner-only KB 硬隔离 | 当前没有 tenant、成员或 ACL 数据模型；历史 KB 无可靠归属，故 fail-closed，`allowedKbs` 仅保留默认范围；无用户映射的 MCP 私有检索拒绝。 |
+| 2026-08-18 | Agent 默认 KB 范围迁移为关系表 | `agent_knowledge_base` 支持数据库级绑定清理和最小绑定元数据；API `allowedKbs` 仅作投影，不能承担资源授权、共享 ACL 或完整审计。 |
+| 2026-08-18 | Ban 确认后续 G1 边界 | 共享保持 owner-only；MCP V1 使用每主体独立可轮换凭据映射单一 `user_id` 并审计；删除采用后续异步文件清理；补 L2/L3；其他环境只人工 owner 认领后迁移。 |
+| 2026-08-18 | G1 任务与摄入先交付 L0/L1 | `ingestion_task`、RabbitMQ 路由、Worker、幂等、脱敏任务 API 与前端轮询均有契约测试；迁移未执行，PDF、SSE 进度、真实队列/模型、L2 与 Playwright 不宣称完成。 |
+| 2026-08-18 | MCP V1 映射与追加审计落地 | `mcp_principal*` 与 `mcp_access_audit` 的迁移、指纹解析、Filter 主体传播、owner-only 检索和允许/拒绝审计均有 L0/L1 覆盖；迁移未执行，未创建真实凭据或审计数据。 |
+| 2026-08-19 | G1 隔离 L2/L3 验收 | 独立 PostgreSQL/RabbitMQ、隔离后端和本机 Edge 完成真实 HTTP/JWT、RabbitMQ 重试/DLQ、MCP 和浏览器旅程；测试数据、凭据、容器、进程和临时日志已清理，不触及业务库。 |
+| 2026-08-20 | G1 Rabbit 消费数据库失败恢复验收 | `G1RabbitConsumerDatabaseRecoveryRuntimeL2Test` 在独立 PostgreSQL/RabbitMQ 以真实 listener、MyBatis 和 Spring 事务触发旧 chunk 删除失败；两次运行均观察到事务回滚、`RETRYING` 两次后 `DEAD_LETTER`、retry/DLQ 消息和文档/任务/chunk/物理文件单份。前置测试配置问题修正后业务 RED 未复现，未修改生产代码；容器、队列、临时目录和测试凭据已精确清理。 |
+| 2026-08-20 | G1 任务 SSE HTTP 多连接验收 | `G1IngestionTaskSseHttpRuntimeL2Test` 在独立 PostgreSQL、嵌入式 HTTP、真实项目 JWT 拦截器下先 RED：同任务第二条 SSE 连接覆盖第一条，发布状态后第一连接五秒超时。最小 GREEN 将单 emitter 改为任务级并发集合并按连接注销；两条授权连接均收到 `RUNNING`，另一 owner 响应不含资源标识。容器和原始报告在收尾删除。 |
+| 2026-08-20 | G1 浏览器任务 SSE 连接后事件验收 | Edge 严格用例先 RED：已建立并收到 `DEAD_LETTER` 快照的第二条 Bearer SSE 在页面触发真实 RabbitMQ 重试后 15 秒内未收到 `RUNNING`；根因为 Spring 选择三参消费者构造器。`@Autowired` 移至四参生产构造器后，洁净隔离全栈补齐缺失的临时 UUID 默认值并重跑同一用例，退出码 `0`，第二条已连接流收到 `RUNNING`。多实例、重连与持久化恢复不在本项范围。 |
+| 2026-08-21 | G1 真实模型、生产迁移与 MCP 主体协议验收 | 生产业务库执行任务/MCP 迁移并建立 `principal_id=1 -> user_id=10` 的单一有效 grant；真实外部聊天模型驱动 Agent 完成 `KnowledgeTool` 调用，HTML/embedding 成功路径已签收；Spring AI 显式使用 `STREAMABLE` `/mcp`，真实 `initialize`、`tools/list`、`tools/call` 成功。原始凭据只在进程内轮换使用，数据库仅存指纹；跨组件恢复、多实例 SSE、重连、PDF/损坏文件和会话范围收窄仍不在本项范围。 |
+| 2026-08-21 | G1 PDF golden case 与终态内存清理验收 | 真实两页 PDF 在独立 PostgreSQL/RabbitMQ/Ollama 和上传目录中，直调断言两个 chunk、非空 embedding 与 `pageNumber=1/2`；Rabbit 摄入另验证 `sourceType=pdf`、1024 维 embedding 和 `SUCCEEDED`。损坏 PDF 首次投递进入 retry queue，测试手工重投到真实消费者后观察第二次重试和最终死信，DLQ 有消息且不留下重复持久化副作用；不外推为 retry TTL/DLX 自动回投。`IngestionTaskProgressServiceTest` 同时固定单实例终态无连接 30 分钟后的惰性内存清理。模型驱动会话收窄、多实例和持久化恢复不在本项范围。 |
+
+| 2026-08-19 | G1 advisory lock 与文件补偿强化验收 | `G1AdvisoryLockRuntimeL2Test` 在独立 PostgreSQL 以真实 MyBatis/事务连接观察同一 owner+key 的 advisory waiter；提交后两请求只保留一个任务，跨资源复用键拒绝；触发器回滚后任务/幂等无残留且同键可继续。`G1FileCompensationRuntimeL2Test` 让真实上传文件先落盘、再由任务插入触发器失败，确认统一内部错误响应不泄露路径，目录与文档/任务/chunk 均清空；移除触发器后同键重试成功且重放不误删文件。两项 GREEN Surefire 均为失败/错误 `0`，隔离容器、临时目录和 fixture 已删除。 |
+| 2026-08-19 | G1 文件中途写入补偿强化验收 | `G1FileCompensationRuntimeL2Test` 以真实 PostgreSQL、Spring 事务和 `DocumentStorageServiceImpl` 构造输入流首段已写入、随后 `IOException` 的稳定 RED：数据库事务回滚，但临时目录遗留一个物理文件。最小 GREEN 仅在 `Files.copy` 异常分支删除该次目标文件，并在为空时删除本次文档目录和 KB 目录；同一真实测试 2 项均通过（失败/错误 `0`）。它补齐复制中断的物理补偿，不等同于消费者/RabbitMQ/embedding 的端到端恢复。 |

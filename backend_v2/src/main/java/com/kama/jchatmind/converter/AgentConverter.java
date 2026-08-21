@@ -12,6 +12,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
+import java.util.List;
+
 @Component
 @AllArgsConstructor
 public class AgentConverter {
@@ -21,7 +23,6 @@ public class AgentConverter {
     public Agent toEntity(AgentDTO agentDTO) throws JsonProcessingException {
         Assert.notNull(agentDTO, "AgentDTO cannot be null");
         Assert.notNull(agentDTO.getAllowedTools(), "Allowed tools cannot be null");
-        Assert.notNull(agentDTO.getAllowedKbs(), "Allowed kbs cannot be null");
         Assert.notNull(agentDTO.getChatOptions(), "Chat options cannot be null");
         Assert.notNull(agentDTO.getModel(), "Model cannot be null");
 
@@ -33,7 +34,6 @@ public class AgentConverter {
                 .systemPrompt(agentDTO.getSystemPrompt())
                 .model(agentDTO.getModel().getModelName())
                 .allowedTools(objectMapper.writeValueAsString(agentDTO.getAllowedTools()))
-                .allowedKbs(objectMapper.writeValueAsString(agentDTO.getAllowedKbs()))
                 .chatOptions(objectMapper.writeValueAsString(agentDTO.getChatOptions()))
                 .createdAt(agentDTO.getCreatedAt())
                 .updatedAt(agentDTO.getUpdatedAt())
@@ -43,7 +43,6 @@ public class AgentConverter {
     public AgentDTO toDTO(Agent agent) throws JsonProcessingException {
         Assert.notNull(agent, "Agent cannot be null");
         Assert.notNull(agent.getAllowedTools(), "Allowed tools cannot be null");
-        Assert.notNull(agent.getAllowedKbs(), "Allowed kbs cannot be null");
         Assert.notNull(agent.getChatOptions(), "Chat options cannot be null");
         Assert.notNull(agent.getModel(), "Model cannot be null");
 
@@ -55,7 +54,7 @@ public class AgentConverter {
                 .systemPrompt(agent.getSystemPrompt())
                 .model(AgentDTO.ModelType.fromModelName(agent.getModel()))
                 .allowedTools(objectMapper.readValue(agent.getAllowedTools(), new TypeReference<>(){}))
-                .allowedKbs(objectMapper.readValue(agent.getAllowedKbs(), new TypeReference<>(){}))
+                .allowedKbs(List.of())
                 .chatOptions(objectMapper.readValue(agent.getChatOptions(), AgentDTO.ChatOptions.class))
                 .createdAt(agent.getCreatedAt())
                 .updatedAt(agent.getUpdatedAt())

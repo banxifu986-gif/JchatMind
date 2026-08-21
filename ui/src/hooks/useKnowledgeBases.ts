@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   createKnowledgeBase,
   type CreateKnowledgeBaseRequest,
@@ -9,25 +9,7 @@ import type { KnowledgeBase } from "../types";
 export function useKnowledgeBases() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
 
-  useEffect(() => {
-    async function fetchData() {
-      const resp = await getKnowledgeBases();
-      // 将 KnowledgeBaseVO 转换为 KnowledgeBase 类型
-      const converted = resp.knowledgeBases.map((kb) => ({
-        knowledgeBaseId: kb.id,
-        name: kb.name,
-        description: kb.description || "",
-      }));
-      setKnowledgeBases(converted);
-    }
-
-    fetchData().then();
-  }, []);
-
-  async function createKnowledgeBaseHandle(
-    request: CreateKnowledgeBaseRequest,
-  ) {
-    await createKnowledgeBase(request);
+  const refreshKnowledgeBases = useCallback(async () => {
     const resp = await getKnowledgeBases();
     // 将 KnowledgeBaseVO 转换为 KnowledgeBase 类型
     const converted = resp.knowledgeBases.map((kb) => ({
@@ -36,11 +18,31 @@ export function useKnowledgeBases() {
       description: kb.description || "",
     }));
     setKnowledgeBases(converted);
+  }, []);
+
+  useEffect(() => {
+    void getKnowledgeBases().then((resp) => {
+      // 将 KnowledgeBaseVO 转换为 KnowledgeBase 类型
+      const converted = resp.knowledgeBases.map((kb) => ({
+        knowledgeBaseId: kb.id,
+        name: kb.name,
+        description: kb.description || "",
+      }));
+      setKnowledgeBases(converted);
+    });
+  }, []);
+
+  async function createKnowledgeBaseHandle(
+    request: CreateKnowledgeBaseRequest,
+  ) {
+    await createKnowledgeBase(request);
+    await refreshKnowledgeBases();
   }
 
   return {
     knowledgeBases,
     createKnowledgeBaseHandle,
+    refreshKnowledgeBases,
   };
 }
 

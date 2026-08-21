@@ -4,9 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.converter.DocumentConverter;
 import com.kama.jchatmind.exception.BizException;
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.mapper.DocumentMapper;
 import com.kama.jchatmind.model.dto.DocumentDTO;
 import com.kama.jchatmind.model.entity.Document;
+import com.kama.jchatmind.model.entity.IngestionTask;
+import com.kama.jchatmind.model.entity.KnowledgeBase;
 import com.kama.jchatmind.model.request.CreateDocumentRequest;
 import com.kama.jchatmind.model.request.UpdateDocumentRequest;
 import com.kama.jchatmind.model.response.CreateDocumentResponse;
@@ -16,18 +19,15 @@ import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import com.kama.jchatmind.service.DocumentFacadeService;
 import com.kama.jchatmind.service.DocumentStorageService;
-import com.kama.jchatmind.service.MarkdownParserService;
-import com.kama.jchatmind.service.RagService;
-import com.kama.jchatmind.util.RagChunkSupport;
+import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,13 +41,17 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     private final DocumentConverter documentConverter;
     private final ObjectMapper objectMapper;
     private final DocumentStorageService documentStorageService;
-    private final MarkdownParserService markdownParserService;
-    private final RagService ragService;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
+    private final KnowledgeBaseAccessService knowledgeBaseAccessService;
+    private final RequestScopeData requestScopeData;
+    private final IngestionTaskServiceImpl ingestionTaskService;
 
     @Override
     public GetDocumentsResponse getDocuments() {
-        List<Document> documents = documentMapper.selectAll();
+        List<Document> documents = new ArrayList<>();
+        for (KnowledgeBase knowledgeBase : knowledgeBaseAccessService.getOwnedKnowledgeBases(requireUserId())) {
+            documents.addAll(documentMapper.selectByKbId(knowledgeBase.getId()));
+        }
         List<DocumentVO> result = new ArrayList<>();
         for (Document document : documents) {
             try {
@@ -64,6 +68,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
 
     @Override
     public GetDocumentsResponse getDocumentsByKbId(String kbId) {
+        knowledgeBaseAccessService.requireAccessibleKnowledgeBase(kbId, requireUserId());
         List<Document> documents = documentMapper.selectByKbId(kbId);
         List<DocumentVO> result = new ArrayList<>();
         for (Document document : documents) {
@@ -82,6 +87,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     @Override
     public CreateDocumentResponse createDocument(CreateDocumentRequest request) {
         try {
+            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(request.getKbId(), requireUserId());
             // 将 CreateDocumentRequest 转换为 DocumentDTO
             DocumentDTO documentDTO = documentConverter.toDTO(request);
 
@@ -109,8 +115,22 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     }
 
     @Override
-    public CreateDocumentResponse uploadDocument(String kbId, MultipartFile file) {
+    @Transactional
+    public CreateDocumentResponse uploadDocument(String kbId, String idempotencyKey, MultipartFile file) {
+        String filePath = null;
         try {
+            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(kbId, requireUserId());
+            if (!StringUtils.hasText(idempotencyKey)) {
+                throw new BizException("幂等键不能为空");
+            }
+            IngestionTask existingTask = ingestionTaskService
+                    .findExistingDocumentIngestion(kbId, idempotencyKey);
+            if (existingTask != null) {
+                return CreateDocumentResponse.builder()
+                        .documentId(existingTask.getDocumentId())
+                        .taskId(existingTask.getId())
+                        .build();
+            }
             if (file.isEmpty()) {
                 throw new BizException("上传的文件为空");
             }
@@ -142,7 +162,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             String documentId = document.getId();
 
             // 保存文件
-            String filePath = documentStorageService.saveFile(kbId, documentId, file);
+            filePath = documentStorageService.saveFile(kbId, documentId, file);
 
             // 更新文档记录，保存文件路径到 metadata
             DocumentDTO.MetaData metadata = new DocumentDTO.MetaData();
@@ -161,20 +181,32 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
 
             log.info("文档上传成功: kbId={}, documentId={}, filename={}", kbId, documentId, originalFilename);
 
-            // 如果是 Markdown 文件，进行解析并生成 chunks
-            if ("md".equalsIgnoreCase(filetype) || "markdown".equalsIgnoreCase(filetype)) {
-                processMarkdownDocument(kbId, documentId, filePath, originalFilename, filetype);
-            } else {
-                // TODO: 未来可以增加其他文件类型的处理逻辑
-                log.warn("待新增处理的文件类型: {}", filetype);
-            }
+            String taskId = ingestionTaskService
+                    .submitDocumentIngestion(kbId, documentId, idempotencyKey)
+                    .getId();
 
             return CreateDocumentResponse.builder()
                     .documentId(documentId)
+                    .taskId(taskId)
                     .build();
         } catch (IOException e) {
+            compensateUploadedFile(filePath);
             log.error("文件保存失败", e);
-            throw new BizException("文件保存失败: " + e.getMessage());
+            throw new BizException("文件保存失败");
+        } catch (RuntimeException e) {
+            compensateUploadedFile(filePath);
+            throw e;
+        }
+    }
+
+    private void compensateUploadedFile(String filePath) {
+        if (!StringUtils.hasText(filePath)) {
+            return;
+        }
+        try {
+            documentStorageService.deleteFile(filePath);
+        } catch (IOException cleanupException) {
+            log.warn("上传失败后的文件补偿删除失败: path={}", filePath, cleanupException);
         }
     }
 
@@ -182,7 +214,12 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     public void deleteDocument(String documentId) {
         Document document = documentMapper.selectById(documentId);
         if (document == null) {
-            throw new BizException("文档不存在: " + documentId);
+            throw new BizException("无权访问文档");
+        }
+        knowledgeBaseAccessService.requireAccessibleKnowledgeBase(document.getKbId(), requireUserId());
+
+        for (ChunkBgeM3 chunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
+            chunkBgeM3Mapper.deleteById(chunk.getId());
         }
 
         // 删除文件
@@ -205,69 +242,6 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     }
 
     /**
-     * 处理 Markdown 文档，解析并生成 chunks
-     */
-    private void processMarkdownDocument(String kbId, String documentId, String filePath, String sourceName, String sourceType) {
-        try {
-            log.info("开始处理 Markdown 文档: kbId={}, documentId={}, filePath={}", kbId, documentId, filePath);
-
-            // 从保存的文件路径读取文件
-            Path path = documentStorageService.getFilePath(filePath);
-            try (InputStream inputStream = Files.newInputStream(path)) {
-                // 解析 Markdown 文件
-                List<MarkdownParserService.MarkdownSection> sections = markdownParserService.parseMarkdown(inputStream);
-
-                if (sections.isEmpty()) {
-                    log.warn("Markdown 文档解析后没有找到任何章节: documentId={}", documentId);
-                    return;
-                }
-
-                LocalDateTime now = LocalDateTime.now();
-                int chunkCount = 0;
-
-                // 为每个章节生成 chunk
-                for (int i = 0; i < sections.size(); i++) {
-                    MarkdownParserService.MarkdownSection section = sections.get(i);
-                    String title = section.getTitle();
-                    String content = section.getContent();
-                    String contentPath = section.getContentPath();
-
-                    if (title == null || title.trim().isEmpty()) {
-                        continue;
-                    }
-
-                    float[] embedding = ragService.embed(RagChunkSupport.buildChunkEmbeddingText(section));
-
-                    // 创建 ChunkBgeM3 实体
-                    ChunkBgeM3 chunk = ChunkBgeM3.builder()
-                            .kbId(kbId)
-                            .docId(documentId)
-                            .content(content != null ? content : "")
-                            .metadata(RagChunkSupport.buildChunkMetadataJson(objectMapper, section, sourceType, sourceName, i))
-                            .embedding(embedding)
-                            .createdAt(now)
-                            .updatedAt(now)
-                            .build();
-
-                    // 插入数据库
-                    int result = chunkBgeM3Mapper.insert(chunk);
-
-                    if (result > 0) {
-                        chunkCount++;
-                        log.debug("创建 chunk 成功: title={}, chunkId={}", title, chunk.getId());
-                    } else {
-                        log.warn("创建 chunk 失败: title={}", title);
-                    }
-                }
-                log.info("Markdown 文档处理完成: documentId={}, 共生成 {} 个 chunks", documentId, chunkCount);
-            }
-        } catch (Exception e) {
-            log.error("处理 Markdown 文档失败: documentId={}", documentId, e);
-            // 不抛出异常，避免影响文档上传流程
-        }
-    }
-
-    /**
      * 从文件名提取文件类型
      */
     private String getFileType(String filename) {
@@ -283,8 +257,9 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             // 查询现有的文档
             Document existingDocument = documentMapper.selectById(documentId);
             if (existingDocument == null) {
-                throw new BizException("文档不存在: " + documentId);
+                throw new BizException("无权访问文档");
             }
+            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(existingDocument.getKbId(), requireUserId());
 
             // 将现有 Document 转换为 DocumentDTO
             DocumentDTO documentDTO = documentConverter.toDTO(existingDocument);
@@ -309,5 +284,13 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         } catch (JsonProcessingException e) {
             throw new BizException("更新文档时发生序列化错误: " + e.getMessage());
         }
+    }
+
+    private String requireUserId() {
+        Long userId = requestScopeData.getUserId();
+        if (userId == null) {
+            throw new BizException("用户未登录");
+        }
+        return String.valueOf(userId);
     }
 }

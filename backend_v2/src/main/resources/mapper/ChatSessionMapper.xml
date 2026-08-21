@@ -65,7 +65,7 @@
             updated_at
         FROM chat_session
         WHERE id = CAST(#{id} AS uuid)
-          AND user_id = #{userId}
+          AND user_id = CAST(#{userId} AS text)
     </select>
 
     <select id="selectByUserId" resultMap="BaseResultMap">

@@ -9,13 +9,14 @@
         <result property="name" column="name" jdbcType="VARCHAR"/>
         <result property="description" column="description" jdbcType="VARCHAR"/>
         <result property="metadata" column="metadata" jdbcType="VARCHAR"/>
+        <result property="ownerId" column="owner_id" jdbcType="VARCHAR"/>
         <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
         <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
     </resultMap>
 
     <sql id="Base_Column_List">
         id,name,description,
-        metadata,created_at,updated_at
+        metadata,owner_id,created_at,updated_at
     </sql>
 
     <insert id="insert" parameterType="com.kama.jchatmind.model.entity.KnowledgeBase"
@@ -25,6 +26,7 @@
             name,
             description,
             metadata,
+            owner_id,
             created_at,
             updated_at
         )
@@ -33,6 +35,7 @@
                 #{name},
                 #{description},
                 CAST(#{metadata} AS jsonb),
+                CAST(#{ownerId} AS bigint),
                 #{createdAt},
                 #{updatedAt}
             )
@@ -44,6 +47,7 @@
             name,
             description,
             metadata::text AS metadata,
+            owner_id,
             created_at,
             updated_at
         FROM knowledge_base
@@ -56,9 +60,24 @@
             name,
             description,
             metadata::text AS metadata,
+            owner_id,
             created_at,
             updated_at
         FROM knowledge_base
+        ORDER BY updated_at DESC
+    </select>
+
+    <select id="selectByOwnerId" resultMap="BaseResultMap">
+        SELECT
+            id,
+            name,
+            description,
+            metadata::text AS metadata,
+            owner_id,
+            created_at,
+            updated_at
+        FROM knowledge_base
+        WHERE owner_id = CAST(#{ownerId} AS bigint)
         ORDER BY updated_at DESC
     </select>
 
@@ -68,6 +87,7 @@
             name,
             description,
             metadata::text AS metadata,
+            owner_id,
             created_at,
             updated_at
         FROM knowledge_base

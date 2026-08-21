@@ -19,6 +19,8 @@ public class KnowledgeBase {
 
     private String metadata;
 
+    private String ownerId;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
@@ -39,6 +41,7 @@ public class KnowledgeBase {
             && (this.getName() == null ? other.getName() == null : this.getName().equals(other.getName()))
             && (this.getDescription() == null ? other.getDescription() == null : this.getDescription().equals(other.getDescription()))
             && (this.getMetadata() == null ? other.getMetadata() == null : this.getMetadata().equals(other.getMetadata()))
+            && (this.getOwnerId() == null ? other.getOwnerId() == null : this.getOwnerId().equals(other.getOwnerId()))
             && (this.getCreatedAt() == null ? other.getCreatedAt() == null : this.getCreatedAt().equals(other.getCreatedAt()))
             && (this.getUpdatedAt() == null ? other.getUpdatedAt() == null : this.getUpdatedAt().equals(other.getUpdatedAt()));
     }
@@ -51,6 +54,7 @@ public class KnowledgeBase {
         result = prime * result + ((getName() == null) ? 0 : getName().hashCode());
         result = prime * result + ((getDescription() == null) ? 0 : getDescription().hashCode());
         result = prime * result + ((getMetadata() == null) ? 0 : getMetadata().hashCode());
+        result = prime * result + ((getOwnerId() == null) ? 0 : getOwnerId().hashCode());
         result = prime * result + ((getCreatedAt() == null) ? 0 : getCreatedAt().hashCode());
         result = prime * result + ((getUpdatedAt() == null) ? 0 : getUpdatedAt().hashCode());
         return result;
@@ -65,6 +69,7 @@ public class KnowledgeBase {
                 ", name=" + name +
                 ", description=" + description +
                 ", metadata=" + metadata +
+                ", ownerId=" + ownerId +
                 ", createdAt=" + createdAt +
                 ", updatedAt=" + updatedAt +
                 "]";

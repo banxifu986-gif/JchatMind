@@ -10,15 +10,17 @@ import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.converter.AgentConverter;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
+import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.AgentMapper;
-import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.model.dto.AgentDTO;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.entity.Agent;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
 import com.kama.jchatmind.model.entity.UserMemory;
+import com.kama.jchatmind.service.AgentKnowledgeBaseBindingService;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
+import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.SseService;
 import com.kama.jchatmind.service.ToolFacadeService;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
@@ -45,8 +47,9 @@ public class JChatMindFactory {
     private final SseService sseService;
     private final AgentMapper agentMapper;
     private final AgentConverter agentConverter;
-    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeBaseConverter knowledgeBaseConverter;
+    private final KnowledgeBaseAccessService knowledgeBaseAccessService;
+    private final AgentKnowledgeBaseBindingService agentKnowledgeBaseBindingService;
     private final ToolFacadeService toolFacadeService;
     private final ChatMessageFacadeService chatMessageFacadeService;
     private final ChatMessageConverter chatMessageConverter;
@@ -62,8 +65,9 @@ public class JChatMindFactory {
             SseService sseService,
             AgentMapper agentMapper,
             AgentConverter agentConverter,
-            KnowledgeBaseMapper knowledgeBaseMapper,
             KnowledgeBaseConverter knowledgeBaseConverter,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            AgentKnowledgeBaseBindingService agentKnowledgeBaseBindingService,
             ToolFacadeService toolFacadeService,
             ChatMessageFacadeService chatMessageFacadeService,
             ChatMessageConverter chatMessageConverter,
@@ -77,8 +81,9 @@ public class JChatMindFactory {
         this.sseService = sseService;
         this.agentMapper = agentMapper;
         this.agentConverter = agentConverter;
-        this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.knowledgeBaseConverter = knowledgeBaseConverter;
+        this.knowledgeBaseAccessService = knowledgeBaseAccessService;
+        this.agentKnowledgeBaseBindingService = agentKnowledgeBaseBindingService;
         this.toolFacadeService = toolFacadeService;
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.chatMessageConverter = chatMessageConverter;
@@ -88,8 +93,12 @@ public class JChatMindFactory {
         this.harnessInterceptorChain = harnessInterceptorChain;
     }
 
-    private Agent loadAgent(String agentId) {
-        return agentMapper.selectById(agentId);
+    private Agent loadAgent(String userId, String agentId) {
+        Agent agent = agentMapper.selectById(agentId);
+        if (agent == null || !userId.equals(agent.getUserId())) {
+            throw new BizException("无权访问 Agent");
+        }
+        return agent;
     }
 
     private List<Message> loadMemory(String userId, String chatSessionId) {
@@ -170,19 +179,22 @@ public class JChatMindFactory {
     private AgentDTO toAgentConfig(Agent agent) {
         try {
             agentConfig = agentConverter.toDTO(agent);
+            agentConfig.setAllowedKbs(agentKnowledgeBaseBindingService
+                    .getBoundKnowledgeBaseIds(agent.getId()));
             return agentConfig;
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("解析 Agent 配置失败", e);
         }
     }
 
-    private List<KnowledgeBaseDTO> resolveRuntimeKnowledgeBases(AgentDTO agentConfig) {
+    private List<KnowledgeBaseDTO> resolveRuntimeKnowledgeBases(AgentDTO agentConfig, String userId) {
         List<String> allowedKbIds = agentConfig.getAllowedKbs();
         if (allowedKbIds == null || allowedKbIds.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<KnowledgeBase> knowledgeBases = knowledgeBaseMapper.selectByIdBatch(allowedKbIds);
+        List<KnowledgeBase> knowledgeBases = knowledgeBaseAccessService
+                .filterAccessibleKnowledgeBases(allowedKbIds, userId);
         if (knowledgeBases.isEmpty()) {
             return Collections.emptyList();
         }
@@ -200,6 +212,7 @@ public class JChatMindFactory {
 
     private List<Tool> resolveRuntimeTools(AgentDTO agentConfig) {
         List<Tool> runtimeTools = new ArrayList<>(toolFacadeService.getFixedTools());
+        runtimeTools.removeIf(tool -> "terminate".equals(tool.getName()));
         List<String> allowedToolNames = agentConfig.getAllowedTools();
         if (allowedToolNames == null || allowedToolNames.isEmpty()) {
             return runtimeTools;
@@ -307,10 +320,10 @@ public class JChatMindFactory {
     }
 
     public JChatMind create(String userId, String agentId, String chatSessionId) {
-        Agent agent = loadAgent(agentId);
+        Agent agent = loadAgent(userId, agentId);
         AgentDTO currentAgentConfig = toAgentConfig(agent);
         List<Message> memory = loadMemory(userId, chatSessionId);
-        List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(currentAgentConfig);
+        List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(currentAgentConfig, userId);
         List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
         runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases);
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Card,
@@ -10,27 +10,77 @@ import {
   Space,
   message,
   Empty,
+  Progress,
+  Tag,
+  Tooltip,
 } from "antd";
 import {
   BookOutlined,
   UploadOutlined,
   DeleteOutlined,
   FileOutlined,
+  CloseOutlined,
+  RedoOutlined,
 } from "@ant-design/icons";
 import type { UploadProps } from "antd";
 import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.ts";
 import { useDocuments } from "../../hooks/useDocuments.ts";
-import { uploadDocument, type DocumentVO } from "../../api/api.ts";
+import {
+  cancelIngestionTask,
+  getIngestionTask,
+  retryIngestionTask,
+  subscribeIngestionTaskProgress,
+  uploadDocument,
+  type DocumentVO,
+  type IngestionTaskVO,
+} from "../../api/api.ts";
 
 const { Title, Text, Paragraph } = Typography;
 
+const ACTIVE_INGESTION_STATUSES = new Set(["QUEUED", "RUNNING", "RETRYING"]);
+const CANCELLABLE_INGESTION_STATUSES = new Set(["QUEUED", "RETRYING"]);
+const RETRYABLE_INGESTION_STATUSES = new Set(["FAILED", "DEAD_LETTER"]);
+
+function taskStatusText(status: IngestionTaskVO["status"]): string {
+  return {
+    QUEUED: "排队中",
+    RUNNING: "处理中",
+    RETRYING: "等待重试",
+    FAILED: "处理失败",
+    DEAD_LETTER: "重试已耗尽",
+    CANCELLED: "已取消",
+    SUCCEEDED: "处理完成",
+  }[status];
+}
+
+function taskProgress(status: IngestionTaskVO["status"]): number {
+  if (status === "SUCCEEDED") return 100;
+  if (status === "FAILED" || status === "DEAD_LETTER" || status === "CANCELLED") return 100;
+  if (status === "RUNNING" || status === "RETRYING") return 60;
+  return 20;
+}
+
+function taskStatusColor(status: IngestionTaskVO["status"]): string {
+  if (status === "SUCCEEDED") return "success";
+  if (status === "FAILED" || status === "DEAD_LETTER") return "error";
+  if (status === "CANCELLED") return "default";
+  return "processing";
+}
+
 const KnowledgeBaseView: React.FC = () => {
   const { knowledgeBaseId } = useParams<{ knowledgeBaseId?: string }>();
-  const { knowledgeBases } = useKnowledgeBases();
+  const { knowledgeBases, refreshKnowledgeBases } = useKnowledgeBases();
   const { documents, loading, refreshDocuments, deleteDocument } =
     useDocuments(knowledgeBaseId);
 
   const [uploading, setUploading] = useState(false);
+  const [ingestionTask, setIngestionTask] = useState<IngestionTaskVO | null>(null);
+  const uploadIdempotencyKeys = useRef<Map<string, string>>(new Map());
+  const currentIngestionTask = ingestionTask?.kbId === knowledgeBaseId ? ingestionTask : null;
+  const ingestionTaskId = currentIngestionTask?.taskId;
+  const ingestionTaskStatus = currentIngestionTask?.status;
+  const canCancelIngestion = currentIngestionTask !== null
+    && CANCELLABLE_INGESTION_STATUSES.has(currentIngestionTask.status);
 
   // 查找当前知识库的详细信息
   const currentKnowledgeBase = useMemo(() => {
@@ -40,6 +90,94 @@ const KnowledgeBaseView: React.FC = () => {
       null
     );
   }, [knowledgeBaseId, knowledgeBases]);
+
+  useEffect(() => {
+    setIngestionTask((currentTask) => currentTask?.kbId === knowledgeBaseId ? currentTask : null);
+  }, [knowledgeBaseId]);
+
+  useEffect(() => {
+    if (knowledgeBaseId) {
+      void refreshKnowledgeBases();
+    }
+  }, [knowledgeBaseId, refreshKnowledgeBases]);
+
+  useEffect(() => {
+    if (!knowledgeBaseId
+      || !ingestionTaskId
+      || !ingestionTaskStatus
+      || !ACTIVE_INGESTION_STATUSES.has(ingestionTaskStatus)) {
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    let lastEventId: number | undefined;
+    const applyTaskUpdate = (nextTask: IngestionTaskVO) => {
+      if (!active || nextTask.kbId !== knowledgeBaseId) {
+        return;
+      }
+      setIngestionTask(nextTask);
+      if (!ACTIVE_INGESTION_STATUSES.has(nextTask.status)) {
+        void refreshDocuments();
+        controller.abort();
+      }
+    };
+
+    const refreshTask = async () => {
+      try {
+        const nextTask = await getIngestionTask(ingestionTaskId);
+        if (!active) return;
+        if (nextTask.kbId !== knowledgeBaseId) {
+          setIngestionTask(null);
+          return;
+        }
+        applyTaskUpdate(nextTask);
+      } catch {
+        return;
+      }
+    };
+
+    void refreshTask();
+    const connectProgress = async () => {
+      while (active && !controller.signal.aborted) {
+        try {
+          await subscribeIngestionTaskProgress(
+            ingestionTaskId,
+            (event) => {
+              if (event.sequence !== undefined) {
+                if (lastEventId !== undefined && event.sequence <= lastEventId) {
+                  return;
+                }
+                lastEventId = Math.max(lastEventId ?? 0, event.sequence);
+              }
+              applyTaskUpdate(event);
+            },
+            controller.signal,
+            lastEventId,
+          );
+          if (active && !controller.signal.aborted) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          }
+        } catch (error: unknown) {
+          if (!active || controller.signal.aborted) {
+            return;
+          }
+          console.error("摄入任务 SSE 连接失败:", error);
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        }
+      }
+    };
+    void connectProgress();
+    const timer = window.setInterval(() => {
+      void refreshTask();
+    }, 2000);
+
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [knowledgeBaseId, ingestionTaskId, ingestionTaskStatus, refreshDocuments]);
 
   // 处理文件上传
   const handleUpload: UploadProps["customRequest"] = async (options) => {
@@ -51,17 +189,65 @@ const KnowledgeBaseView: React.FC = () => {
     }
 
     setUploading(true);
+    const uploadFile = file as File;
+    const uploadKey = `${uploadFile.name}:${uploadFile.size}:${uploadFile.lastModified}`;
+    const idempotencyKey = uploadIdempotencyKeys.current.get(uploadKey) ?? crypto.randomUUID();
+    uploadIdempotencyKeys.current.set(uploadKey, idempotencyKey);
 
     try {
-      await uploadDocument(knowledgeBaseId, file as File);
-      message.success("文档上传成功");
+      const response = await uploadDocument(knowledgeBaseId, file as File, idempotencyKey);
+      if (response.taskId) {
+        setIngestionTask({
+          taskId: response.taskId,
+          kbId: knowledgeBaseId,
+          documentId: response.documentId,
+          taskType: "DOCUMENT_INGESTION",
+          status: "QUEUED",
+          attemptCount: 0,
+          maxAttempts: 3,
+          errorSummary: null,
+          createdAt: null,
+          updatedAt: null,
+          startedAt: null,
+          completedAt: null,
+        });
+      }
+      message.success(response.taskId ? "文档已上传，正在处理" : "文档上传成功");
       await refreshDocuments();
       onSuccess?.(file);
+      uploadIdempotencyKeys.current.delete(uploadKey);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "上传失败");
       onError?.(error as Error);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleCancelIngestion = async () => {
+    if (!currentIngestionTask || !canCancelIngestion) return;
+    try {
+      await cancelIngestionTask(currentIngestionTask.taskId);
+      setIngestionTask({ ...currentIngestionTask, status: "CANCELLED" });
+      message.success("已取消文档处理");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "取消文档处理失败");
+    }
+  };
+
+  const handleRetryIngestion = async () => {
+    if (!currentIngestionTask || !RETRYABLE_INGESTION_STATUSES.has(currentIngestionTask.status)) return;
+    try {
+      await retryIngestionTask(currentIngestionTask.taskId);
+      setIngestionTask({
+        ...currentIngestionTask,
+        status: "QUEUED",
+        attemptCount: 0,
+        errorSummary: null,
+      });
+      message.success("已重新提交文档处理");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "重新提交文档处理失败");
     }
   };
 
@@ -195,7 +381,7 @@ const KnowledgeBaseView: React.FC = () => {
             <Upload
               customRequest={handleUpload}
               showUploadList={false}
-              accept=".md"
+            accept=".md,.markdown,.txt,.html,.pdf"
               disabled={uploading}
             >
               <Button
@@ -208,8 +394,64 @@ const KnowledgeBaseView: React.FC = () => {
               </Button>
             </Upload>
             <Text type="secondary" className="block mt-2 text-xs">
-              支持格式: Markdown
+              支持格式: Markdown、纯文本、HTML 和 PDF
             </Text>
+            {currentIngestionTask && (
+              <div className="mt-3 border-t pt-3">
+                <Space className="w-full justify-between" align="center">
+                  <Space size="small">
+                    <Text>{taskStatusText(currentIngestionTask.status)}</Text>
+                    <Tag color={taskStatusColor(currentIngestionTask.status)}>
+                      {currentIngestionTask.status}
+                    </Tag>
+                  </Space>
+                  <Space size="small">
+                    {canCancelIngestion && (
+                      <Tooltip title="取消处理">
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<CloseOutlined />}
+                          aria-label="取消处理"
+                          onClick={() => void handleCancelIngestion()}
+                        />
+                      </Tooltip>
+                    )}
+                    {RETRYABLE_INGESTION_STATUSES.has(currentIngestionTask.status) && (
+                      <Tooltip title="重新处理">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<RedoOutlined />}
+                          aria-label="重新处理"
+                          onClick={() => void handleRetryIngestion()}
+                        />
+                      </Tooltip>
+                    )}
+                  </Space>
+                </Space>
+                <Progress
+                  percent={taskProgress(currentIngestionTask.status)}
+                  status={
+                    currentIngestionTask.status === "FAILED" || currentIngestionTask.status === "DEAD_LETTER"
+                      ? "exception"
+                      : currentIngestionTask.status === "CANCELLED"
+                        ? "normal"
+                        : currentIngestionTask.status === "SUCCEEDED"
+                          ? "success"
+                          : "active"
+                  }
+                  showInfo={false}
+                  className="mt-2 mb-0"
+                />
+                {currentIngestionTask.errorSummary && (
+                  <Text type="danger" className="block mt-1 text-xs">
+                    {currentIngestionTask.errorSummary}
+                  </Text>
+                )}
+              </div>
+            )}
           </Card>
         </div>
 

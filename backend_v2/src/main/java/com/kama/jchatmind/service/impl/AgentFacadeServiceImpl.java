@@ -13,8 +13,11 @@ import com.kama.jchatmind.model.response.CreateAgentResponse;
 import com.kama.jchatmind.model.response.GetAgentsResponse;
 import com.kama.jchatmind.model.vo.AgentVO;
 import com.kama.jchatmind.service.AgentFacadeService;
+import com.kama.jchatmind.service.AgentKnowledgeBaseBindingService;
+import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -28,6 +31,8 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     private final AgentMapper agentMapper;
     private final AgentConverter agentConverter;
     private final RequestScopeData requestScopeData;
+    private final KnowledgeBaseAccessService knowledgeBaseAccessService;
+    private final AgentKnowledgeBaseBindingService agentKnowledgeBaseBindingService;
 
     @Override
     public GetAgentsResponse getAgents() {
@@ -37,6 +42,7 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
         for (Agent agent : agents) {
             try {
                 AgentVO vo = agentConverter.toVO(agent);
+                vo.setAllowedKbs(agentKnowledgeBaseBindingService.getBoundKnowledgeBaseIds(agent.getId()));
                 result.add(vo);
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
@@ -48,6 +54,7 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     }
 
     @Override
+    @Transactional
     public CreateAgentResponse createAgent(CreateAgentRequest request) {
         try {
             String userId = requireUserId();
@@ -55,6 +62,8 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
             // 将 CreateAgentRequest 转换为 AgentDTO
             AgentDTO agentDTO = agentConverter.toDTO(request);
             agentDTO.setUserId(userId);
+            agentDTO.setAllowedKbs(knowledgeBaseAccessService
+                    .requireAccessibleKnowledgeBaseIds(agentDTO.getAllowedKbs(), userId));
 
             // 将 AgentDTO 转换为 Agent 实体
             Agent agent = agentConverter.toEntity(agentDTO);
@@ -69,6 +78,11 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
             if (result <= 0) {
                 throw new BizException("创建 agent 失败");
             }
+            agentKnowledgeBaseBindingService.replaceBindings(
+                    agent.getId(),
+                    agentDTO.getAllowedKbs(),
+                    userId
+            );
 
             // 返回生成的 agentId
             return CreateAgentResponse.builder()
@@ -90,6 +104,7 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     }
 
     @Override
+    @Transactional
     public void updateAgent(String agentId, UpdateAgentRequest request) {
         try {
             String userId = requireUserId();
@@ -97,9 +112,13 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
 
             // 将现有 Agent 转换为 AgentDTO
             AgentDTO agentDTO = agentConverter.toDTO(existingAgent);
+            agentDTO.setAllowedKbs(agentKnowledgeBaseBindingService
+                    .getBoundKnowledgeBaseIds(existingAgent.getId()));
 
             // 使用 UpdateAgentRequest 更新 AgentDTO
             agentConverter.updateDTOFromRequest(agentDTO, request);
+            agentDTO.setAllowedKbs(knowledgeBaseAccessService
+                    .requireAccessibleKnowledgeBaseIds(agentDTO.getAllowedKbs(), userId));
 
             // 将更新后的 AgentDTO 转换回 Agent 实体
             Agent updatedAgent = agentConverter.toEntity(agentDTO);
@@ -115,6 +134,11 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
             if (result <= 0) {
                 throw new BizException("更新 agent 失败");
             }
+            agentKnowledgeBaseBindingService.replaceBindings(
+                    updatedAgent.getId(),
+                    agentDTO.getAllowedKbs(),
+                    userId
+            );
         } catch (JsonProcessingException e) {
             throw new BizException("更新 agent 时发生序列化错误: " + e.getMessage());
         }
@@ -131,11 +155,8 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     private Agent requireOwnedAgent(String agentId) {
         String userId = requireUserId();
         Agent agent = agentMapper.selectById(agentId);
-        if (agent == null) {
-            throw new BizException("Agent 不存在: " + agentId);
-        }
-        if (agent.getUserId() == null || !agent.getUserId().equals(userId)) {
-            throw new BizException("无权操作此 Agent");
+        if (agent == null || agent.getUserId() == null || !agent.getUserId().equals(userId)) {
+            throw new BizException("无权访问 Agent");
         }
         return agent;
     }

@@ -43,7 +43,12 @@ public class DocumentStorageServiceImpl implements DocumentStorageService {
         
         // 保存文件
         Path targetPath = documentDir.resolve(uniqueFilename);
-        Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            compensatePartialWrite(targetPath, documentDir, kbDir);
+            throw e;
+        }
         
         // 返回相对路径（相对于 baseStoragePath）
         String relativePath = Paths.get(kbId, documentId, uniqueFilename).toString().replace("\\", "/");
@@ -85,5 +90,23 @@ public class DocumentStorageServiceImpl implements DocumentStorageService {
     public boolean fileExists(String filePath) {
         Path fullPath = getFilePath(filePath);
         return Files.exists(fullPath) && Files.isRegularFile(fullPath);
+    }
+
+    private void compensatePartialWrite(Path targetPath, Path documentDir, Path kbDir) {
+        try {
+            Files.deleteIfExists(targetPath);
+        } catch (IOException cleanupException) {
+            log.warn("文件写入失败后的残留文件清理失败", cleanupException);
+        }
+        deleteEmptyDirectory(documentDir);
+        deleteEmptyDirectory(kbDir);
+    }
+
+    private void deleteEmptyDirectory(Path directory) {
+        try {
+            Files.deleteIfExists(directory);
+        } catch (IOException cleanupException) {
+            log.debug("文件写入失败后的空目录清理跳过", cleanupException);
+        }
     }
 }

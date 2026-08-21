@@ -2,13 +2,17 @@ package com.kama.jchatmind.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,13 +22,25 @@ import java.util.stream.Collectors;
 @Component
 public class McpKnowledgeTool {
 
+    private static final String PRIVATE_KNOWLEDGE_ACCESS_DENIED = "当前 MCP 调用未绑定用户身份，禁止访问私有知识库。";
+    private static final int DEFAULT_RETRIEVAL_LIMIT = 5;
+
     private final RagService ragService;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
+    private final KnowledgeBaseAccessService knowledgeBaseAccessService;
+    private final McpPrincipalAccessService mcpPrincipalAccessService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public McpKnowledgeTool(RagService ragService, KnowledgeBaseMapper knowledgeBaseMapper) {
+    public McpKnowledgeTool(
+            RagService ragService,
+            KnowledgeBaseMapper knowledgeBaseMapper,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            McpPrincipalAccessService mcpPrincipalAccessService
+    ) {
         this.ragService = ragService;
         this.knowledgeBaseMapper = knowledgeBaseMapper;
+        this.knowledgeBaseAccessService = knowledgeBaseAccessService;
+        this.mcpPrincipalAccessService = mcpPrincipalAccessService;
     }
 
     @org.springframework.ai.tool.annotation.Tool(
@@ -32,17 +48,68 @@ public class McpKnowledgeTool {
             description = "从指定知识库执行语义检索（RAG）。参数：query（查询文本，必传）、kbIds（知识库 ID 数组，必传）。返回结构化检索结果，包含知识库名、来源、路径和内容。"
     )
     public String search(String query, List<String> kbIds) {
-        if (!StringUtils.hasText(query)) {
-            return "查询文本不能为空。";
+        McpCallerIdentity caller = resolveCaller();
+        if (caller == null) {
+            return PRIVATE_KNOWLEDGE_ACCESS_DENIED;
         }
-        if (CollectionUtils.isEmpty(kbIds)) {
-            return "知识库 ID 列表不能为空，请指定要检索的知识库。";
+        try {
+            List<String> accessibleKbIds = knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(
+                    kbIds,
+                    String.valueOf(caller.userId())
+            );
+            if (accessibleKbIds.isEmpty()) {
+                mcpPrincipalAccessService.recordKnowledgeQuery(
+                        caller,
+                        resolveCorrelationId(),
+                        "ALLOW",
+                        accessibleKbIds,
+                        "empty_scope"
+                );
+                return "";
+            }
+            List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, DEFAULT_RETRIEVAL_LIMIT);
+            mcpPrincipalAccessService.recordKnowledgeQuery(
+                    caller,
+                    resolveCorrelationId(),
+                    "ALLOW",
+                    accessibleKbIds,
+                    "retrieved"
+            );
+            return formatResults(results, buildKbNameMap(accessibleKbIds));
+        } catch (BizException e) {
+            mcpPrincipalAccessService.recordKnowledgeQuery(
+                    caller,
+                    resolveCorrelationId(),
+                    "DENY",
+                    kbIds,
+                    "knowledge_base_access_denied"
+            );
+            return PRIVATE_KNOWLEDGE_ACCESS_DENIED;
         }
+    }
 
-        Map<String, String> kbIdToName = buildKbNameMap(kbIds);
-        List<RagRetrievalResult> results = ragService.retrieve(kbIds, query, null, 3);
+    private McpCallerIdentity resolveCaller() {
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes == null) {
+            return null;
+        }
+        Object caller = attributes.getAttribute(
+                McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE,
+                RequestAttributes.SCOPE_REQUEST
+        );
+        return caller instanceof McpCallerIdentity identity ? identity : null;
+    }
 
-        return formatResults(results, kbIdToName);
+    private String resolveCorrelationId() {
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes == null) {
+            return null;
+        }
+        Object correlationId = attributes.getAttribute(
+                McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE,
+                RequestAttributes.SCOPE_REQUEST
+        );
+        return correlationId instanceof String value ? value : null;
     }
 
     private Map<String, String> buildKbNameMap(List<String> kbIds) {

@@ -7,5 +7,7 @@ import lombok.Data;
 @Builder
 public class CreateDocumentResponse {
     private String documentId;
+
+    private String taskId;
 }
 

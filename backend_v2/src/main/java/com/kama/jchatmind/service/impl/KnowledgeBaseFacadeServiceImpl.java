@@ -1,6 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
@@ -12,6 +13,7 @@ import com.kama.jchatmind.model.response.CreateKnowledgeBaseResponse;
 import com.kama.jchatmind.model.response.GetKnowledgeBasesResponse;
 import com.kama.jchatmind.model.vo.KnowledgeBaseVO;
 import com.kama.jchatmind.service.KnowledgeBaseFacadeService;
+import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -25,10 +27,12 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeBaseConverter knowledgeBaseConverter;
+    private final KnowledgeBaseAccessService knowledgeBaseAccessService;
+    private final RequestScopeData requestScopeData;
 
     @Override
     public GetKnowledgeBasesResponse getKnowledgeBases() {
-        List<KnowledgeBase> knowledgeBases = knowledgeBaseMapper.selectAll();
+        List<KnowledgeBase> knowledgeBases = knowledgeBaseAccessService.getOwnedKnowledgeBases(requireUserId());
         List<KnowledgeBaseVO> result = new ArrayList<>();
         for (KnowledgeBase knowledgeBase : knowledgeBases) {
             try {
@@ -46,11 +50,13 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
     @Override
     public CreateKnowledgeBaseResponse createKnowledgeBase(CreateKnowledgeBaseRequest request) {
         try {
+            String userId = requireUserId();
             // 将 CreateKnowledgeBaseRequest 转换为 KnowledgeBaseDTO
             KnowledgeBaseDTO knowledgeBaseDTO = knowledgeBaseConverter.toDTO(request);
             
             // 将 KnowledgeBaseDTO 转换为 KnowledgeBase 实体
             KnowledgeBase knowledgeBase = knowledgeBaseConverter.toEntity(knowledgeBaseDTO);
+            knowledgeBase.setOwnerId(userId);
             
             // 设置创建时间和更新时间
             LocalDateTime now = LocalDateTime.now();
@@ -74,10 +80,7 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
 
     @Override
     public void deleteKnowledgeBase(String knowledgeBaseId) {
-        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(knowledgeBaseId);
-        if (knowledgeBase == null) {
-            throw new BizException("知识库不存在: " + knowledgeBaseId);
-        }
+        KnowledgeBase knowledgeBase = knowledgeBaseAccessService.requireAccessibleKnowledgeBase(knowledgeBaseId, requireUserId());
         
         int result = knowledgeBaseMapper.deleteById(knowledgeBaseId);
         if (result <= 0) {
@@ -88,11 +91,8 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
     @Override
     public void updateKnowledgeBase(String knowledgeBaseId, UpdateKnowledgeBaseRequest request) {
         try {
-            // 查询现有的知识库
-            KnowledgeBase existingKnowledgeBase = knowledgeBaseMapper.selectById(knowledgeBaseId);
-            if (existingKnowledgeBase == null) {
-                throw new BizException("知识库不存在: " + knowledgeBaseId);
-            }
+            KnowledgeBase existingKnowledgeBase = knowledgeBaseAccessService
+                    .requireAccessibleKnowledgeBase(knowledgeBaseId, requireUserId());
             
             // 将现有 KnowledgeBase 转换为 KnowledgeBaseDTO
             KnowledgeBaseDTO knowledgeBaseDTO = knowledgeBaseConverter.toDTO(existingKnowledgeBase);
@@ -105,6 +105,7 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
             
             // 保留原有的 ID 和创建时间
             updatedKnowledgeBase.setId(existingKnowledgeBase.getId());
+            updatedKnowledgeBase.setOwnerId(existingKnowledgeBase.getOwnerId());
             updatedKnowledgeBase.setCreatedAt(existingKnowledgeBase.getCreatedAt());
             updatedKnowledgeBase.setUpdatedAt(LocalDateTime.now());
             
@@ -116,5 +117,13 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
         } catch (JsonProcessingException e) {
             throw new BizException("更新知识库时发生序列化错误: " + e.getMessage());
         }
+    }
+
+    private String requireUserId() {
+        Long userId = requestScopeData.getUserId();
+        if (userId == null) {
+            throw new BizException("用户未登录");
+        }
+        return String.valueOf(userId);
     }
 }

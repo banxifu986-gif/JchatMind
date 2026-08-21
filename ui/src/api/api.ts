@@ -258,6 +258,7 @@ export interface GetDocumentsResponse {
 
 export interface CreateDocumentResponse {
   documentId: string;
+  taskId: string | null;
 }
 
 export async function getDocumentsByKbId(
@@ -269,12 +270,14 @@ export async function getDocumentsByKbId(
 export async function uploadDocument(
   kbId: string,
   file: File,
+  idempotencyKey: string,
 ): Promise<CreateDocumentResponse> {
   const token = window.localStorage.getItem("jchatmind.token");
   const headers: Record<string, string> = {};
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
+  headers["Idempotency-Key"] = idempotencyKey;
 
   const formData = new FormData();
   formData.append("kbId", kbId);
@@ -296,6 +299,122 @@ export async function uploadDocument(
   }
 
   return apiResponse.data;
+}
+
+export type IngestionTaskStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "RETRYING"
+  | "FAILED"
+  | "DEAD_LETTER"
+  | "CANCELLED"
+  | "SUCCEEDED";
+
+export interface IngestionTaskVO {
+  taskId: string;
+  kbId: string;
+  documentId: string;
+  taskType: string;
+  status: IngestionTaskStatus;
+  attemptCount: number | null;
+  maxAttempts: number | null;
+  errorSummary: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type IngestionTaskProgressEvent = IngestionTaskVO & {
+  sequence?: number;
+};
+
+const INGESTION_SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL
+  || `${BASE_URL.replace(/\/api\/?$/, "")}/sse`;
+
+export async function subscribeIngestionTaskProgress(
+  taskId: string,
+  onEvent: (event: IngestionTaskProgressEvent) => void,
+  signal: AbortSignal,
+  lastEventId?: number,
+): Promise<void> {
+  const token = window.localStorage.getItem("jchatmind.token");
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (lastEventId !== undefined) {
+    headers["Last-Event-ID"] = String(lastEventId);
+  }
+
+  const response = await fetch(
+    `${INGESTION_SSE_BASE_URL}/ingestion/${encodeURIComponent(taskId)}`,
+    { headers, signal },
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error("摄入进度流不可用");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const consumeFrame = (frame: string) => {
+    let eventName = "message";
+    let eventId: number | undefined;
+    const dataLines: string[] = [];
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+      } else if (line.startsWith("id:")) {
+        const parsedId = Number(line.slice("id:".length).trim());
+        if (Number.isFinite(parsedId)) {
+          eventId = parsedId;
+        }
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice("data:".length).trim());
+      }
+    }
+    if (eventName !== "ingestion-progress" || dataLines.length === 0) {
+      return;
+    }
+    const event = JSON.parse(dataLines.join("\n")) as IngestionTaskProgressEvent;
+    if (event.sequence === undefined && eventId !== undefined) {
+      event.sequence = eventId;
+    }
+    onEvent(event);
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const frames = buffer.split(/\r?\n\r?\n/);
+    buffer = frames.pop() ?? "";
+    frames.filter((frame) => frame.trim()).forEach(consumeFrame);
+    if (done) {
+      if (buffer.trim()) {
+        consumeFrame(buffer);
+      }
+      return;
+    }
+  }
+}
+
+export async function getIngestionTask(
+  taskId: string,
+): Promise<IngestionTaskVO> {
+  return get<IngestionTaskVO>(`/ingestion/tasks/${taskId}`);
+}
+
+export async function cancelIngestionTask(taskId: string): Promise<void> {
+  return post<void>(`/ingestion/tasks/${taskId}/cancel`);
+}
+
+export async function retryIngestionTask(taskId: string): Promise<void> {
+  return post<void>(`/ingestion/tasks/${taskId}/retry`);
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {

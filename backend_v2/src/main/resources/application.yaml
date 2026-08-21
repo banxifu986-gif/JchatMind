@@ -52,7 +52,9 @@ spring:
         name: JchatMind MCP Server
         version: 1.0.0
         type: SYNC
+        protocol: STREAMABLE
       client:
+        enabled: ${MCP_CLIENT_ENABLED:false}
         initialized: false
         stdio:
           connections:

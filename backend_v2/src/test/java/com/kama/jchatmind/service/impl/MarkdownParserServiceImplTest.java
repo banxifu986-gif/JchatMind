@@ -1,9 +1,15 @@
 package com.kama.jchatmind.service.impl;
 
 import com.kama.jchatmind.service.MarkdownParserService;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -13,6 +19,48 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MarkdownParserServiceImplTest {
+
+    @Test
+    void shouldExtractPdfTextWithPageMetadata() throws Exception {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parsePdf(
+                new ByteArrayInputStream(twoPagePdf())
+        );
+
+        assertEquals(2, sections.size());
+        assertEquals(1, sections.get(0).getPageNumber());
+        assertEquals(2, sections.get(1).getPageNumber());
+        assertTrue(sections.get(0).getContent().contains("Page one"));
+    }
+
+    private byte[] twoPagePdf() throws Exception {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            for (String text : List.of("Page one", "Page two")) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+                try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+                    contentStream.beginText();
+                    contentStream.setFont(PDType1Font.HELVETICA, 12);
+                    contentStream.newLineAtOffset(72, 720);
+                    contentStream.showText(text);
+                    contentStream.endText();
+                }
+            }
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    @Test
+    void shouldRejectCorruptPdf() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> service.parsePdf(new ByteArrayInputStream(new byte[]{1, 2, 3}))
+        );
+    }
 
     @Test
     void shouldExtractMultiLevelHeadingStructure() {
@@ -96,5 +144,12 @@ class MarkdownParserServiceImplTest {
         assertEquals("项目 > 认证 > 1. 第一个问题？", sections.get(3).getParentContentPath());
         assertEquals("项目 > 认证 > 2. 第二个问题？", sections.get(4).getContentPath());
         assertEquals("项目 > 认证 > 2. 第二个问题？", sections.get(5).getParentContentPath());
+    }
+
+    @Test
+    void shouldNotKeepRequestMarkdownInSingletonState() {
+        for (Field field : MarkdownParserServiceImpl.class.getDeclaredFields()) {
+            assertFalse(field.getName().equals("originalMarkdownContent"));
+        }
     }
 }

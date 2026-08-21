@@ -18,6 +18,14 @@ public interface MarkdownParserService {
      * @return 标题和内容的列表，每个元素包含标题和该标题下的内容
      */
     List<MarkdownSection> parseMarkdown(InputStream inputStream);
+
+    default List<MarkdownSection> parseHtml(InputStream inputStream) {
+        return parseMarkdown(inputStream);
+    }
+
+    default List<MarkdownSection> parsePdf(InputStream inputStream) {
+        throw new UnsupportedOperationException("PDF 解析尚未配置");
+    }
     
     /**
      * Markdown 章节数据类
@@ -35,6 +43,22 @@ public interface MarkdownParserService {
         private SectionType sectionType;
         private int pathDepth;
         private int localContentLength;
+        private Integer pageNumber;
+
+        public MarkdownSection(
+                String title,
+                String content,
+                String contentPath,
+                String parentContentPath,
+                int headingLevel,
+                boolean hasChildren,
+                SectionType sectionType,
+                int pathDepth,
+                int localContentLength
+        ) {
+            this(title, content, contentPath, parentContentPath, headingLevel, hasChildren,
+                    sectionType, pathDepth, localContentLength, null);
+        }
     }
 
     enum SectionType {

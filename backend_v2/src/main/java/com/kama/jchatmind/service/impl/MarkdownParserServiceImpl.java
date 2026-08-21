@@ -1,6 +1,8 @@
 package com.kama.jchatmind.service.impl;
 
 import com.kama.jchatmind.service.MarkdownParserService;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import com.vladsch.flexmark.ast.Heading;
 import com.vladsch.flexmark.ext.tables.TableBlock;
 import com.vladsch.flexmark.parser.Parser;
@@ -13,16 +15,22 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 public class MarkdownParserServiceImpl implements MarkdownParserService {
 
+    private static final Pattern HTML_HEADING_PATTERN = Pattern.compile(
+            "(?is)<h([1-6])\\b[^>]*>(.*?)</h\\1\\s*>"
+    );
+
     private final Parser parser;
-    private String originalMarkdownContent;
 
     public MarkdownParserServiceImpl() {
         MutableDataSet options = new MutableDataSet();
@@ -32,11 +40,11 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
     @Override
     public List<MarkdownSection> parseMarkdown(InputStream inputStream) {
         try {
-            originalMarkdownContent = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-            Document document = parser.parse(originalMarkdownContent);
+            String markdown = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            Document document = parser.parse(markdown);
 
             List<MarkdownSection> sections = new ArrayList<>();
-            extractSections(document, sections);
+            extractSections(document, sections, markdown);
 
             log.info("解析 Markdown 完成，共提取 {} 个章节", sections.size());
             return sections;
@@ -46,7 +54,130 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
         }
     }
 
-    private void extractSections(Document document, List<MarkdownSection> sections) {
+    @Override
+    public List<MarkdownSection> parseHtml(InputStream inputStream) {
+        try {
+            String html = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            Matcher matcher = HTML_HEADING_PATTERN.matcher(html);
+            List<HtmlHeading> headings = new ArrayList<>();
+            while (matcher.find()) {
+                headings.add(new HtmlHeading(
+                        Integer.parseInt(matcher.group(1)),
+                        stripHtml(matcher.group(2)),
+                        matcher.start(),
+                        matcher.end()
+                ));
+            }
+            List<MarkdownSection> sections = new ArrayList<>();
+            List<String> currentPathTitles = new ArrayList<>();
+            List<Integer> currentPathLevels = new ArrayList<>();
+            for (int i = 0; i < headings.size(); i++) {
+                HtmlHeading heading = headings.get(i);
+                if (heading.title().isEmpty()) {
+                    continue;
+                }
+                while (!currentPathLevels.isEmpty()
+                        && currentPathLevels.get(currentPathLevels.size() - 1) >= heading.level()) {
+                    currentPathLevels.remove(currentPathLevels.size() - 1);
+                    currentPathTitles.remove(currentPathTitles.size() - 1);
+                }
+                String parentContentPath = currentPathTitles.isEmpty()
+                        ? null
+                        : String.join(" > ", currentPathTitles);
+                String contentPath = parentContentPath == null
+                        ? heading.title()
+                        : parentContentPath + " > " + heading.title();
+                int contentEnd = i + 1 < headings.size() ? headings.get(i + 1).start() : html.length();
+                String content = stripHtml(html.substring(heading.end(), contentEnd));
+                boolean hasChildren = i + 1 < headings.size()
+                        && headings.get(i + 1).level() > heading.level();
+                sections.add(new MarkdownSection(
+                        heading.title(),
+                        content,
+                        contentPath,
+                        parentContentPath,
+                        heading.level(),
+                        hasChildren,
+                        resolveSectionType(heading.title(), hasChildren),
+                        pathDepth(contentPath),
+                        content.length()
+                ));
+                currentPathLevels.add(heading.level());
+                currentPathTitles.add(heading.title());
+            }
+            log.info("解析 HTML 完成，共提取 {} 个章节", sections.size());
+            return sections;
+        } catch (Exception e) {
+            log.error("解析 HTML 失败", e);
+            throw new RuntimeException("解析 HTML 失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<MarkdownSection> parsePdf(InputStream inputStream) {
+        try (PDDocument document = PDDocument.load(inputStream)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            List<MarkdownSection> sections = new ArrayList<>();
+            for (int page = 1; page <= document.getNumberOfPages(); page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                String content = stripper.getText(document).trim();
+                if (content.isEmpty()) {
+                    continue;
+                }
+                String title = "第 " + page + " 页";
+                sections.add(new MarkdownSection(
+                        title,
+                        content,
+                        title,
+                        null,
+                        1,
+                        false,
+                        SectionType.LEAF_CONTENT,
+                        1,
+                        content.length(),
+                        page
+                ));
+            }
+            if (sections.isEmpty()) {
+                throw new IllegalArgumentException("PDF 未提取到文本");
+            }
+            log.info("解析 PDF 完成，共提取 {} 页文本", sections.size());
+            return sections;
+        } catch (IOException | RuntimeException e) {
+            log.error("解析 PDF 失败", e);
+            if (e instanceof IllegalArgumentException illegalArgumentException) {
+                throw illegalArgumentException;
+            }
+            throw new IllegalArgumentException("解析 PDF 失败", e);
+        }
+    }
+
+    private String stripHtml(String html) {
+        if (html == null) {
+            return "";
+        }
+        return html
+                .replaceAll("(?i)<br\\s*/?>", "\\n")
+                .replaceAll("(?s)<[^>]+>", " ")
+                .replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private record HtmlHeading(int level, String title, int start, int end) {
+    }
+
+    private void extractSections(
+            Document document,
+            List<MarkdownSection> sections,
+            String markdown
+    ) {
         List<Node> topLevelNodes = new ArrayList<>();
         Node child = document.getFirstChild();
         while (child != null) {
@@ -89,7 +220,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
                     break;
                 }
 
-                String content = extractNodeContent(nextNode);
+                String content = extractNodeContent(nextNode, markdown);
                 if (content != null && !content.trim().isEmpty()) {
                     if (contentBuilder.length() > 0) {
                         contentBuilder.append("\n");
@@ -175,18 +306,18 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
         return text.toString().trim();
     }
 
-    private String extractNodeContent(Node node) {
+    private String extractNodeContent(Node node, String markdown) {
         if (node == null) {
             return null;
         }
         if (node instanceof TableBlock) {
-            return extractTableMarkdown(node);
+            return extractTableMarkdown(node, markdown);
         }
         return extractPlainText(node);
     }
 
-    private String extractTableMarkdown(Node tableNode) {
-        if (originalMarkdownContent == null) {
+    private String extractTableMarkdown(Node tableNode, String markdown) {
+        if (markdown == null) {
             return extractPlainText(tableNode);
         }
 
@@ -195,8 +326,8 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             if (chars != null && chars.length() > 0) {
                 int startOffset = chars.getStartOffset();
                 int endOffset = chars.getEndOffset();
-                if (startOffset >= 0 && endOffset <= originalMarkdownContent.length() && startOffset < endOffset) {
-                    return originalMarkdownContent.substring(startOffset, endOffset).trim();
+                if (startOffset >= 0 && endOffset <= markdown.length() && startOffset < endOffset) {
+                    return markdown.substring(startOffset, endOffset).trim();
                 }
             }
             return extractPlainText(tableNode);

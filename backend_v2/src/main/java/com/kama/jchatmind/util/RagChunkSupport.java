@@ -43,6 +43,9 @@ public final class RagChunkSupport {
         metadata.put("sectionType", section.getSectionType() == null ? null : section.getSectionType().name());
         metadata.put("pathDepth", section.getPathDepth());
         metadata.put("localContentLength", section.getLocalContentLength());
+        if (section.getPageNumber() != null) {
+            metadata.put("pageNumber", section.getPageNumber());
+        }
         return metadata;
     }
 

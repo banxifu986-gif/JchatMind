@@ -34,6 +34,21 @@ public class RabbitMQConfig {
     public static final int EMAIL_MAX_RETRY_COUNT = 3;
     public static final int EMAIL_RETRY_TTL_MILLIS = 30_000;
 
+    public static final String INGESTION_EXCHANGE = "ingestion.exchange";
+    public static final String INGESTION_QUEUE = "ingestion.queue";
+    public static final String INGESTION_ROUTING_KEY = "ingestion.submit";
+
+    public static final String INGESTION_RETRY_EXCHANGE = "ingestion.retry.exchange";
+    public static final String INGESTION_RETRY_QUEUE = "ingestion.retry.queue";
+    public static final String INGESTION_RETRY_ROUTING_KEY = "ingestion.retry";
+
+    public static final String INGESTION_DLX = "ingestion.dlx";
+    public static final String INGESTION_DLQ = "ingestion.dlq";
+    public static final String INGESTION_DLQ_ROUTING_KEY = "ingestion.dlq";
+
+    public static final int INGESTION_MAX_RETRY_COUNT = 3;
+    public static final int INGESTION_RETRY_TTL_MILLIS = 30_000;
+
     @Bean
     public DirectExchange emailExchange() {
         return new DirectExchange(EMAIL_EXCHANGE);
@@ -94,6 +109,68 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(emailDlq())
                 .to(emailDlx())
                 .with(EMAIL_DLQ_ROUTING_KEY);
+    }
+
+    @Bean
+    public DirectExchange ingestionExchange() {
+        return new DirectExchange(INGESTION_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange ingestionRetryExchange() {
+        return new DirectExchange(INGESTION_RETRY_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange ingestionDlx() {
+        return new DirectExchange(INGESTION_DLX);
+    }
+
+    @Bean
+    public Queue ingestionQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", INGESTION_DLX);
+        args.put("x-dead-letter-routing-key", INGESTION_DLQ_ROUTING_KEY);
+        return QueueBuilder.durable(INGESTION_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue ingestionRetryQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", INGESTION_EXCHANGE);
+        args.put("x-dead-letter-routing-key", INGESTION_ROUTING_KEY);
+        args.put("x-message-ttl", INGESTION_RETRY_TTL_MILLIS);
+        return QueueBuilder.durable(INGESTION_RETRY_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue ingestionDlq() {
+        return QueueBuilder.durable(INGESTION_DLQ).build();
+    }
+
+    @Bean
+    public Binding ingestionBinding() {
+        return BindingBuilder.bind(ingestionQueue())
+                .to(ingestionExchange())
+                .with(INGESTION_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding ingestionRetryBinding() {
+        return BindingBuilder.bind(ingestionRetryQueue())
+                .to(ingestionRetryExchange())
+                .with(INGESTION_RETRY_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding ingestionDlqBinding() {
+        return BindingBuilder.bind(ingestionDlq())
+                .to(ingestionDlx())
+                .with(INGESTION_DLQ_ROUTING_KEY);
     }
 
     @Bean

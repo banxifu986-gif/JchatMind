@@ -1,0 +1,166 @@
+package com.kama.jchatmind.mcp;
+
+import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
+import com.kama.jchatmind.exception.BizException;
+import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.service.KnowledgeBaseAccessService;
+import com.kama.jchatmind.service.RagService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+class McpKnowledgeToolTest {
+
+    @Test
+    void shouldDenyPrivateKnowledgeRetrievalWithoutCallerIdentity() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                mock(KnowledgeBaseAccessService.class),
+                mock(McpPrincipalAccessService.class)
+        );
+
+        String result = tool.search("私有知识", List.of("kb-private"));
+
+        assertThat(result).isEqualTo("当前 MCP 调用未绑定用户身份，禁止访问私有知识库。");
+        verifyNoInteractions(ragService, knowledgeBaseMapper);
+    }
+
+    @Test
+    void shouldRetrieveOnlyKnowledgeBasesOwnedByResolvedCaller() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class)
+        );
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(new McpCallerIdentity(11L, 7L));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            RagRetrievalResult result = new RagRetrievalResult();
+            result.setKbId("kb-own");
+            result.setContent("仅属于用户 7 的内容");
+            result.setMetadata("{\"sourceName\":\"owner.md\",\"contentPath\":\"# Owner\"}");
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
+                    .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("用户 7 知识库").build()));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of(result));
+
+            String response = tool.search("查询", List.of("kb-own"));
+
+            assertThat(response).contains("知识库: 用户 7 知识库").contains("仅属于用户 7 的内容");
+            verify(knowledgeBaseAccessService).requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7");
+            verify(ragService).retrieve(List.of("kb-own"), "查询", 5);
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldAuditAllowedKnowledgeQueryWithRequestCorrelationId() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        McpKnowledgeTool tool = createAuditedTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                principalAccessService
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-123");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of());
+
+            tool.search("查询", List.of("kb-own"));
+
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    "request-123",
+                    "ALLOW",
+                    List.of("kb-own"),
+                    "retrieved"
+            );
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldAuditDeniedKnowledgeQueryWithoutRetrievingForeignKnowledge() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        McpKnowledgeTool tool = createAuditedTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                principalAccessService
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-456");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-foreign"), "7"))
+                    .thenThrow(new BizException("无权访问知识库"));
+
+            String response = tool.search("查询", List.of("kb-foreign"));
+
+            assertThat(response).isEqualTo("当前 MCP 调用未绑定用户身份，禁止访问私有知识库。");
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    "request-456",
+                    "DENY",
+                    List.of("kb-foreign"),
+                    "knowledge_base_access_denied"
+            );
+            verifyNoInteractions(ragService);
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    private McpKnowledgeTool createAuditedTool(
+            RagService ragService,
+            KnowledgeBaseMapper knowledgeBaseMapper,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            McpPrincipalAccessService principalAccessService
+    ) {
+        try {
+            return McpKnowledgeTool.class.getConstructor(
+                    RagService.class,
+                    KnowledgeBaseMapper.class,
+                    KnowledgeBaseAccessService.class,
+                    McpPrincipalAccessService.class
+            ).newInstance(ragService, knowledgeBaseMapper, knowledgeBaseAccessService, principalAccessService);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("McpKnowledgeTool 必须接收 McpPrincipalAccessService 以记录检索审计", e);
+        }
+    }
+}

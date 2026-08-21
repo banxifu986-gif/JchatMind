@@ -39,8 +39,9 @@ public class DocumentController {
     @PostMapping("/documents/upload")
     public ApiResponse<CreateDocumentResponse> uploadDocument(
             @RequestParam("kbId") String kbId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @RequestParam("file") MultipartFile file) {
-        return ApiResponse.success(documentFacadeService.uploadDocument(kbId, file));
+        return ApiResponse.success(documentFacadeService.uploadDocument(kbId, idempotencyKey, file));
     }
 
     // 删除文档

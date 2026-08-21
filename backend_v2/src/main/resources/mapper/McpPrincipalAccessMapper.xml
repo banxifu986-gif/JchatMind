@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.McpPrincipalAccessMapper">
+
+    <select id="selectActiveCallerByCredentialFingerprint"
+            resultType="com.kama.jchatmind.mcp.McpCallerIdentity">
+        SELECT
+            p.principal_id AS "principalId",
+            g.user_id AS "userId"
+        FROM mcp_principal_credential c
+        JOIN mcp_principal p ON p.principal_id = c.principal_id
+        JOIN mcp_principal_user_grant g ON g.principal_id = p.principal_id
+        WHERE c.credential_fingerprint = #{credentialFingerprint}
+          AND p.status = 'ACTIVE'
+          AND c.status = 'ACTIVE'
+          AND c.revoked_at IS NULL
+          AND c.valid_from &lt;= CURRENT_TIMESTAMP
+          AND (c.expires_at IS NULL OR c.expires_at &gt; CURRENT_TIMESTAMP)
+          AND g.revoked_at IS NULL
+        LIMIT 1
+    </select>
+
+    <insert id="insertAccessAudit">
+        INSERT INTO mcp_access_audit (
+            principal_id,
+            user_id,
+            action,
+            decision,
+            target_kb_ids,
+            correlation_id,
+            reason_code,
+            request_metadata
+        ) VALUES (
+            #{principalId},
+            #{userId},
+            #{action},
+            #{decision},
+            CAST(#{targetKbIdsJson} AS jsonb),
+            #{correlationId},
+            #{reasonCode},
+            CAST(#{requestMetadataJson} AS jsonb)
+        )
+    </insert>
+</mapper>
