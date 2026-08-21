@@ -90,7 +90,7 @@ public class McpKnowledgeTool {
                 mcpPrincipalAccessService.recordKnowledgeQuery(
                         caller,
                         resolveCorrelationId(),
-                        "ALLOW",
+                        route.route() == RagRouteDecision.Route.ABSTAIN ? "DENY" : "ALLOW",
                         accessibleKbIds,
                         "route_" + route.route().name().toLowerCase()
                 );

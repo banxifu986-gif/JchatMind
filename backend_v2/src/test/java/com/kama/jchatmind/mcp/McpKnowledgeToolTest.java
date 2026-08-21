@@ -148,19 +148,21 @@ class McpKnowledgeToolTest {
     }
 
     @Test
-    void shouldRejectExternalLookupBeforePrivateRetrieval() {
+    void shouldAuditExternalLookupDeniedBeforePrivateRetrieval() {
         RagService ragService = mock(RagService.class);
         KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
         McpKnowledgeTool tool = new McpKnowledgeTool(
                 ragService,
                 mock(KnowledgeBaseMapper.class),
                 knowledgeBaseAccessService,
-                mock(McpPrincipalAccessService.class),
+                principalAccessService,
                 new RagRouter()
         );
         McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-external");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         try {
             when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
@@ -170,6 +172,13 @@ class McpKnowledgeToolTest {
 
             assertThat(response).contains("许可");
             verifyNoInteractions(ragService);
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    "request-external",
+                    "DENY",
+                    List.of("kb-own"),
+                    "route_abstain"
+            );
         } finally {
             RequestContextHolder.resetRequestAttributes();
         }
