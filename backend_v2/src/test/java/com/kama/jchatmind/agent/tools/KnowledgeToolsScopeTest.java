@@ -1,6 +1,8 @@
 package com.kama.jchatmind.agent.tools;
 
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
+import com.kama.jchatmind.model.dto.RagRetrievalContext;
+import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
 import org.junit.jupiter.api.Test;
@@ -42,5 +44,53 @@ class KnowledgeToolsScopeTest {
 
         assertThat(result).isEmpty();
         verify(ragService).retrieve(List.of("kb-2"), "问题", null, 3);
+    }
+
+    @Test
+    void shouldSearchAllAgentKnowledgeBasesWhenKbIdsAreOmitted() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalContext previousContext = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("旧文档")
+                .build();
+        when(sessionService.getRetrievalContext("session-1", "7")).thenReturn(previousContext);
+        when(ragService.retrieve(List.of("kb-1", "kb-2"), "新主题", previousContext, 3))
+                .thenReturn(List.of());
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(
+                        KnowledgeBaseDTO.builder().id("kb-1").build(),
+                        KnowledgeBaseDTO.builder().id("kb-2").build()
+                ));
+
+        tool.knowledgeQuery("新主题", null);
+
+        verify(ragService).retrieve(List.of("kb-1", "kb-2"), "新主题", previousContext, 3);
+    }
+
+    @Test
+    void shouldNotPersistLowConfidenceTopResultAsSessionContext() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalResult lowConfidence = new RagRetrievalResult();
+        lowConfidence.setChunkId("chunk-1");
+        lowConfidence.setKbId("kb-1");
+        lowConfidence.setMetadata("{\"sourceName\":\"无关文档\"}");
+        lowConfidence.setRrfScore(0.01D);
+        lowConfidence.setRank(1);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(lowConfidence));
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("问题", null);
+
+        org.mockito.Mockito.verify(sessionService, org.mockito.Mockito.never())
+                .updateRetrievalContext(
+                        org.mockito.ArgumentMatchers.eq("session-1"),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq("7")
+                );
     }
 }

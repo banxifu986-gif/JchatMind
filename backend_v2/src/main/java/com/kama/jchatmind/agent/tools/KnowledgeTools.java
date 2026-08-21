@@ -20,6 +20,10 @@ import java.util.stream.Collectors;
 @Component
 public class KnowledgeTools implements Tool {
 
+    private static final double MIN_CONTEXT_RRF_SCORE = 0.02D;
+    private static final double MIN_CONTEXT_RRF_GAP = 0.002D;
+    private static final double MAX_CONTEXT_VECTOR_DISTANCE = 0.35D;
+
     private final RagService ragService;
     private final ChatSessionFacadeService chatSessionFacadeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -86,10 +90,29 @@ public class KnowledgeTools implements Tool {
         if (!StringUtils.hasText(chatSessionId) || !StringUtils.hasText(userId) || results == null || results.isEmpty()) {
             return;
         }
+        if (!isConfidentResult(results)) {
+            return;
+        }
         RagRetrievalContext context = buildContextFromTopResult(results.get(0));
         if (context != null && context.hasContext()) {
             chatSessionFacadeService.updateRetrievalContext(chatSessionId, context, userId);
         }
+    }
+
+    private boolean isConfidentResult(List<RagRetrievalResult> results) {
+        RagRetrievalResult top = results.get(0);
+        if (top == null) {
+            return false;
+        }
+        if (top.getRrfScore() != null) {
+            double nextScore = results.size() > 1 && results.get(1) != null
+                    && results.get(1).getRrfScore() != null
+                    ? results.get(1).getRrfScore()
+                    : 0D;
+            return top.getRrfScore() >= MIN_CONTEXT_RRF_SCORE
+                    && (results.size() == 1 || top.getRrfScore() - nextScore >= MIN_CONTEXT_RRF_GAP);
+        }
+        return top.getDistance() != null && top.getDistance() <= MAX_CONTEXT_VECTOR_DISTANCE;
     }
 
     private RagRetrievalContext buildContextFromTopResult(RagRetrievalResult result) {
@@ -148,11 +171,6 @@ public class KnowledgeTools implements Tool {
             return List.of();
         }
         if (CollectionUtils.isEmpty(kbIds)) {
-            if (retrievalContext != null
-                    && StringUtils.hasText(retrievalContext.getKbId())
-                    && allowedKbMap.containsKey(retrievalContext.getKbId())) {
-                return List.of(retrievalContext.getKbId());
-            }
             return new ArrayList<>(allowedKbMap.keySet());
         }
         return kbIds.stream()
