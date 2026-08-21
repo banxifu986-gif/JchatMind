@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
 
 final class RagFastRegressionEvaluator {
 
@@ -75,6 +76,9 @@ final class RagFastRegressionEvaluator {
         double abstentionAccuracy = abstentionCases.stream()
                 .filter(item -> replays.get(item.caseId()).abstained())
                 .count() / (double) abstentionCases.size();
+        long p95LatencyMs = p95Latency(replays.values().stream()
+                .map(RagFastRegressionReplay::latencyMs)
+                .toList());
 
         return new RagFastRegressionReport(
                 dataset.manifest().datasetId(),
@@ -90,6 +94,7 @@ final class RagFastRegressionEvaluator {
                 contextPrecisionAt10,
                 contextRecallAt10,
                 abstentionAccuracy,
+                p95LatencyMs,
                 RagAsReport.disabled(contextPrecisionAt5, contextRecallAt5)
         );
     }
@@ -111,6 +116,9 @@ final class RagFastRegressionEvaluator {
             for (String line : new String(inputStream.readAllBytes(), StandardCharsets.UTF_8).split("\\R")) {
                 if (StringUtils.hasText(line)) {
                     RagFastRegressionReplay replay = OBJECT_MAPPER.readValue(line, RagFastRegressionReplay.class);
+                    if (replay.latencyMs() <= 0) {
+                        throw new IllegalStateException("replay 延迟必须为正数: " + replay.caseId());
+                    }
                     if (replays.putIfAbsent(replay.caseId(), replay) != null) {
                         throw new IllegalStateException("replay caseId 重复: " + replay.caseId());
                     }
@@ -145,5 +153,10 @@ final class RagFastRegressionEvaluator {
             }
         }
         return 0D;
+    }
+
+    private static long p95Latency(List<Long> latencyMs) {
+        List<Long> sorted = latencyMs.stream().sorted(Comparator.naturalOrder()).toList();
+        return sorted.get((int) Math.ceil(sorted.size() * 0.95D) - 1);
     }
 }

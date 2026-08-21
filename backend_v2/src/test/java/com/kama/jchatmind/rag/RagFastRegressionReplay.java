@@ -5,6 +5,7 @@ import java.util.List;
 record RagFastRegressionReplay(
         String caseId,
         List<String> topChunkIds,
-        boolean abstained
+        boolean abstained,
+        long latencyMs
 ) {
 }

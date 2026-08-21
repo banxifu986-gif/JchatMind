@@ -42,5 +42,6 @@ class RagFastRegressionEvaluatorTest {
         String reportJson = Files.readString(reportPath);
         assertTrue(reportJson.contains("fixture-fast-v1"));
         assertTrue(reportJson.contains("\"ragas\""));
+        assertTrue(reportJson.contains("\"p95LatencyMs\" : 27"));
     }
 }

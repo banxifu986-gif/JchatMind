@@ -16,6 +16,7 @@ record RagFastRegressionReport(
         double contextPrecisionAt10,
         double contextRecallAt10,
         double abstentionAccuracy,
+        long p95LatencyMs,
         RagAsReport ragas
 ) {
 }
