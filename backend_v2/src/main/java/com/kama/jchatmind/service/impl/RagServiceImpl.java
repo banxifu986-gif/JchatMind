@@ -179,7 +179,7 @@ public class RagServiceImpl implements RagService {
                 : rewritten.getRetrievalQueries();
         List<String> retrievalQuerySources = rewritten.getRetrievalQuerySources() == null
                 || rewritten.getRetrievalQuerySources().size() != retrievalQueries.size()
-                ? Collections.nCopies(retrievalQueries.size(), "unknown")
+                ? Collections.nCopies(retrievalQueries.size(), "original")
                 : rewritten.getRetrievalQuerySources();
         Map<String, String> embeddingLiteralCache = new LinkedHashMap<>();
 

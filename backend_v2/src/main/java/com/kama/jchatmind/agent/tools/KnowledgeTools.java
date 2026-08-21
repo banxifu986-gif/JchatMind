@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.rag.RagRouteDecision;
+import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -26,6 +29,7 @@ public class KnowledgeTools implements Tool {
 
     private final RagService ragService;
     private final ChatSessionFacadeService chatSessionFacadeService;
+    private final RagRouter ragRouter;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String userId;
@@ -33,15 +37,25 @@ public class KnowledgeTools implements Tool {
     private Map<String, KnowledgeBaseDTO> allowedKbMap;
 
     public KnowledgeTools(RagService ragService, ChatSessionFacadeService chatSessionFacadeService) {
+        this(ragService, chatSessionFacadeService, new RagRouter());
+    }
+
+    @Autowired
+    public KnowledgeTools(
+            RagService ragService,
+            ChatSessionFacadeService chatSessionFacadeService,
+            RagRouter ragRouter
+    ) {
         this.ragService = ragService;
         this.chatSessionFacadeService = chatSessionFacadeService;
+        this.ragRouter = ragRouter;
         this.userId = null;
         this.chatSessionId = null;
         this.allowedKbMap = Map.of();
     }
 
     public KnowledgeTools fork(String userId, String chatSessionId, List<KnowledgeBaseDTO> allowedKbs) {
-        KnowledgeTools tool = new KnowledgeTools(ragService, chatSessionFacadeService);
+        KnowledgeTools tool = new KnowledgeTools(ragService, chatSessionFacadeService, ragRouter);
         tool.userId = userId;
         tool.chatSessionId = chatSessionId;
         tool.allowedKbMap = buildAllowedKbMap(allowedKbs);
@@ -74,7 +88,18 @@ public class KnowledgeTools implements Tool {
             return "未找到可检索的知识库，请检查当前 Agent 是否已配置可访问知识库，或传入的 kbIds 是否都在授权范围内。";
         }
         retrievalContext = alignRetrievalContext(retrievalContext, kbIds, effectiveKbIds);
+        RagRouteDecision route = ragRouter.decide(query, effectiveKbIds, true, false, true);
+        if (route.route() == RagRouteDecision.Route.ABSTAIN
+                || route.route() == RagRouteDecision.Route.CLARIFY) {
+            return route.reason();
+        }
+        if (route.route() == RagRouteDecision.Route.DIRECT) {
+            return route.reason();
+        }
         List<RagRetrievalResult> results = ragService.retrieve(effectiveKbIds, query, retrievalContext, 3);
+        if (results == null || results.isEmpty()) {
+            return "当前授权知识范围内没有足够证据，无法可靠回答。";
+        }
         updateRetrievalContext(results);
         return formatResults(results);
     }
@@ -90,30 +115,41 @@ public class KnowledgeTools implements Tool {
         if (!StringUtils.hasText(chatSessionId) || !StringUtils.hasText(userId) || results == null || results.isEmpty()) {
             return;
         }
-        if (!isConfidentResult(results)) {
+        RagRetrievalResult confidentResult = findConfidentResult(results);
+        if (confidentResult == null) {
             return;
         }
-        RagRetrievalContext context = buildContextFromTopResult(results.get(0));
+        RagRetrievalContext context = buildContextFromTopResult(confidentResult);
         if (context != null && context.hasContext()) {
             chatSessionFacadeService.updateRetrievalContext(chatSessionId, context, userId);
         }
     }
 
-    private boolean isConfidentResult(List<RagRetrievalResult> results) {
+    private RagRetrievalResult findConfidentResult(List<RagRetrievalResult> results) {
+        boolean hasRrfSignal = results.stream()
+                .anyMatch(result -> result != null && result.getRrfScore() != null);
+        if (hasRrfSignal) {
+            if (results.stream().anyMatch(result -> result == null || result.getRrfScore() == null)) {
+                return null;
+            }
+            List<RagRetrievalResult> rankedByRrf = results.stream()
+                    .sorted(java.util.Comparator.comparing(RagRetrievalResult::getRrfScore).reversed())
+                    .toList();
+            RagRetrievalResult top = rankedByRrf.get(0);
+            double nextScore = rankedByRrf.size() > 1 ? rankedByRrf.get(1).getRrfScore() : 0D;
+            if (top.getRrfScore() < MIN_CONTEXT_RRF_SCORE
+                    || (rankedByRrf.size() > 1 && top.getRrfScore() - nextScore < MIN_CONTEXT_RRF_GAP)) {
+                return null;
+            }
+            return top;
+        }
+
         RagRetrievalResult top = results.get(0);
         if (top == null) {
-            return false;
-        }
-        if (top.getRrfScore() != null) {
-            if (results.size() > 1 && (results.get(1) == null || results.get(1).getRrfScore() == null)) {
-                return false;
-            }
-            double nextScore = results.size() > 1 ? results.get(1).getRrfScore() : 0D;
-            return top.getRrfScore() >= MIN_CONTEXT_RRF_SCORE
-                    && (results.size() == 1 || top.getRrfScore() - nextScore >= MIN_CONTEXT_RRF_GAP);
+            return null;
         }
         Double vectorDistance = top.getVectorDistance() != null ? top.getVectorDistance() : top.getDistance();
-        return vectorDistance != null && vectorDistance <= MAX_CONTEXT_VECTOR_DISTANCE;
+        return vectorDistance != null && vectorDistance <= MAX_CONTEXT_VECTOR_DISTANCE ? top : null;
     }
 
     private RagRetrievalContext buildContextFromTopResult(RagRetrievalResult result) {
@@ -136,7 +172,7 @@ public class KnowledgeTools implements Tool {
         try {
             JsonNode root = objectMapper.readTree(metadata);
             JsonNode node = root.get(fieldName);
-            return node != null && node.isTextual() ? node.asText() : "";
+            return node != null && node.isValueNode() ? node.asText() : "";
         } catch (Exception e) {
             return "";
         }
@@ -233,10 +269,13 @@ public class KnowledgeTools implements Tool {
         String kbName = resolveKnowledgeBaseName(result.getKbId());
         String sourceName = extractMetadataText(result.getMetadata(), "sourceName");
         String contentPath = extractMetadataText(result.getMetadata(), "contentPath");
+        String pageNumber = extractMetadataText(result.getMetadata(), "pageNumber");
         String content = StringUtils.hasText(result.getContent()) ? result.getContent().trim() : "";
         return "知识库: " + kbName + "\n"
                 + "来源: " + defaultText(sourceName) + "\n"
                 + "路径: " + defaultText(contentPath) + "\n"
+                + "引用: " + defaultText(result.getChunkId())
+                + (StringUtils.hasText(pageNumber) ? " | 页码: " + pageNumber : "") + "\n"
                 + "内容: " + content;
     }
 

@@ -44,6 +44,20 @@ class QueryRewriteServiceImplTest {
     }
 
     @Test
+    void shouldKeepOriginalProvenanceWhenStandaloneQueryAddsNoContext() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        QueryRewriteResult result = service.rewrite(
+                List.of("kb-1"),
+                "这个",
+                RagRetrievalContext.builder().kbId("kb-1").build()
+        );
+
+        assertEquals(List.of("这个"), result.getRetrievalQueries());
+        assertEquals(List.of("original"), result.getRetrievalQuerySources());
+    }
+
+    @Test
     void shouldNotResolveChatClientRegistryDuringConstruction() {
         AtomicInteger resolutionCount = new AtomicInteger();
         ObjectProvider<ChatClientRegistry> chatClientRegistryProvider = new CountingObjectProvider<>(resolutionCount, null);

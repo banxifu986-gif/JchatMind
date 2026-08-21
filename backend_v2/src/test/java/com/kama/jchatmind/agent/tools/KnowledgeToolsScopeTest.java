@@ -42,7 +42,7 @@ class KnowledgeToolsScopeTest {
 
         String result = tool.knowledgeQuery("问题", List.of("foreign-kb", "kb-2"));
 
-        assertThat(result).isEmpty();
+        assertThat(result).contains("没有足够证据");
         verify(ragService).retrieve(List.of("kb-2"), "问题", null, 3);
     }
 
@@ -170,6 +170,35 @@ class KnowledgeToolsScopeTest {
     }
 
     @Test
+    void shouldUseHighestRrfEvidenceWhenRerankOrderDiffers() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRetrievalResult rerankTop = new RagRetrievalResult();
+        rerankTop.setChunkId("chunk-low");
+        rerankTop.setKbId("kb-1");
+        rerankTop.setMetadata("{\"sourceName\":\"低 RRF 文档\"}");
+        rerankTop.setRrfScore(0.01D);
+        RagRetrievalResult rrfTop = new RagRetrievalResult();
+        rrfTop.setChunkId("chunk-high");
+        rrfTop.setKbId("kb-1");
+        rrfTop.setMetadata("{\"sourceName\":\"高 RRF 文档\"}");
+        rrfTop.setRrfScore(0.04D);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3))
+                .thenReturn(List.of(rerankTop, rrfTop));
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("问题", null);
+
+        org.mockito.Mockito.verify(sessionService).updateRetrievalContext(
+                org.mockito.ArgumentMatchers.eq("session-1"),
+                org.mockito.ArgumentMatchers.argThat(context -> "高 RRF 文档".equals(context.getSourceName())),
+                org.mockito.ArgumentMatchers.eq("7")
+        );
+    }
+
+    @Test
     void shouldHonorExplicitSessionKnowledgeBaseScopeWithoutSourceContext() {
         RagService ragService = mock(RagService.class);
         ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
@@ -202,5 +231,62 @@ class KnowledgeToolsScopeTest {
         tool.knowledgeQuery("问题", null);
 
         verify(ragService).retrieve(List.of("kb-1"), "问题", null, 3);
+    }
+
+    @Test
+    void shouldRejectExternalLookupBeforeRetrievalWhenPermissionIsMissing() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        String result = tool.knowledgeQuery("查询最新官方文档", null);
+
+        assertThat(result).contains("许可");
+        org.mockito.Mockito.verifyNoInteractions(ragService);
+    }
+
+    @Test
+    void shouldSkipRetrievalForDirectConversationRoute() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        String result = tool.knowledgeQuery("你好", null);
+
+        assertThat(result).contains("闲聊无需检索");
+        org.mockito.Mockito.verifyNoInteractions(ragService);
+    }
+
+    @Test
+    void shouldRefuseWhenAuthorizedRetrievalReturnsNoEvidence() {
+        RagService ragService = mock(RagService.class);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of());
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        String result = tool.knowledgeQuery("问题", null);
+
+        assertThat(result).contains("没有足够证据");
+    }
+
+    @Test
+    void shouldFormatStableCitationForRetrievedEvidence() {
+        RagService ragService = mock(RagService.class);
+        RagRetrievalResult result = new RagRetrievalResult();
+        result.setChunkId("chunk-1");
+        result.setKbId("kb-1");
+        result.setContent("证据正文");
+        result.setDistance(0.2D);
+        result.setMetadata("{\"sourceName\":\"设计文档.pdf\",\"contentPath\":\"第 2 页\",\"pageNumber\":2}");
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(result));
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").name("研发知识库").build()));
+
+        String response = tool.knowledgeQuery("问题", null);
+
+        assertThat(response)
+                .contains("引用: chunk-1")
+                .contains("页码: 2")
+                .contains("证据正文");
     }
 }

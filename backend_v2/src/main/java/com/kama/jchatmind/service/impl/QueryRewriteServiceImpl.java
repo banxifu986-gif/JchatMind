@@ -204,7 +204,8 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 && context != null
                 && context.hasContext()) {
             String standalone = buildStandaloneFollowUpQuery(context, sanitizedQuery);
-            if (StringUtils.hasText(standalone)) {
+            if (StringUtils.hasText(standalone)
+                    && !normalize(standalone).equals(normalize(sanitizedQuery))) {
                 queries.add(standalone);
                 sources.add("standalone");
             }
