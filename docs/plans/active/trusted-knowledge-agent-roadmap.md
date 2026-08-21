@@ -233,7 +233,9 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 该用例覆盖“外部 embedding 短暂不可用后自动恢复”的端到端边界，不外推为所有外部服务故障、多实例 SSE、持久化事件恢复或图片/OCR 的验收。
 
-### 5.6 G2 RAG 优化实施次序（尚未开始）
+### 5.6 G2 RAG 优化实施次序（局部先行，主链路尚未完成）
+
+**2026-08-21 局部实现记录。** 按 G2-3a 的候选排序契约，`RagServiceImpl` 现已在 RRF 与 `HARD` 过滤后将可 rerank 候选限制为前 50 个，并把原先随排名线性增长的 penalty 封顶为 `0.15`；预算外候选保留 RRF 顺序。这只修复深层精确候选无法翻盘和 rerank 无界计算两个局部边界，不代表同源通道组内去重/校准、retrieval context 置信门禁或 G2-0/G2-1/G2-2/G2-3/G2-4 已完成。`RagServiceImplTest.shouldLetDeepExactCandidateRiseWithinBoundedRerankBudget` 已先 RED 后 GREEN，固定第 35 名精确候选可在预算内升至首位。
 
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
@@ -243,7 +245,7 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 4. `RagRouter` 目前没有生产调用点；单元测试通过只证明分类规则，不证明授权范围、外部许可、拒答和实际召回链路正确。
 5. 多格式摄入已覆盖 Markdown/HTML/PDF 文本，但没有图片、表格或公式的独立资产、相对位置和跨元素关系，无法形成 RAG-Anything 所强调的可定位多模态证据。
 6. 未传 `kbIds` 时，`KnowledgeTools` 会以会话上次命中的 `retrievalContext.kbId` 隐式收窄可搜 KB。这与“默认搜索 Agent 所有可访问 KB、会话仅提供偏置”的产品语义不同，会令跨 KB 的 topic switch 在改写器识别前已经不可能召回。安全收窄本身正确，但默认范围必须显式定义，不能由上一条结果悄然决定。
-7. `RERANK_CANDIDATE_LIMIT` 未在 RRF 后实际截断，线性 rank penalty 会使深层候选即使词面和结构信号全满也永远无法升到 Top-1。多通道扩展后，该排序器并不具有预期的“重新排序”能力。
+7. 同源标题通道与多 query 向量通道仍未完成组内去重/校准；当前仅已落实 RRF 后 50 个候选的 rerank 预算和有界 rank penalty，尚未证明重复通道不会放大投票。
 8. 有会话上下文的短新实体/标题可能被判为 `FOLLOW_UP`，进而关闭所有标题通道；任意 `/` 或 `\\` 又可能被判为导航并触发无上限的 title/path 候选扫描，还可能误施加 `HARD` 约束。
 9. `KnowledgeTools` 在任何非空 Top-1 后都会覆盖 session retrieval context；低相关或无答案检索会把错误来源写回下一轮，形成 context 自我强化。
 

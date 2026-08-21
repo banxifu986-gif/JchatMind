@@ -33,7 +33,7 @@ import java.util.function.Function;
 @Service
 @Slf4j
 public class RagServiceImpl implements RagService {
-    private static final int RERANK_CANDIDATE_LIMIT = 10;
+    private static final int RERANK_CANDIDATE_LIMIT = 50;
     private static final int TITLE_MATCH_CANDIDATE_LIMIT = 20;
     private static final int TITLE_CONTAINS_CANDIDATE_LIMIT = 10;
     private static final int TITLE_KEYWORD_CANDIDATE_LIMIT = 10;
@@ -45,6 +45,7 @@ public class RagServiceImpl implements RagService {
     private static final double BM25_K1 = 1.2D;
     private static final double BM25_B = 0.75D;
     private static final double RERANK_RANK_PENALTY = 0.03D;
+    private static final double MAX_RERANK_RANK_PENALTY = 0.15D;
     private static final double TITLE_TRIGRAM_MIN_SCORE = 0.18D;
     private static final int MIN_CONTENT_SUBSTRING_LENGTH = 8;
     private static final int MIN_PATH_SUBSTRING_LENGTH = 4;
@@ -713,7 +714,10 @@ public class RagServiceImpl implements RagService {
             return candidates;
         }
 
-        List<ScoredRagResult> scoredResults = candidates.stream()
+        int rerankCandidateCount = Math.min(RERANK_CANDIDATE_LIMIT, candidates.size());
+        List<RagRetrievalResult> rerankCandidates = candidates.subList(0, rerankCandidateCount);
+        List<RagRetrievalResult> remainingCandidates = candidates.subList(rerankCandidateCount, candidates.size());
+        List<ScoredRagResult> scoredResults = rerankCandidates.stream()
                 .map(result -> new ScoredRagResult(result, rerankScore(normalizedQuery, context, result)))
                 .toList();
 
@@ -734,9 +738,13 @@ public class RagServiceImpl implements RagService {
         for (int i = 0; i < reranked.size(); i++) {
             reranked.get(i).result().setRank(i + 1);
         }
-        return reranked.stream()
-                .map(ScoredRagResult::result)
-                .toList();
+        List<RagRetrievalResult> results = new ArrayList<>(candidates.size());
+        results.addAll(reranked.stream().map(ScoredRagResult::result).toList());
+        for (int i = 0; i < remainingCandidates.size(); i++) {
+            remainingCandidates.get(i).setRank(rerankCandidateCount + i + 1);
+        }
+        results.addAll(remainingCandidates);
+        return results;
     }
 
     private RerankScore rerankScore(String normalizedQuery, RetrievalContext context, RagRetrievalResult result) {
@@ -744,7 +752,10 @@ public class RagServiceImpl implements RagService {
         double titleBm25SignalScore = bm25SignalScore(result.getTitleBm25Rank(), result.getTitleBm25Score(), 0.05D, 0.03D);
         double contentBm25SignalScore = bm25SignalScore(result.getContentBm25Rank(), result.getContentBm25Score(), 0.10D, 0.05D);
         double vectorSignalScore = vectorSignalScore(result);
-        double rankPenalty = (safeRank(result.getRank()) - 1) * RERANK_RANK_PENALTY;
+        double rankPenalty = Math.min(
+                (safeRank(result.getRank()) - 1) * RERANK_RANK_PENALTY,
+                MAX_RERANK_RANK_PENALTY
+        );
         return lexicalScore.withRetrievalSignals(titleBm25SignalScore, contentBm25SignalScore, vectorSignalScore)
                 .withRankPenalty(rankPenalty);
     }
