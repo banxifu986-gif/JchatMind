@@ -44,4 +44,24 @@ class RagFastRegressionEvaluatorTest {
         assertTrue(reportJson.contains("\"ragas\""));
         assertTrue(reportJson.contains("\"p95LatencyMs\" : 27"));
     }
+
+    @Test
+    void evaluatesFrozenG2PreBm25Replay() throws Exception {
+        Path reportPath = Path.of("target", "rag-eval", "fast", "g2-pre-bm25-v1-report.json");
+
+        RagFastRegressionReport report = RagFastRegressionEvaluator.evaluateAndWrite(
+                "rag-eval/datasets/manifests/g2-pre-bm25-v1.json",
+                "rag-eval/datasets/replays/g2-pre-bm25-v1.jsonl",
+                reportPath
+        );
+
+        assertEquals("g2-pre-bm25-v1", report.datasetId());
+        assertEquals(9, report.total());
+        assertEquals(7, report.answerable());
+        assertEquals(2, report.abstentionTotal());
+        assertEquals(1.0, report.recallAt5(), 0.0001);
+        assertEquals(1.0, report.abstentionAccuracy(), 0.0001);
+        assertEquals(45, report.p95LatencyMs());
+        assertTrue(Files.exists(reportPath));
+    }
 }

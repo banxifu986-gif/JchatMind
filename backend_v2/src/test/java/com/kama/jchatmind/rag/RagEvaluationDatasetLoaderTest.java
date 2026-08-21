@@ -22,6 +22,27 @@ class RagEvaluationDatasetLoaderTest {
     }
 
     @Test
+    void loadsFrozenG2PreBm25DatasetWithRequiredCoverage() throws Exception {
+        RagEvaluationDataset dataset = RagEvaluationDatasetLoader.load("rag-eval/datasets/manifests/g2-pre-bm25-v1.json");
+
+        assertEquals("g2-pre-bm25-v1", dataset.manifest().datasetId());
+        assertEquals("frozen", dataset.manifest().status());
+        assertEquals(9, dataset.cases().size());
+        assertEquals(2, dataset.cases().stream().filter(RagEvaluationCase::shouldAbstain).count());
+        assertTrue(List.of(
+                "chinese-technical-term",
+                "code-identifier",
+                "title-exact",
+                "content-exact",
+                "multi-turn",
+                "topic-switch",
+                "no-answer",
+                "permission-boundary",
+                "pdf-page"
+        ).stream().allMatch(label -> dataset.cases().stream().anyMatch(item -> item.labels().contains(label))));
+    }
+
+    @Test
     void rejectsInvalidFrozenCasesBeforeTheyEnterRegressionDataset() {
         RagEvaluationCase abstentionCaseWithGold = new RagEvaluationCase(
                 "invalid-1", "fixture-fast-v1", "无答案", "no_answer", "easy", List.of(),

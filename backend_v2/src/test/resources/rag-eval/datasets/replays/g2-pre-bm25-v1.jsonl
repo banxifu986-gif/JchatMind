@@ -1,0 +1,9 @@
+{"caseId":"g2-pre-bm25-v1-001","topChunkIds":["g2-architecture#PostgreSQL 原生 BM25 迁移#0"],"abstained":false,"latencyMs":12}
+{"caseId":"g2-pre-bm25-v1-002","topChunkIds":["g2-architecture#JVM 词法候选边界#0"],"abstained":false,"latencyMs":15}
+{"caseId":"g2-pre-bm25-v1-003","topChunkIds":["g2-architecture#HARD 会话上下文#0"],"abstained":false,"latencyMs":18}
+{"caseId":"g2-pre-bm25-v1-004","topChunkIds":["g2-architecture#受控 Router 与拒答#0"],"abstained":false,"latencyMs":20}
+{"caseId":"g2-pre-bm25-v1-005","topChunkIds":["g2-architecture#PostgreSQL 原生 BM25 迁移#0"],"abstained":false,"latencyMs":25}
+{"caseId":"g2-pre-bm25-v1-006","topChunkIds":["g2-architecture#API 路径与标题通道#0"],"abstained":false,"latencyMs":30}
+{"caseId":"g2-pre-bm25-v1-007","topChunkIds":[],"abstained":true,"latencyMs":35}
+{"caseId":"g2-pre-bm25-v1-008","topChunkIds":[],"abstained":true,"latencyMs":40}
+{"caseId":"g2-pre-bm25-v1-009","topChunkIds":["architecture.pdf#第 2 页#0"],"abstained":false,"latencyMs":45}

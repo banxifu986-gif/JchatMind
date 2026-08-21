@@ -1,0 +1,16 @@
+{
+  "datasetId": "g2-pre-bm25-v1",
+  "schemaVersion": "1",
+  "caseFile": "../cases/g2-pre-bm25-v1.jsonl",
+  "caseSha256": "30924ad843e6eb3b7048b962d78b08fdd09b088068db5f89c5f1b2543bff54ce",
+  "corpusFiles": [
+    "../corpus/g2-pre-bm25-v1/g2-architecture.md",
+    "../corpus/g2-pre-bm25-v1/g2-architecture-pdf-pages.md"
+  ],
+  "corpusSha256": "742d1e2e1bd5b1396f7310696dc711dbc416c6401241b2f0bc7746ebe69ba78c",
+  "chunkingVersion": "markdown-section-v1+pdf-page-semantic-fixture-v1",
+  "embeddingModel": "bge-m3",
+  "embeddingInputVersion": "title-title-content-v1",
+  "defaultTopK": 10,
+  "status": "frozen"
+}
