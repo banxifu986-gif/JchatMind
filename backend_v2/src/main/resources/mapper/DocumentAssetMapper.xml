@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.DocumentAssetMapper">
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.DocumentAsset">
+        INSERT INTO document_asset
+        (asset_id,
+         document_id,
+         asset_type,
+         asset_key,
+         page_number,
+         locator,
+         content_hash,
+         parser_version,
+         status,
+         created_at,
+         updated_at)
+        VALUES (CAST(#{assetId} AS uuid),
+                CAST(#{documentId} AS uuid),
+                #{assetType},
+                #{assetKey},
+                #{pageNumber},
+                COALESCE(CAST(#{locator} AS jsonb), '{}'::jsonb),
+                #{contentHash},
+                #{parserVersion},
+                #{status},
+                #{createdAt},
+                #{updatedAt})
+    </insert>
+
+    <delete id="deleteByDocumentId">
+        DELETE FROM document_asset
+        WHERE document_id = CAST(#{documentId} AS uuid)
+    </delete>
+
+    <insert id="insertChunkRelation">
+        INSERT INTO document_asset_chunk
+        (asset_id,
+         chunk_id,
+         asset_document_id,
+         chunk_document_id)
+        VALUES (CAST(#{assetId} AS uuid),
+                CAST(#{chunkId} AS uuid),
+                CAST(#{assetDocumentId} AS uuid),
+                CAST(#{chunkDocumentId} AS uuid))
+    </insert>
+</mapper>
