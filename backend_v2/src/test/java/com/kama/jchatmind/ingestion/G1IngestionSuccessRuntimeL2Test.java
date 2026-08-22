@@ -65,13 +65,14 @@ class G1IngestionSuccessRuntimeL2Test {
         storageRoot = Path.of(System.getProperty("g1.storage.dir"));
         clearStorage();
         purgeQueues();
-        jdbcTemplate.execute("DROP TABLE IF EXISTS chunk_bge_m3, ingestion_task, document, knowledge_base, jchatmind_user CASCADE");
+        jdbcTemplate.execute("DROP TABLE IF EXISTS document_asset_chunk, document_asset, chunk_bge_m3, ingestion_task, document, knowledge_base, jchatmind_user CASCADE");
         jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto");
         jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS vector");
         jdbcTemplate.execute("CREATE TABLE jchatmind_user (user_id BIGINT PRIMARY KEY, account VARCHAR(128), username VARCHAR(128), password VARCHAR(128))");
         jdbcTemplate.execute("CREATE TABLE knowledge_base (id UUID PRIMARY KEY, name VARCHAR(128), description VARCHAR(255), metadata JSONB, owner_id BIGINT NOT NULL REFERENCES jchatmind_user(user_id), created_at TIMESTAMP, updated_at TIMESTAMP)");
         jdbcTemplate.execute("CREATE TABLE document (id UUID PRIMARY KEY, kb_id UUID NOT NULL REFERENCES knowledge_base(id) ON DELETE CASCADE, filename VARCHAR(255), filetype VARCHAR(32), size BIGINT, metadata JSONB, created_at TIMESTAMP, updated_at TIMESTAMP)");
         jdbcTemplate.execute("CREATE TABLE chunk_bge_m3 (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), kb_id UUID NOT NULL REFERENCES knowledge_base(id) ON DELETE CASCADE, doc_id UUID NOT NULL REFERENCES document(id) ON DELETE CASCADE, content TEXT, metadata JSONB, embedding vector(1024), created_at TIMESTAMP, updated_at TIMESTAMP)");
+        jdbcTemplate.execute(Files.readString(Path.of("..", "sql", "ingestion", "2026-08-22-create-document-asset.sql")));
         jdbcTemplate.execute("CREATE TABLE ingestion_task (task_id UUID PRIMARY KEY, owner_id BIGINT NOT NULL REFERENCES jchatmind_user(user_id), kb_id UUID NOT NULL REFERENCES knowledge_base(id) ON DELETE CASCADE, document_id UUID NOT NULL REFERENCES document(id) ON DELETE CASCADE, idempotency_key VARCHAR(128) NOT NULL, task_type VARCHAR(64) NOT NULL, status VARCHAR(32) NOT NULL, attempt_count INTEGER NOT NULL, max_attempts INTEGER NOT NULL, error_summary VARCHAR(500), created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, UNIQUE(owner_id, idempotency_key))");
         jdbcTemplate.update("INSERT INTO jchatmind_user VALUES (?, ?, ?, ?)", OWNER_ID, "g1-ingestion-success", "g1", "isolated");
         jdbcTemplate.update("INSERT INTO knowledge_base VALUES (?::uuid, ?, ?, '{}'::jsonb, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", KB_ID, "G1 success", "isolated", OWNER_ID);
@@ -80,7 +81,7 @@ class G1IngestionSuccessRuntimeL2Test {
     @AfterEach
     void tearDown() throws Exception {
         purgeQueues();
-        jdbcTemplate.execute("DROP TABLE IF EXISTS chunk_bge_m3, ingestion_task, document, knowledge_base, jchatmind_user CASCADE");
+        jdbcTemplate.execute("DROP TABLE IF EXISTS document_asset_chunk, document_asset, chunk_bge_m3, ingestion_task, document, knowledge_base, jchatmind_user CASCADE");
         clearStorage();
     }
 
@@ -107,6 +108,7 @@ class G1IngestionSuccessRuntimeL2Test {
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3 WHERE embedding IS NOT NULL", Integer.class)).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3 WHERE metadata->>'pageNumber' = '1'", Integer.class)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3 WHERE metadata->>'pageNumber' = '2'", Integer.class)).isEqualTo(1);
+        assertPdfAssetsPersisted();
     }
 
     @Test
@@ -152,6 +154,7 @@ class G1IngestionSuccessRuntimeL2Test {
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3 WHERE metadata->>'sourceType' = 'pdf'", Integer.class)).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3 WHERE metadata->>'pageNumber' = '1'", Integer.class)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3 WHERE metadata->>'pageNumber' = '2'", Integer.class)).isEqualTo(1);
+        assertPdfAssetsPersisted();
     }
 
     @Test
@@ -254,6 +257,12 @@ class G1IngestionSuccessRuntimeL2Test {
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ingestion_task", Integer.class)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunk_bge_m3", Integer.class)).isZero();
         assertThat(regularFileCount()).isEqualTo(1);
+    }
+
+    private void assertPdfAssetsPersisted() {
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM document_asset WHERE document_id = ?::uuid AND asset_type = 'PDF_PAGE_TEXT'", Integer.class, DOCUMENT_ID)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM document_asset WHERE locator->>'pageNumber' IN ('1', '2') AND content_hash ~ '^[0-9a-f]{64}$' AND parser_version = 'pdf-text-v1' AND status = 'READY'", Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM document_asset_chunk relation JOIN document_asset asset ON asset.asset_id = relation.asset_id JOIN chunk_bge_m3 chunk ON chunk.id = relation.chunk_id WHERE relation.asset_document_id = ?::uuid AND relation.chunk_document_id = ?::uuid AND asset.document_id = chunk.doc_id", Integer.class, DOCUMENT_ID, DOCUMENT_ID)).isEqualTo(2);
     }
 
     private int retryQueueMessageCount() {

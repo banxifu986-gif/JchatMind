@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.DocumentConverter;
 import com.kama.jchatmind.mapper.DocumentMapper;
+import com.kama.jchatmind.mapper.DocumentAssetMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.mapper.IngestionTaskMapper;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
@@ -28,10 +29,19 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import javax.sql.DataSource;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @TestConfiguration
 @EnableTransactionManagement(proxyTargetClass = true)
 public class G1RuntimePostgresTestConfig {
+
+    private static final int MIN_DYNAMIC_PORT = 49152;
+    private static final int MAX_DYNAMIC_PORT = 65535;
+    private static final Pattern ISOLATED_DATABASE_URL = Pattern.compile(
+            "jdbc:postgresql://127\\.0\\.0\\.1:([1-9][0-9]{0,4})/g1_ingestion_([a-f0-9]{12})"
+    );
+    private static final Pattern ISOLATION_RUN_NONCE = Pattern.compile("[a-f0-9]{12}");
 
     @Bean
     public static PropertySourcesPlaceholderConfigurer documentStoragePathConfigurer() {
@@ -44,12 +54,26 @@ public class G1RuntimePostgresTestConfig {
 
     @Bean
     public DataSource dataSource() {
+        String databaseUrl = requiredProperty("g1.pg.url");
+        String runNonce = requiredProperty("g1.pg.nonce");
+        Matcher databaseUrlMatcher = ISOLATED_DATABASE_URL.matcher(databaseUrl);
+        if (!databaseUrlMatcher.matches()
+                || !ISOLATION_RUN_NONCE.matcher(runNonce).matches()
+                || !isDynamicDockerPort(databaseUrlMatcher.group(1))
+                || !databaseUrlMatcher.group(2).equals(runNonce)) {
+            throw new IllegalArgumentException("G1 摄入 L2 只能连接本地随机隔离 PostgreSQL 数据库");
+        }
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");
-        dataSource.setUrl(requiredProperty("g1.pg.url"));
-        dataSource.setUsername(requiredProperty("g1.pg.username"));
-        dataSource.setPassword(requiredProperty("g1.pg.password"));
+        dataSource.setUrl(databaseUrl);
+        dataSource.setUsername("g1ingestion");
+        dataSource.setPassword("");
         return dataSource;
+    }
+
+    private boolean isDynamicDockerPort(String port) {
+        int portNumber = Integer.parseInt(port);
+        return portNumber >= MIN_DYNAMIC_PORT && portNumber <= MAX_DYNAMIC_PORT;
     }
 
     @Bean
@@ -63,6 +87,7 @@ public class G1RuntimePostgresTestConfig {
                     resolver.getResource("classpath:mapper/DocumentMapper.xml"),
                     resolver.getResource("classpath:mapper/IngestionTaskMapper.xml"),
                     resolver.getResource("classpath:mapper/ChunkBgeM3Mapper.xml"),
+                    resolver.getResource("classpath:mapper/DocumentAssetMapper.xml"),
                     resolver.getResource("classpath:mapper/KnowledgeBaseMapper.xml")
             );
         } catch (Exception e) {
@@ -94,6 +119,11 @@ public class G1RuntimePostgresTestConfig {
     @Bean
     public MapperFactoryBean<ChunkBgeM3Mapper> chunkBgeM3Mapper(SqlSessionFactory sqlSessionFactory) {
         return mapperFactory(ChunkBgeM3Mapper.class, sqlSessionFactory);
+    }
+
+    @Bean
+    public MapperFactoryBean<DocumentAssetMapper> documentAssetMapper(SqlSessionFactory sqlSessionFactory) {
+        return mapperFactory(DocumentAssetMapper.class, sqlSessionFactory);
     }
 
     @Bean

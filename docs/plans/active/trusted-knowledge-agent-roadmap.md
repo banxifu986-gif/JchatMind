@@ -257,6 +257,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-22 G2-4a 资产持久化契约记录。** `2026-08-22-create-document-asset.sql` 新增版本化 `document_asset` 与 `document_asset_chunk` 迁移；资产保存稳定定位、页码/坐标、内容哈希、解析版本和状态，关系表以双文档 ID、相等检查和复合外键保证关联资产与 chunk 归属同一文档，且已关联对象不能换文档。`DocumentAssetMigrationContractTest` 与受 `g2.asset.contract.l2=true` 显式启用的 `DocumentAssetMigrationL2Test` 先以缺少双文档关系字段的迁移验证 RED：L0 缺少字段，L2 写关联行报列不存在；最小 GREEN 命令 `mvn.cmd "-Dtest=DocumentAssetMigrationL2Test,DocumentAssetMigrationContractTest" "-Dg2.asset.contract.l2=true" test` 在隔离数据库 `g2assetcontract` 中通过 3 个测试、0 failure/error。L2 单独验证小写 SHA-256、页码、状态和资产类型约束，跨文档拒绝、关联后换文档拒绝及删除级联。该记录仅表示 G2-4a 数据库契约完成，不表示 `TC-G2-06` 已验收，也不表示 OCR、图片、表格、公式的解析、资产写入、检索或引用输出已实现。
 
+**2026-08-22 G2-4b PDF 页文本资产摄入记录。** `DefaultIngestionTaskProcessor` 仅在 `filetype=pdf` 时，在同一事务内先删除该文档的旧资产、重建 chunk，再以 `PDF_PAGE_TEXT/page-{pageNumber}` 写入页文本资产，并用小写 SHA-256、`pdf-text-v1`、`READY`、`{\"pageNumber\":n}` locator 和双文档 ID 的关系行关联新 chunk；Markdown、HTML、TXT 不触碰资产 Mapper。`DefaultIngestionTaskProcessorTest` 固定 PDF 资产字段、关系和写入失败行为，并验证非 PDF 零资产交互。`G2PdfAssetTransactionRuntimeL2Test` 在独立 `g2pdfassettx` 数据库通过受控 trigger 制造新资产写入失败，验证 Spring AOP 事务代理回滚新 chunk、并恢复旧 chunk、资产及关系；测试配置的连接仅指向本机隔离库，破坏性 DDL 前核验 `current_database()`，密码只由运行时系统属性提供。G1 摄入成功 L2 只接受 `jdbc:postgresql://127.0.0.1:<49152-65535>/g1_ingestion_<12位十六进制nonce>`，在任何清理 DDL 前拒绝业务库、固定端口和 nonce 不匹配。关联回归为处理器 L1 10 项、资产契约 3 项、G1 数据源隔离守卫 4 项和事务 L2 1 项，均为 0 failure/error。该记录只签收 PDF 页文本资产摄入和原子替换；OCR、图片、表格、公式、资产检索和可回跳引用未实现，`TC-G2-06` 保持未验收。
+
 | 顺序 | 改造与边界 | 完成判据 |
 | --- | --- | --- |
 | G2-0 | 冻结迁移前评测集、查询计划和延迟基线；新增中文术语/代码、标题、正文精确匹配、multi-turn follow-up、topic switch、无答案、越权和 PDF 页码 case。 | 数据集、gold、KB 范围、模型、检索配置和报告版本可复跑；不把现有 4 文档 fixture 当成真实规模结论。 |

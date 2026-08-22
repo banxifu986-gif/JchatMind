@@ -2,8 +2,10 @@ package com.kama.jchatmind.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
+import com.kama.jchatmind.mapper.DocumentAssetMapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
+import com.kama.jchatmind.model.entity.DocumentAsset;
 import com.kama.jchatmind.model.entity.Document;
 import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.service.DocumentStorageService;
@@ -19,12 +21,18 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class DefaultIngestionTaskProcessorTest {
@@ -78,6 +86,7 @@ class DefaultIngestionTaskProcessorTest {
         DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
         RagService ragService = mock(RagService.class);
         ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
         Path storedFile = temporaryDirectory.resolve("notes.txt");
         Files.writeString(storedFile, "plain text");
         when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
@@ -96,7 +105,8 @@ class DefaultIngestionTaskProcessorTest {
                 documentStorageService,
                 new MarkdownParserServiceImpl(),
                 ragService,
-                chunkBgeM3Mapper
+                chunkBgeM3Mapper,
+                documentAssetMapper
         );
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
@@ -104,6 +114,7 @@ class DefaultIngestionTaskProcessorTest {
         ArgumentCaptor<ChunkBgeM3> chunkCaptor = ArgumentCaptor.forClass(ChunkBgeM3.class);
         verify(chunkBgeM3Mapper).insert(chunkCaptor.capture());
         assertThat(chunkCaptor.getValue().getContent()).isEqualTo("plain text");
+        verifyNoInteractions(documentAssetMapper);
     }
 
     @Test
@@ -112,6 +123,7 @@ class DefaultIngestionTaskProcessorTest {
         DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
         RagService ragService = mock(RagService.class);
         ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
         Path storedFile = temporaryDirectory.resolve("notes.md");
         Files.writeString(storedFile, "plain markdown text");
         when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
@@ -130,7 +142,8 @@ class DefaultIngestionTaskProcessorTest {
                 documentStorageService,
                 new MarkdownParserServiceImpl(),
                 ragService,
-                chunkBgeM3Mapper
+                chunkBgeM3Mapper,
+                documentAssetMapper
         );
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
@@ -138,6 +151,41 @@ class DefaultIngestionTaskProcessorTest {
         ArgumentCaptor<ChunkBgeM3> chunkCaptor = ArgumentCaptor.forClass(ChunkBgeM3.class);
         verify(chunkBgeM3Mapper).insert(chunkCaptor.capture());
         assertThat(chunkCaptor.getValue().getContent()).isEqualTo("plain markdown text");
+        verifyNoInteractions(documentAssetMapper);
+    }
+
+    @Test
+    void shouldNotPersistAssetsForHtmlDocument() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path storedFile = temporaryDirectory.resolve("guide.html");
+        Files.writeString(storedFile, "<html><body><h1>HTML Guide</h1><p>正文</p></body></html>");
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("guide.html")
+                .filetype("html")
+                .metadata("{\"filePath\":\"kb-1/doc-1/guide.html\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/guide.html")).thenReturn(storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenReturn(1);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                new MarkdownParserServiceImpl(),
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        verifyNoInteractions(documentAssetMapper);
     }
 
     @Test
@@ -175,12 +223,13 @@ class DefaultIngestionTaskProcessorTest {
     }
 
     @Test
-    void shouldParsePdfIntoPageScopedChunks() throws Exception {
+    void shouldPersistPdfPageAssetsAndLinkThemToGeneratedChunks() throws Exception {
         DocumentMapper documentMapper = mock(DocumentMapper.class);
         DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
         MarkdownParserService markdownParserService = mock(MarkdownParserService.class);
         RagService ragService = mock(RagService.class);
         ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
         Path storedFile = temporaryDirectory.resolve("guide.pdf");
         Files.write(storedFile, new byte[]{'%', 'P', 'D', 'F'});
         when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
@@ -197,13 +246,21 @@ class DefaultIngestionTaskProcessorTest {
                 section("第 2 页", "第二页正文", 2)
         ));
         when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
-        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenReturn(1);
+        AtomicInteger chunkSequence = new AtomicInteger(1);
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            ChunkBgeM3 chunk = invocation.getArgument(0);
+            chunk.setId("00000000-0000-0000-0000-00000000a20" + chunkSequence.getAndIncrement());
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
         Object processor = processor(
                 documentMapper,
                 documentStorageService,
                 markdownParserService,
                 ragService,
-                chunkBgeM3Mapper
+                chunkBgeM3Mapper,
+                documentAssetMapper
         );
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
@@ -213,7 +270,111 @@ class DefaultIngestionTaskProcessorTest {
         assertThat(chunkCaptor.getAllValues())
                 .extracting(ChunkBgeM3::getMetadata)
                 .allMatch(metadata -> metadata.contains("pageNumber"));
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper, org.mockito.Mockito.times(2)).insert(assetCaptor.capture());
+        assertThat(assetCaptor.getAllValues())
+                .extracting(
+                        DocumentAsset::getDocumentId,
+                        DocumentAsset::getAssetType,
+                        DocumentAsset::getAssetKey,
+                        DocumentAsset::getPageNumber,
+                        DocumentAsset::getLocator,
+                        DocumentAsset::getContentHash,
+                        DocumentAsset::getParserVersion,
+                        DocumentAsset::getStatus
+                )
+                .containsExactly(
+                        tuple("doc-1", "PDF_PAGE_TEXT", "page-1", 1, "{\"pageNumber\":1}", sha256("第一页正文"), "pdf-text-v1", "READY"),
+                        tuple("doc-1", "PDF_PAGE_TEXT", "page-2", 2, "{\"pageNumber\":2}", sha256("第二页正文"), "pdf-text-v1", "READY")
+                );
+        ArgumentCaptor<String> assetIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> chunkIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> assetDocumentIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> chunkDocumentIdCaptor = ArgumentCaptor.forClass(String.class);
+        verify(documentAssetMapper, org.mockito.Mockito.times(2)).insertChunkRelation(
+                assetIdCaptor.capture(),
+                chunkIdCaptor.capture(),
+                assetDocumentIdCaptor.capture(),
+                chunkDocumentIdCaptor.capture()
+        );
+        assertThat(assetIdCaptor.getAllValues())
+                .containsExactlyElementsOf(assetCaptor.getAllValues().stream().map(DocumentAsset::getAssetId).toList());
+        assertThat(chunkIdCaptor.getAllValues())
+                .containsExactly("00000000-0000-0000-0000-00000000a201", "00000000-0000-0000-0000-00000000a202");
+        assertThat(assetDocumentIdCaptor.getAllValues()).containsOnly("doc-1");
+        assertThat(chunkDocumentIdCaptor.getAllValues()).containsOnly("doc-1");
+        verify(documentAssetMapper).deleteByDocumentId("doc-1");
         verify(markdownParserService).parsePdf(any());
+    }
+
+    @Test
+    void shouldFailWhenPdfPageAssetDoesNotPersist() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        MarkdownParserService markdownParserService = mock(MarkdownParserService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path storedFile = temporaryDirectory.resolve("guide.pdf");
+        Files.write(storedFile, new byte[]{'%', 'P', 'D', 'F'});
+        stubPdfDocument(documentMapper, documentStorageService, storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(markdownParserService.parsePdf(any())).thenReturn(List.of(section("第 1 页", "第一页正文", 1)));
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a201");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(0);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                markdownParserService,
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build())
+        ).hasCauseInstanceOf(com.kama.jchatmind.exception.BizException.class)
+                .hasMessageContaining("文档资产写入失败");
+        verify(documentAssetMapper, org.mockito.Mockito.never()).insertChunkRelation(any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldFailWhenPdfPageAssetChunkRelationDoesNotPersist() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        MarkdownParserService markdownParserService = mock(MarkdownParserService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path storedFile = temporaryDirectory.resolve("guide.pdf");
+        Files.write(storedFile, new byte[]{'%', 'P', 'D', 'F'});
+        stubPdfDocument(documentMapper, documentStorageService, storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(markdownParserService.parsePdf(any())).thenReturn(List.of(section("第 1 页", "第一页正文", 1)));
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a201");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(0);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                markdownParserService,
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build())
+        ).hasCauseInstanceOf(com.kama.jchatmind.exception.BizException.class)
+                .hasMessageContaining("文档资产关联写入失败");
     }
 
     @Test
@@ -260,6 +421,24 @@ class DefaultIngestionTaskProcessorTest {
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper
     ) {
+        return processor(
+                documentMapper,
+                documentStorageService,
+                markdownParserService,
+                ragService,
+                chunkBgeM3Mapper,
+                mock(DocumentAssetMapper.class)
+        );
+    }
+
+    private Object processor(
+            DocumentMapper documentMapper,
+            DocumentStorageService documentStorageService,
+            MarkdownParserService markdownParserService,
+            RagService ragService,
+            ChunkBgeM3Mapper chunkBgeM3Mapper,
+            DocumentAssetMapper documentAssetMapper
+    ) {
         try {
             Class<?> processorType = Class.forName("com.kama.jchatmind.ingestion.DefaultIngestionTaskProcessor");
             return processorType.getConstructor(
@@ -268,14 +447,16 @@ class DefaultIngestionTaskProcessorTest {
                     ObjectMapper.class,
                     MarkdownParserService.class,
                     RagService.class,
-                    ChunkBgeM3Mapper.class
+                    ChunkBgeM3Mapper.class,
+                    DocumentAssetMapper.class
             ).newInstance(
                     documentMapper,
                     documentStorageService,
                     new ObjectMapper(),
                     markdownParserService,
                     ragService,
-                    chunkBgeM3Mapper
+                    chunkBgeM3Mapper,
+                    documentAssetMapper
             );
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("G1 默认摄入处理器尚未实现", e);
@@ -295,6 +476,34 @@ class DefaultIngestionTaskProcessorTest {
 
     private MarkdownParserService.MarkdownSection section() {
         return section("标题", "正文", null);
+    }
+
+    private void stubPdfDocument(
+            DocumentMapper documentMapper,
+            DocumentStorageService documentStorageService,
+            Path storedFile
+    ) {
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("guide.pdf")
+                .filetype("pdf")
+                .metadata("{\"filePath\":\"kb-1/doc-1/guide.pdf\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/guide.pdf")).thenReturn(storedFile);
+    }
+
+    private String sha256(String content) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                hex.append(String.format("%02x", value));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private MarkdownParserService.MarkdownSection section(String title, String content, Integer pageNumber) {

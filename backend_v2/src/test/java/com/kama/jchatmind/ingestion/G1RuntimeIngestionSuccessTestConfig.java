@@ -3,6 +3,7 @@ package com.kama.jchatmind.ingestion;
 import com.kama.jchatmind.config.RabbitMQConfig;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
+import com.kama.jchatmind.mapper.DocumentAssetMapper;
 import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
@@ -89,7 +90,8 @@ public class G1RuntimeIngestionSuccessTestConfig {
             com.fasterxml.jackson.databind.ObjectMapper objectMapper,
             MarkdownParserService markdownParserService,
             RagService ragService,
-            ChunkBgeM3Mapper chunkBgeM3Mapper
+            ChunkBgeM3Mapper chunkBgeM3Mapper,
+            DocumentAssetMapper documentAssetMapper
     ) {
         return new DefaultIngestionTaskProcessor(
                 documentMapper,
@@ -97,7 +99,8 @@ public class G1RuntimeIngestionSuccessTestConfig {
                 objectMapper,
                 markdownParserService,
                 ragService,
-                chunkBgeM3Mapper
+                chunkBgeM3Mapper,
+                documentAssetMapper
         );
     }
 

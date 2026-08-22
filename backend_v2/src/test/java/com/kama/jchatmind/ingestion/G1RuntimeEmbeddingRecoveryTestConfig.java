@@ -3,6 +3,7 @@ package com.kama.jchatmind.ingestion;
 import com.kama.jchatmind.config.RabbitMQConfig;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
+import com.kama.jchatmind.mapper.DocumentAssetMapper;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.DocumentStorageService;
@@ -120,7 +121,8 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
             com.fasterxml.jackson.databind.ObjectMapper objectMapper,
             MarkdownParserService markdownParserService,
             RagService ragService,
-            ChunkBgeM3Mapper chunkBgeM3Mapper
+            ChunkBgeM3Mapper chunkBgeM3Mapper,
+            DocumentAssetMapper documentAssetMapper
     ) {
         return new DefaultIngestionTaskProcessor(
                 documentMapper,
@@ -128,7 +130,8 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
                 objectMapper,
                 markdownParserService,
                 ragService,
-                chunkBgeM3Mapper
+                chunkBgeM3Mapper,
+                documentAssetMapper
         );
     }
 

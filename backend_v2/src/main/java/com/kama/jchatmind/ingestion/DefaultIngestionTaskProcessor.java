@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
+import com.kama.jchatmind.mapper.DocumentAssetMapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
+import com.kama.jchatmind.model.entity.DocumentAsset;
 import com.kama.jchatmind.model.entity.Document;
 import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.service.DocumentStorageService;
@@ -23,9 +25,13 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 @Component
 @AllArgsConstructor
@@ -37,6 +43,7 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
     private final MarkdownParserService markdownParserService;
     private final RagService ragService;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
+    private final DocumentAssetMapper documentAssetMapper;
 
     @Override
     @Transactional
@@ -52,6 +59,10 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         }
 
         List<MarkdownParserService.MarkdownSection> sections = parseSections(document, storedFile);
+        boolean pdfDocument = "pdf".equalsIgnoreCase(document.getFiletype());
+        if (pdfDocument) {
+            documentAssetMapper.deleteByDocumentId(document.getId());
+        }
         for (ChunkBgeM3 existingChunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
             chunkBgeM3Mapper.deleteById(existingChunk.getId());
         }
@@ -74,6 +85,71 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
             if (chunkBgeM3Mapper.insert(chunk) <= 0) {
                 throw new BizException("文档分块写入失败");
             }
+            if (pdfDocument) {
+                persistPdfPageAsset(document, section, chunk, now);
+            }
+        }
+    }
+
+    private void persistPdfPageAsset(
+            Document document,
+            MarkdownParserService.MarkdownSection section,
+            ChunkBgeM3 chunk,
+            LocalDateTime now
+    ) {
+        Integer pageNumber = section.getPageNumber();
+        if (pageNumber == null || pageNumber <= 0) {
+            throw new BizException("PDF 页码缺失");
+        }
+        if (!StringUtils.hasText(chunk.getId())) {
+            throw new BizException("文档分块标识生成失败");
+        }
+
+        String content = section.getContent() == null ? "" : section.getContent();
+        DocumentAsset asset = DocumentAsset.builder()
+                .assetId(UUID.randomUUID().toString())
+                .documentId(document.getId())
+                .assetType("PDF_PAGE_TEXT")
+                .assetKey("page-" + pageNumber)
+                .pageNumber(pageNumber)
+                .locator(buildPdfPageLocator(pageNumber))
+                .contentHash(sha256(content))
+                .parserVersion("pdf-text-v1")
+                .status("READY")
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        if (documentAssetMapper.insert(asset) <= 0) {
+            throw new BizException("文档资产写入失败");
+        }
+        if (documentAssetMapper.insertChunkRelation(
+                asset.getAssetId(),
+                chunk.getId(),
+                document.getId(),
+                document.getId()
+        ) <= 0) {
+            throw new BizException("文档资产关联写入失败");
+        }
+    }
+
+    private String buildPdfPageLocator(int pageNumber) {
+        try {
+            return objectMapper.writeValueAsString(Map.of("pageNumber", pageNumber));
+        } catch (JsonProcessingException e) {
+            throw new BizException("文档资产定位信息序列化失败");
+        }
+    }
+
+    private String sha256(String content) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                hex.append(String.format("%02x", value));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
         }
     }
 
