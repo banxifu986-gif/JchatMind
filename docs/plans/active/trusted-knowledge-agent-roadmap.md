@@ -255,6 +255,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-22 G2-0 基线记录。** `g2-pre-bm25-v1` 冻结集含 9 个合成技术 case（7 个可回答、2 个拒答），覆盖中文术语、代码标识符、标题/正文精确匹配、follow-up、topic switch、无答案、越权及 PDF 页码语义；PDF fixture 不宣称 OCR、图片、表格或公式能力。`RagG2PreBm25BaselineL2Test` 在名称固定为 `g2ragbaseline` 的隔离 PostgreSQL 14.22 数据库中插入 5,000 个候选，执行 `ANALYZE`、一次不计入统计的预热读取及 20 次 JDBC 全量候选读取。该次运行报告为 `target/rag-eval/g2-pre-bm25-v1-pre-migration-l2.json`：p95 为 22ms，`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` 为 `Seq Scan -> Sort -> WindowAgg`，估算 4,975 行、实际 5,000 行。该基线只刻画迁移前全量候选扫描，不能外推为 Agent、embedding、生成或生产业务库的端到端性能；后续 G2-1/G2-2 必须以同一冻结集比较并保留等价证据。
 
+**2026-08-22 G2-4a 资产持久化契约记录。** `2026-08-22-create-document-asset.sql` 新增版本化 `document_asset` 与 `document_asset_chunk` 迁移；资产保存稳定定位、页码/坐标、内容哈希、解析版本和状态，关系表以双文档 ID、相等检查和复合外键保证关联资产与 chunk 归属同一文档，且已关联对象不能换文档。`DocumentAssetMigrationContractTest` 与受 `g2.asset.contract.l2=true` 显式启用的 `DocumentAssetMigrationL2Test` 先以缺少双文档关系字段的迁移验证 RED：L0 缺少字段，L2 写关联行报列不存在；最小 GREEN 命令 `mvn.cmd "-Dtest=DocumentAssetMigrationL2Test,DocumentAssetMigrationContractTest" "-Dg2.asset.contract.l2=true" test` 在隔离数据库 `g2assetcontract` 中通过 3 个测试、0 failure/error。L2 单独验证小写 SHA-256、页码、状态和资产类型约束，跨文档拒绝、关联后换文档拒绝及删除级联。该记录仅表示 G2-4a 数据库契约完成，不表示 `TC-G2-06` 已验收，也不表示 OCR、图片、表格、公式的解析、资产写入、检索或引用输出已实现。
+
 | 顺序 | 改造与边界 | 完成判据 |
 | --- | --- | --- |
 | G2-0 | 冻结迁移前评测集、查询计划和延迟基线；新增中文术语/代码、标题、正文精确匹配、multi-turn follow-up、topic switch、无答案、越权和 PDF 页码 case。 | 数据集、gold、KB 范围、模型、检索配置和报告版本可复跑；不把现有 4 文档 fixture 当成真实规模结论。 |

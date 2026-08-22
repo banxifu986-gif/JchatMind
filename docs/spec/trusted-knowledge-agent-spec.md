@@ -148,6 +148,10 @@
 
 **Router 与证据资产契约。** Router 只能在 `KnowledgeTools`/MCP 已收窄的可访问 KB 范围内输出计划，不能自行访问未授权 KB 或外部工具。`ABSTAIN`、`CLARIFY`、`EXTERNAL_TOOL` 需在真实入口生效，而非仅由 Router 单测断言。非文本能力增加前，先定义资产的 `assetType`、文档 ID、页码/坐标、关联 chunk、内容哈希、解析版本和状态；回答引用须可回跳资产及关联文本。当前 PDF 文本/页码并不等价于图片、表格或公式检索已实现。
 
+**G2-4a 资产持久化契约。** [2026-08-22-create-document-asset.sql](../../sql/ingestion/2026-08-22-create-document-asset.sql) 定义 `document_asset` 与 `document_asset_chunk`：资产以 `(document_id, asset_type, asset_key)` 作为稳定定位键，保存可选 `page_number`、JSON `locator`、小写 SHA-256 `content_hash`、`parser_version` 与 `PENDING`/`READY`/`FAILED` 状态；关系表分别携带 `asset_document_id` 和 `chunk_document_id`，通过相等检查约束两者属于同一文档，再以资产 `(asset_id, document_id)` 与 chunk `(id, doc_id)` 的复合级联外键关联。该模型由数据库引用完整性阻止跨文档关联，也阻止已关联的资产或 chunk 换文档，不依赖易产生并发检查-写入竞态的触发器。初始合法资产类型为 `PDF_PAGE_TEXT`、`IMAGE`、`TABLE` 和 `FORMULA`，但本阶段只有契约和迁移已落地，尚未启用 OCR、图片、表格或公式解析、索引或引用输出。后续每种资产类型必须先独立 RED，再补摄入、幂等替换、权限、召回和定位引用 GREEN。
+
+**发布边界。** 当前仓库没有自动 schema migrator；该 SQL 是版本化、一次性发布工件，提交不代表任何生产业务库已升级。发布前必须确认 `document_asset`、`document_asset_chunk`、所有命名约束与两个索引均不存在；随后在维护窗口以脚本原有事务一次执行，并通过 PostgreSQL catalog 核验表、检查约束、外键和索引，再将迁移文件名、提交 SHA、执行时间和 catalog 核验结果登记到发布记录。若 preflight 发现任一对象已存在或部分漂移，必须停止并人工比对修复，禁止以 `IF NOT EXISTS` 或重复执行掩盖状态。
+
 | TC-ID | 先写的失败测试 | GREEN 与边界 |
 | --- | --- | --- |
 | TC-G2-02 | 隔离 PostgreSQL 中，原生 BM25 对标题/正文精确术语不能返回正确 chunk，或 Provider 未按 `kb_id`/上下文过滤。 | 真实扩展索引返回预期 Top-N；`EXPLAIN` 和大于 fixture 的冻结语料证明不调用 `selectLexicalCandidatesByKbIds` 全量扫描 JVM；仅比较候选排名，不将插件 score 和 vector distance 相加。 |
