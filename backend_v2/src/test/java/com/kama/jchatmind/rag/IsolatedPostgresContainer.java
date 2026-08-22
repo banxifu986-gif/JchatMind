@@ -6,6 +6,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -36,6 +37,18 @@ final class IsolatedPostgresContainer {
                 "docker", "exec", containerName,
                 "psql", "-qAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", databaseName, "-c", sql
         ), null);
+    }
+
+    String sqlCommands(String... statements) {
+        List<String> command = new ArrayList<>(List.of(
+                "docker", "exec", containerName,
+                "psql", "-qAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", databaseName
+        ));
+        for (String statement : statements) {
+            command.add("-c");
+            command.add(statement);
+        }
+        return run(command, null);
     }
 
     String dumpTable(String tableName) {

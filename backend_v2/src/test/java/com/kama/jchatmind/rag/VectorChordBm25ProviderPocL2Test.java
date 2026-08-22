@@ -27,6 +27,8 @@ class VectorChordBm25ProviderPocL2Test {
     private static final String FROZEN_TABLE = "bm25_catalog.g2_vchord_frozen_poc";
     private static final String FROZEN_TITLE_INDEX = "bm25_catalog.g2_vchord_frozen_poc_title_idx";
     private static final String FROZEN_BODY_INDEX = "bm25_catalog.g2_vchord_frozen_poc_body_idx";
+    private static final String SCALE_TABLE = "bm25_catalog.g2_vchord_scale_poc";
+    private static final int SCALE_CANDIDATE_COUNT = 5_000;
     private final IsolatedPostgresContainer database = new IsolatedPostgresContainer(
             "g2-vchord-poc", "g2vchord", "sha256:8c106fde572fb799217dcacb01b6f869af693322069bc134dbd6341d0c175abd"
     );
@@ -163,6 +165,53 @@ class VectorChordBm25ProviderPocL2Test {
         }
     }
 
+    @Test
+    void usesDefaultBm25IndexForFiveThousandScopedCandidates() {
+        database.assertIsolation();
+        database.sql("DROP TABLE IF EXISTS " + SCALE_TABLE + " CASCADE");
+        try {
+            createScaleFixtureAndIndex();
+
+            assertEquals(Integer.toString(SCALE_CANDIDATE_COUNT), database.sql("SELECT count(*) FROM " + SCALE_TABLE).trim());
+            String unscopedRanking = database.sql(scaleUnscopedBodyRankingQuery()).trim();
+            String outsideTopN = unscopedRanking.lines().findFirst().orElseThrow();
+            assertTrue(candidateId(outsideTopN) > 100, "5,000 行全局 Top-N 必须实际返回范围外干扰项");
+            assertTrue(candidateScore(outsideTopN) < candidateScore(unscopedRanking, 1), "5,000 行范围外干扰项必须拥有更高 native BM25 排序分数");
+            assertEquals("1", database.sql(scaleScopedBodyQuery()).trim());
+            List<String> plannerEvidence = database.sqlCommands(
+                    """
+                    SET search_path = bm25_catalog, pg_catalog, public;
+                    SELECT current_setting('enable_seqscan') || '|' || current_setting('enable_indexscan');
+                    """,
+                    "EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) " + scaleScopedBodySelect()
+            ).lines().toList();
+            assertTrue(plannerEvidence.size() > 1);
+            String[] plannerSettings = plannerEvidence.get(0).split("\\|", -1);
+            assertEquals(2, plannerSettings.length);
+            assertEquals("on", plannerSettings[0]);
+            assertEquals("on", plannerSettings[1]);
+            String queryPlan = String.join("\n", plannerEvidence.subList(1, plannerEvidence.size()));
+            assertTrue(queryPlan.contains("Index Scan using g2_vchord_scale_poc_body_idx"));
+            assertTrue(!queryPlan.contains("Seq Scan"));
+            assertTrue(queryPlan.contains("kb_id = 'kb-authorized'"));
+            assertTrue(queryPlan.contains("source_name = 'architecture.md'"));
+            assertTrue(queryPlan.contains("source_type = 'md'"));
+            assertTrue(queryPlan.contains("content_path = 'RAG > BM25 > Body'"));
+            database.writeEvidenceReport("g2-vchord-scale-default-plan-l2.json", Map.of(
+                    "provider", "vchord_bm25",
+                    "containerImageId", database.imageId(),
+                    "candidateCount", SCALE_CANDIDATE_COUNT,
+                    "bodyScopePlan", queryPlan,
+                    "defaultPlannerOnly", true,
+                    "enableSeqScan", plannerSettings[0],
+                    "enableIndexScan", plannerSettings[1],
+                    "measurementBoundary", "EXPLAIN ANALYZE 仅记录数据库侧单次执行计划；不与 G2-0 的 JDBC p95 作绝对比较。"
+            ));
+        } finally {
+            database.sql("DROP TABLE IF EXISTS " + SCALE_TABLE + " CASCADE");
+        }
+    }
+
     private void createFixtureAndIndex() {
         database.sql("""
                 CREATE TABLE bm25_catalog.g2_vchord_provider_poc (
@@ -187,6 +236,41 @@ class VectorChordBm25ProviderPocL2Test {
                 FROM generate_series(1, 20) AS item
                 """);
         createIndex();
+    }
+
+    private void createScaleFixtureAndIndex() {
+        database.sql("""
+                CREATE TABLE bm25_catalog.g2_vchord_scale_poc (
+                    id BIGINT PRIMARY KEY,
+                    kb_id TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    content_path TEXT NOT NULL,
+                    content_token_vector bm25_catalog.bm25vector NOT NULL
+                )
+                """);
+        database.sql("""
+                INSERT INTO bm25_catalog.g2_vchord_scale_poc
+                VALUES (1, 'kb-authorized', 'architecture.md', 'md', 'RAG > BM25 > Body', '{30:1,40:1}'::bm25_catalog.bm25vector)
+                """);
+        database.sql("""
+                INSERT INTO bm25_catalog.g2_vchord_scale_poc
+                SELECT 100 + item, 'kb-outside', 'other.md', 'txt', 'Elsewhere > Distractor',
+                       '{30:4,40:4}'::bm25_catalog.bm25vector
+                FROM generate_series(1, 20) AS item
+                """);
+        database.sql("""
+                INSERT INTO bm25_catalog.g2_vchord_scale_poc
+                SELECT 1000 + item, 'kb-authorized', 'architecture.md', 'md', 'RAG > BM25 > Body',
+                       '{50:1}'::bm25_catalog.bm25vector
+                FROM generate_series(1, 4979) AS item
+                """);
+        database.sql("""
+                CREATE INDEX g2_vchord_scale_poc_body_idx
+                ON bm25_catalog.g2_vchord_scale_poc
+                USING bm25 (content_token_vector bm25_catalog.bm25_ops)
+                """);
+        database.sql("ANALYZE " + SCALE_TABLE);
     }
 
     private FrozenFixture frozenFixture(RagEvaluationDataset dataset) throws Exception {
@@ -370,6 +454,31 @@ class VectorChordBm25ProviderPocL2Test {
                 ORDER BY content_token_vector <&> to_bm25query('g2_vchord_provider_poc_body_idx'::regclass, '{30:1,40:1}'::bm25vector)
                 LIMIT 1
                 """.formatted(sqlLiteral(normalizedContentPath));
+    }
+
+    private String scaleScopedBodyQuery() {
+        return "SET search_path = bm25_catalog, pg_catalog, public; " + scaleScopedBodySelect();
+    }
+
+    private String scaleScopedBodySelect() {
+        return """
+                SELECT id FROM g2_vchord_scale_poc
+                WHERE kb_id = 'kb-authorized'
+                  AND source_name = 'architecture.md'
+                  AND source_type = 'md'
+                  AND content_path = 'RAG > BM25 > Body'
+                ORDER BY content_token_vector <&> to_bm25query('g2_vchord_scale_poc_body_idx'::regclass, '{30:1,40:1}'::bm25vector)
+                LIMIT 1
+                """;
+    }
+
+    private String scaleUnscopedBodyRankingQuery() {
+        return "SET search_path = bm25_catalog, pg_catalog, public; " + """
+                SELECT id || '|' || (content_token_vector <&> to_bm25query('g2_vchord_scale_poc_body_idx'::regclass, '{30:1,40:1}'::bm25vector))
+                FROM g2_vchord_scale_poc
+                ORDER BY content_token_vector <&> to_bm25query('g2_vchord_scale_poc_body_idx'::regclass, '{30:1,40:1}'::bm25vector)
+                LIMIT 25
+                """;
     }
 
     private String unscopedBodyQuery() {
