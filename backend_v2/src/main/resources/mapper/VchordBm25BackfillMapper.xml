@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.VchordBm25BackfillMapper">
+
+    <resultMap id="LegacyChunkResultMap" type="com.kama.jchatmind.model.entity.ChunkBgeM3">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="content" column="content" jdbcType="VARCHAR"/>
+        <result property="metadata" column="metadata" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <select id="selectLegacyBm25ChunksForUpdate" resultMap="LegacyChunkResultMap">
+        SELECT id,
+               content,
+               metadata::text AS metadata
+        FROM chunk_bge_m3
+        WHERE bm25_index_version IS NULL
+          AND embedding IS NOT NULL
+          AND NULLIF(btrim(content), '') IS NOT NULL
+        ORDER BY id ASC
+        LIMIT #{limit}
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <update id="updateBm25Projection">
+        UPDATE chunk_bge_m3
+        SET title_bm25_vector = #{titleBm25Vector}::bm25_catalog.bm25vector,
+            content_bm25_vector = #{contentBm25Vector}::bm25_catalog.bm25vector,
+            bm25_index_version = #{bm25IndexVersion},
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND bm25_index_version IS NULL
+    </update>
+</mapper>
