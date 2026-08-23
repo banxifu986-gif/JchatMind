@@ -1,6 +1,7 @@
 package com.kama.jchatmind.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.mapper.Bm25TokenDictionaryMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.mapper.DocumentAssetMapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
@@ -28,24 +29,25 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 @TestConfiguration
 @EnableTransactionManagement(proxyTargetClass = true)
-public class G2PdfAssetTransactionRuntimeL2TestConfig {
+public class G2VchordBm25ProjectionTransactionRuntimeL2TestConfig {
 
-    private static final Path FIXTURE_PDF = Path.of("target", "g2-pdf-asset-transaction", "fixture.pdf")
-            .toAbsolutePath();
+    static final Path FIXTURE = Path.of("target", "g2-vchord-bm25-transaction", "fixture.md").toAbsolutePath();
 
     @Bean
     public DataSource dataSource() {
+        String url = requiredSystemProperty("g2.vchord.ingestion.transaction.pg.url");
+        if (!"jdbc:postgresql://127.0.0.1:55436/g2vchord".equals(url)) {
+            throw new IllegalArgumentException("G2 VectorChord 事务 L2 只能连接指定隔离数据库");
+        }
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");
-        dataSource.setUrl("jdbc:postgresql://127.0.0.1:55434/g2pdfassettx");
-        dataSource.setUsername("postgres");
-        dataSource.setPassword(requiredSystemProperty("g2.pdf.asset.transaction.pg.password"));
+        dataSource.setUrl(url);
+        dataSource.setUsername(requiredSystemProperty("g2.vchord.ingestion.transaction.pg.user"));
+        dataSource.setPassword(requiredSystemProperty("g2.vchord.ingestion.transaction.pg.password"));
         return dataSource;
     }
 
@@ -59,10 +61,10 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
             factory.setMapperLocations(
                     resolver.getResource("classpath:mapper/DocumentMapper.xml"),
                     resolver.getResource("classpath:mapper/ChunkBgeM3Mapper.xml"),
-                    resolver.getResource("classpath:mapper/DocumentAssetMapper.xml")
+                    resolver.getResource("classpath:mapper/Bm25TokenDictionaryMapper.xml")
             );
         } catch (Exception e) {
-            throw new IllegalStateException("无法加载 G2 事务 L2 的 MyBatis 映射", e);
+            throw new IllegalStateException("无法加载 G2 VectorChord 事务 L2 的 MyBatis 映射", e);
         }
         return factory;
     }
@@ -88,8 +90,13 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
     }
 
     @Bean
-    public MapperFactoryBean<DocumentAssetMapper> documentAssetMapper(SqlSessionFactory sqlSessionFactory) {
-        return mapperFactory(DocumentAssetMapper.class, sqlSessionFactory);
+    public MapperFactoryBean<Bm25TokenDictionaryMapper> bm25TokenDictionaryMapper(SqlSessionFactory sqlSessionFactory) {
+        return mapperFactory(Bm25TokenDictionaryMapper.class, sqlSessionFactory);
+    }
+
+    @Bean
+    public DocumentAssetMapper documentAssetMapper() {
+        return mock(DocumentAssetMapper.class);
     }
 
     @Bean
@@ -112,7 +119,7 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
 
             @Override
             public Path getFilePath(String filePath) {
-                return FIXTURE_PDF;
+                return FIXTURE;
             }
 
             @Override
@@ -127,23 +134,22 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
         return new MarkdownParserService() {
             @Override
             public List<MarkdownSection> parseMarkdown(InputStream inputStream) {
-                throw new UnsupportedOperationException("事务 L2 只覆盖 PDF 页文本");
-            }
-
-            @Override
-            public List<MarkdownSection> parsePdf(InputStream inputStream) {
                 return List.of(new MarkdownSection(
-                        "第 1 页",
-                        "new PDF page text",
-                        "第 1 页",
+                        "BM25 事务",
+                        "stable token rollback",
+                        "BM25 事务",
                         null,
                         1,
                         false,
                         SectionType.LEAF_CONTENT,
                         1,
-                        17,
-                        1
+                        21
                 ));
+            }
+
+            @Override
+            public List<MarkdownSection> parsePdf(InputStream inputStream) {
+                throw new UnsupportedOperationException("事务 L2 只覆盖 Markdown");
             }
         };
     }
@@ -153,7 +159,7 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
         return new RagService() {
             @Override
             public float[] embed(String text) {
-                return new float[1024];
+                return new float[]{0.1F, 0.2F};
             }
 
             @Override
@@ -179,12 +185,8 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
     }
 
     @Bean
-    public VchordBm25ProjectionService vchordBm25ProjectionService() {
-        VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
-        when(projectionService.project(any(), any())).thenReturn(
-                new VchordBm25ProjectionService.Projection(null, null, null)
-        );
-        return projectionService;
+    public VchordBm25ProjectionService vchordBm25ProjectionService(Bm25TokenDictionaryMapper mapper) {
+        return new VchordBm25ProjectionService(mapper);
     }
 
     @Bean

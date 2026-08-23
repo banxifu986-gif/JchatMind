@@ -10,6 +10,7 @@ import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
+import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
@@ -22,6 +23,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.web.reactive.function.client.WebClient;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @TestConfiguration
 @EnableRabbit
@@ -84,6 +89,15 @@ public class G1RuntimeRabbitRecoveryTestConfig {
     }
 
     @Bean
+    public VchordBm25ProjectionService vchordBm25ProjectionService() {
+        VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
+        when(projectionService.project(any(), any())).thenReturn(
+                new VchordBm25ProjectionService.Projection(null, null, null)
+        );
+        return projectionService;
+    }
+
+    @Bean
     public DefaultIngestionTaskProcessor defaultIngestionTaskProcessor(
             DocumentMapper documentMapper,
             com.kama.jchatmind.service.DocumentStorageService documentStorageService,
@@ -91,7 +105,8 @@ public class G1RuntimeRabbitRecoveryTestConfig {
             MarkdownParserService markdownParserService,
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
-            DocumentAssetMapper documentAssetMapper
+            DocumentAssetMapper documentAssetMapper,
+            VchordBm25ProjectionService vchordBm25ProjectionService
     ) {
         return new DefaultIngestionTaskProcessor(
                 documentMapper,
@@ -100,7 +115,8 @@ public class G1RuntimeRabbitRecoveryTestConfig {
                 markdownParserService,
                 ragService,
                 chunkBgeM3Mapper,
-                documentAssetMapper
+                documentAssetMapper,
+                vchordBm25ProjectionService
         );
     }
 

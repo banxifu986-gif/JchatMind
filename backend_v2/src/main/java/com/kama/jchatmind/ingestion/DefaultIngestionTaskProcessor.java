@@ -14,6 +14,7 @@ import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
+import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
 import com.kama.jchatmind.util.RagChunkSupport;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -44,6 +45,7 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
     private final RagService ragService;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
     private final DocumentAssetMapper documentAssetMapper;
+    private final VchordBm25ProjectionService vchordBm25ProjectionService;
 
     @Override
     @Transactional
@@ -73,12 +75,21 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
             if (!StringUtils.hasText(section.getTitle())) {
                 continue;
             }
+            String content = section.getContent() == null ? "" : section.getContent();
+            float[] embedding = ragService.embed(RagChunkSupport.buildChunkEmbeddingText(section));
+            VchordBm25ProjectionService.Projection projection = vchordBm25ProjectionService.project(
+                    RagChunkSupport.buildRetrievableTitleSearchText(section, document.getFilename()),
+                    content
+            );
             ChunkBgeM3 chunk = ChunkBgeM3.builder()
                     .kbId(document.getKbId())
                     .docId(document.getId())
-                    .content(section.getContent() == null ? "" : section.getContent())
+                    .content(content)
                     .metadata(buildMetadata(section, document, index))
-                    .embedding(ragService.embed(RagChunkSupport.buildChunkEmbeddingText(section)))
+                    .embedding(embedding)
+                    .titleBm25Vector(projection.titleVector())
+                    .contentBm25Vector(projection.contentVector())
+                    .bm25IndexVersion(projection.indexVersion())
                     .createdAt(now)
                     .updatedAt(now)
                     .build();

@@ -11,13 +11,16 @@
         <result property="content" column="content" jdbcType="VARCHAR"/>
         <result property="metadata" column="metadata" jdbcType="VARCHAR"/>
         <result property="embedding" column="embedding" jdbcType="OTHER"/>
+        <result property="titleBm25Vector" column="title_bm25_vector" jdbcType="VARCHAR"/>
+        <result property="contentBm25Vector" column="content_bm25_vector" jdbcType="VARCHAR"/>
+        <result property="bm25IndexVersion" column="bm25_index_version" jdbcType="INTEGER"/>
         <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
         <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
     </resultMap>
 
     <sql id="Base_Column_List">
         id,kb_id,doc_id,
-        content,metadata,embedding,
+        content,metadata,embedding,title_bm25_vector,content_bm25_vector,bm25_index_version,
         created_at,updated_at
     </sql>
 
@@ -46,6 +49,15 @@
          content,
          metadata,
          embedding,
+         <if test="titleBm25Vector != null">
+             title_bm25_vector,
+         </if>
+         <if test="contentBm25Vector != null">
+             content_bm25_vector,
+         </if>
+         <if test="bm25IndexVersion != null">
+             bm25_index_version,
+         </if>
          created_at,
          updated_at)
         VALUES (CAST(#{kbId} AS uuid),
@@ -53,6 +65,15 @@
                 #{content},
                 CAST(#{metadata} AS jsonb),
                 #{embedding}::vector,
+                <if test="titleBm25Vector != null">
+                    #{titleBm25Vector}::bm25_catalog.bm25vector,
+                </if>
+                <if test="contentBm25Vector != null">
+                    #{contentBm25Vector}::bm25_catalog.bm25vector,
+                </if>
+                <if test="bm25IndexVersion != null">
+                    #{bm25IndexVersion},
+                </if>
                 #{createdAt},
                 #{updatedAt})
     </insert>
@@ -64,6 +85,9 @@
                content,
                metadata::text AS metadata,
                embedding,
+               title_bm25_vector::text AS title_bm25_vector,
+               content_bm25_vector::text AS content_bm25_vector,
+               bm25_index_version,
                created_at,
                updated_at
         FROM chunk_bge_m3
@@ -77,6 +101,9 @@
                content,
                metadata::text AS metadata,
                embedding,
+               title_bm25_vector::text AS title_bm25_vector,
+               content_bm25_vector::text AS content_bm25_vector,
+               bm25_index_version,
                created_at,
                updated_at
         FROM chunk_bge_m3
@@ -107,6 +134,15 @@
             </if>
             <if test="embedding != null">
                 embedding = #{embedding}::vector,
+            </if>
+            <if test="titleBm25Vector != null">
+                title_bm25_vector = #{titleBm25Vector}::bm25_catalog.bm25vector,
+            </if>
+            <if test="contentBm25Vector != null">
+                content_bm25_vector = #{contentBm25Vector}::bm25_catalog.bm25vector,
+            </if>
+            <if test="bm25IndexVersion != null">
+                bm25_index_version = #{bm25IndexVersion},
             </if>
             updated_at = NOW()
         </set>

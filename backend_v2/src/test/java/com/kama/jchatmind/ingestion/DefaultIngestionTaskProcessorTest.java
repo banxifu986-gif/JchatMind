@@ -12,9 +12,11 @@ import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
+import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.InvocationTargetException;
@@ -31,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -78,6 +81,95 @@ class DefaultIngestionTaskProcessorTest {
         assertThat(chunkCaptor.getValue())
                 .extracting(ChunkBgeM3::getKbId, ChunkBgeM3::getDocId, ChunkBgeM3::getContent)
                 .containsExactly("kb-1", "doc-1", "正文");
+    }
+
+    @Test
+    void shouldPersistVchordBm25ProjectionWithEachNewChunk() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        MarkdownParserService markdownParserService = mock(MarkdownParserService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
+        Path storedFile = temporaryDirectory.resolve("notes.md");
+        Files.writeString(storedFile, "# 标题\n正文");
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("notes.md")
+                .filetype("md")
+                .metadata("{\"filePath\":\"kb-1/doc-1/notes.md\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/notes.md")).thenReturn(storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(markdownParserService.parseMarkdown(any())).thenReturn(List.of(section()));
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(projectionService.project("标题 标题 标题 notes md", "正文")).thenReturn(
+                new VchordBm25ProjectionService.Projection("{11:2}", "{42:1}", 1)
+        );
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenReturn(1);
+        Object processor = processorWithProjection(
+                documentMapper,
+                documentStorageService,
+                markdownParserService,
+                ragService,
+                chunkBgeM3Mapper,
+                projectionService
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<ChunkBgeM3> chunkCaptor = ArgumentCaptor.forClass(ChunkBgeM3.class);
+        verify(chunkBgeM3Mapper).insert(chunkCaptor.capture());
+        assertThat(chunkCaptor.getValue())
+                .extracting(
+                        ChunkBgeM3::getTitleBm25Vector,
+                        ChunkBgeM3::getContentBm25Vector,
+                        ChunkBgeM3::getBm25IndexVersion
+                )
+                .containsExactly("{11:2}", "{42:1}", 1);
+    }
+
+    @Test
+    void shouldEmbedBeforeWritingBm25Projection() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        MarkdownParserService markdownParserService = mock(MarkdownParserService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
+        Path storedFile = temporaryDirectory.resolve("notes.md");
+        Files.writeString(storedFile, "# 标题\n正文");
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("notes.md")
+                .filetype("md")
+                .metadata("{\"filePath\":\"kb-1/doc-1/notes.md\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/notes.md")).thenReturn(storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(markdownParserService.parseMarkdown(any())).thenReturn(List.of(section()));
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(projectionService.project(any(), any())).thenReturn(
+                new VchordBm25ProjectionService.Projection("{11:2}", "{42:1}", 1)
+        );
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenReturn(1);
+        Object processor = processorWithProjection(
+                documentMapper,
+                documentStorageService,
+                markdownParserService,
+                ragService,
+                chunkBgeM3Mapper,
+                projectionService
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        InOrder orderedWrites = inOrder(ragService, projectionService, chunkBgeM3Mapper);
+        orderedWrites.verify(ragService).embed(any());
+        orderedWrites.verify(projectionService).project(any(), any());
+        orderedWrites.verify(chunkBgeM3Mapper).insert(any(ChunkBgeM3.class));
     }
 
     @Test
@@ -431,13 +523,13 @@ class DefaultIngestionTaskProcessorTest {
         );
     }
 
-    private Object processor(
+    private Object processorWithProjection(
             DocumentMapper documentMapper,
             DocumentStorageService documentStorageService,
             MarkdownParserService markdownParserService,
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
-            DocumentAssetMapper documentAssetMapper
+            VchordBm25ProjectionService projectionService
     ) {
         try {
             Class<?> processorType = Class.forName("com.kama.jchatmind.ingestion.DefaultIngestionTaskProcessor");
@@ -448,7 +540,8 @@ class DefaultIngestionTaskProcessorTest {
                     MarkdownParserService.class,
                     RagService.class,
                     ChunkBgeM3Mapper.class,
-                    DocumentAssetMapper.class
+                    DocumentAssetMapper.class,
+                    VchordBm25ProjectionService.class
             ).newInstance(
                     documentMapper,
                     documentStorageService,
@@ -456,7 +549,46 @@ class DefaultIngestionTaskProcessorTest {
                     markdownParserService,
                     ragService,
                     chunkBgeM3Mapper,
-                    documentAssetMapper
+                    mock(DocumentAssetMapper.class),
+                    projectionService
+            );
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("G2 VectorChord 投影尚未接入默认摄入处理器", e);
+        }
+    }
+
+    private Object processor(
+            DocumentMapper documentMapper,
+            DocumentStorageService documentStorageService,
+            MarkdownParserService markdownParserService,
+            RagService ragService,
+            ChunkBgeM3Mapper chunkBgeM3Mapper,
+            DocumentAssetMapper documentAssetMapper
+    ) {
+        VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
+        when(projectionService.project(any(), any())).thenReturn(
+                new VchordBm25ProjectionService.Projection(null, null, null)
+        );
+        try {
+            Class<?> processorType = Class.forName("com.kama.jchatmind.ingestion.DefaultIngestionTaskProcessor");
+            return processorType.getConstructor(
+                    DocumentMapper.class,
+                    DocumentStorageService.class,
+                    ObjectMapper.class,
+                    MarkdownParserService.class,
+                    RagService.class,
+                    ChunkBgeM3Mapper.class,
+                    DocumentAssetMapper.class,
+                    VchordBm25ProjectionService.class
+            ).newInstance(
+                    documentMapper,
+                    documentStorageService,
+                    new ObjectMapper(),
+                    markdownParserService,
+                    ragService,
+                    chunkBgeM3Mapper,
+                    documentAssetMapper,
+                    projectionService
             );
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("G1 默认摄入处理器尚未实现", e);

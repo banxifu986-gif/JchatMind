@@ -23,16 +23,7 @@ public final class RagChunkSupport {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("title", section.getTitle());
         metadata.put("retrievableTitle", section.getTitle());
-        metadata.put(
-                "retrievableTitleSearchText",
-                RetrievableTitleLexicalizer.buildSearchText(
-                        section.getTitle(),
-                        section.getTitle(),
-                        section.getContentPath(),
-                        section.getParentContentPath(),
-                        sourceName
-                )
-        );
+        metadata.put("retrievableTitleSearchText", buildRetrievableTitleSearchText(section, sourceName));
         metadata.put("contentPath", section.getContentPath());
         metadata.put("parentContentPath", section.getParentContentPath());
         metadata.put("sourceType", sourceType);
@@ -58,6 +49,19 @@ public final class RagChunkSupport {
     ) throws JsonProcessingException {
         return objectMapper.writeValueAsString(
                 buildChunkMetadata(section, sourceType, sourceName, sectionIndex)
+        );
+    }
+
+    public static String buildRetrievableTitleSearchText(
+            MarkdownParserService.MarkdownSection section,
+            String sourceName
+    ) {
+        return RetrievableTitleLexicalizer.buildSearchText(
+                section.getTitle(),
+                section.getTitle(),
+                section.getContentPath(),
+                section.getParentContentPath(),
+                sourceName
         );
     }
 

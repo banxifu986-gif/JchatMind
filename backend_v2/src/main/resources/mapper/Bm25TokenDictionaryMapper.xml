@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.Bm25TokenDictionaryMapper">
+
+    <resultMap id="TokenEntryResultMap" type="com.kama.jchatmind.model.dto.Bm25TokenDictionaryEntry">
+        <result property="token" column="token" jdbcType="VARCHAR"/>
+        <result property="tokenId" column="token_id" jdbcType="BIGINT"/>
+    </resultMap>
+
+    <select id="upsertTokens" resultMap="TokenEntryResultMap" flushCache="true" useCache="false">
+        INSERT INTO rag_bm25_token_dictionary (token)
+        VALUES
+        <foreach collection="tokens" item="token" separator=",">
+            (#{token})
+        </foreach>
+        ON CONFLICT (token) DO UPDATE
+        SET token = rag_bm25_token_dictionary.token
+        RETURNING token, token_id
+    </select>
+</mapper>

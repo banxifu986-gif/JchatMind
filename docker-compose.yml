@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg14
+    build:
+      context: ./docker/postgres
+    image: jchatmind-postgres-vchord-bm25:0.3.0
     container_name: jchatmind-postgres
     environment:
       POSTGRES_DB: jchatmind
