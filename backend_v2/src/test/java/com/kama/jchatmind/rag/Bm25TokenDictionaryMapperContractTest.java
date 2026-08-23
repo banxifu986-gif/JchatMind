@@ -12,6 +12,9 @@ class Bm25TokenDictionaryMapperContractTest {
     private static final Path MAPPER = Path.of(
             "src", "main", "resources", "mapper", "Bm25TokenDictionaryMapper.xml"
     );
+    private static final Path MAPPER_INTERFACE = Path.of(
+            "src", "main", "java", "com", "kama", "jchatmind", "mapper", "Bm25TokenDictionaryMapper.java"
+    );
 
     @Test
     void shouldAtomicallyReturnStableIdsForNewAndExistingTokens() throws Exception {
@@ -28,5 +31,23 @@ class Bm25TokenDictionaryMapperContractTest {
                 .contains("returning token, token_id")
                 .contains("collection=\"tokens\"")
                 .contains("resultmap=\"tokenentryresultmap\"");
+    }
+
+    @Test
+    void shouldReadKnownTokenIdsWithoutWritingUnknownQueryTerms() throws Exception {
+        String mapper = Files.readString(MAPPER).toLowerCase();
+        String mapperInterface = Files.readString(MAPPER_INTERFACE);
+
+        assertThat(mapperInterface).contains("selectTokenIds");
+        assertThat(mapper).contains("<select id=\"selecttokenids\"");
+
+        int queryStart = mapper.indexOf("<select id=\"selecttokenids\"");
+        int queryEnd = mapper.indexOf("</select>", queryStart);
+        String readQuery = mapper.substring(queryStart, queryEnd);
+        assertThat(readQuery)
+                .contains("select token, token_id")
+                .contains("where token in")
+                .doesNotContain("insert into")
+                .doesNotContain("on conflict");
     }
 }

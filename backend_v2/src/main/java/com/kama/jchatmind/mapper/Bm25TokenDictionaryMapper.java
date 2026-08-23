@@ -9,4 +9,6 @@ import java.util.List;
 @Mapper
 public interface Bm25TokenDictionaryMapper {
     List<Bm25TokenDictionaryEntry> upsertTokens(@Param("tokens") List<String> tokens);
+
+    List<Bm25TokenDictionaryEntry> selectTokenIds(@Param("tokens") List<String> tokens);
 }

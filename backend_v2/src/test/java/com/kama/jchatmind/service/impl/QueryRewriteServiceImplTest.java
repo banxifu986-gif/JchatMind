@@ -409,7 +409,33 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
+        public List<RagRetrievalResult> searchByTitleContainsWithContext(
+                List<String> kbIds,
+                String normalizedTitle,
+                String containsPattern,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public List<RagRetrievalResult> searchByTitleKeywords(List<String> kbIds, List<String> keywords, int queryLength, int limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<RagRetrievalResult> searchByTitleKeywordsWithContext(
+                List<String> kbIds,
+                List<String> keywords,
+                int queryLength,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        ) {
             throw new UnsupportedOperationException();
         }
 
@@ -419,12 +445,41 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
-        public List<RagRetrievalResult> selectLexicalCandidatesByKbIds(List<String> kbIds) {
+        public List<RagRetrievalResult> searchByTitleTrigramWithContext(
+                List<String> kbIds,
+                String normalizedTitle,
+                double minScore,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        ) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public List<RagRetrievalResult> selectContentLexicalCandidatesByKbIds(List<String> kbIds) {
+        public List<RagRetrievalResult> searchByTitleBm25(
+                List<String> kbIds,
+                String queryVector,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int indexVersion,
+                int limit
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<RagRetrievalResult> searchByContentBm25(
+                List<String> kbIds,
+                String queryVector,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int indexVersion,
+                int limit
+        ) {
             throw new UnsupportedOperationException();
         }
 

@@ -26,6 +26,7 @@ import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.RetrievableTitleLexicalizer;
+import com.kama.jchatmind.service.impl.VchordBm25QueryService;
 import com.kama.jchatmind.util.RagChunkSupport;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -968,6 +969,7 @@ class RagRecallEvaluationTest {
                 WebClient.builder(),
                 chunkBgeM3Mapper,
                 queryRewriteService,
+                org.mockito.Mockito.mock(VchordBm25QueryService.class),
                 ollamaBaseUrl,
                 embeddingModel,
                 false,

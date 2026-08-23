@@ -10,6 +10,7 @@ import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
+import com.kama.jchatmind.service.impl.VchordBm25QueryService;
 import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
@@ -79,6 +80,7 @@ public class G1RuntimeIngestionSuccessTestConfig {
                 WebClient.builder(),
                 chunkBgeM3Mapper,
                 new QueryRewriteServiceImpl(chunkBgeM3Mapper),
+                mock(VchordBm25QueryService.class),
                 "http://127.0.0.1:11434",
                 "bge-m3:latest",
                 false,

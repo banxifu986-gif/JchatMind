@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.dto.QueryRewriteResult;
+import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.QueryRewriteService;
 import com.sun.net.httpserver.HttpExchange;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RagServiceImplTest {
@@ -52,6 +54,7 @@ class RagServiceImplTest {
                     WebClient.builder(),
                     mock(ChunkBgeM3Mapper.class),
                     mock(QueryRewriteService.class),
+                    mock(VchordBm25QueryService.class),
                     "http://localhost:" + server.getAddress().getPort(),
                     "bge-m3:latest",
                     false,
@@ -106,13 +109,15 @@ class RagServiceImplTest {
                             .build());
             when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 55))
                     .thenReturn(candidates);
-            when(mapper.selectContentLexicalCandidatesByKbIds(List.of("kb-1")))
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(bm25QueryService.searchContent(List.of("kb-1"), "目标标题", null, null, null, 120))
                     .thenReturn(List.of());
 
             RagServiceImpl service = new RagServiceImpl(
                     WebClient.builder(),
                     mapper,
                     rewriteService,
+                    bm25QueryService,
                     "http://localhost:" + server.getAddress().getPort(),
                     "bge-m3:latest",
                     false,
@@ -128,6 +133,143 @@ class RagServiceImplTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void shouldPushHardContextIntoEveryTitleFallbackChannel() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            RagRetrievalContext context = RagRetrievalContext.builder()
+                    .kbId("kb-1")
+                    .sourceName("architecture.md")
+                    .sourceType("md")
+                    .contentPath("rag > bm25")
+                    .build();
+            when(rewriteService.rewrite(List.of("kb-1"), "接口", context))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("接口")
+                            .context(context)
+                            .titleQuery(true)
+                            .contextApplyMode(QueryRewriteResult.ContextApplyMode.HARD)
+                            .retrievalQueries(List.of("接口"))
+                            .retrievalQuerySources(List.of("original"))
+                            .build());
+            when(mapper.similaritySearchDetailedWithContext(
+                    List.of("kb-1"),
+                    "[0.1,0.2,0.3]",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    50
+            )).thenReturn(List.of());
+            when(mapper.searchByTitleExactWithContext(
+                    List.of("kb-1"),
+                    "接口",
+                    "[0.1,0.2,0.3]",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    20
+            )).thenReturn(List.of());
+            when(bm25QueryService.searchTitle(
+                    List.of("kb-1"),
+                    "接口",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            )).thenReturn(List.of());
+            when(bm25QueryService.searchContent(
+                    List.of("kb-1"),
+                    "接口",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    20
+            )).thenReturn(List.of());
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    false,
+                    0
+            );
+
+            service.retrieve(List.of("kb-1"), "接口", context, 1);
+
+            org.mockito.Mockito.verify(mapper).searchByTitleContainsWithContext(
+                    List.of("kb-1"),
+                    "接口",
+                    "%接口%",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(mapper).searchByTitleKeywordsWithContext(
+                    List.of("kb-1"),
+                    List.of("接口"),
+                    2,
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(mapper).searchByTitleTrigramWithContext(
+                    List.of("kb-1"),
+                    "接口",
+                    0.18D,
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never())
+                    .searchByTitleContains(List.of("kb-1"), "接口", "%接口%", 10);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldReturnEmptyBeforeAnyRetrievalWhenHardContextKbIsOutsideAuthorizedScope() {
+        ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+        QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+        VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+        RagRetrievalContext context = RagRetrievalContext.builder().kbId("kb-revoked").build();
+        when(rewriteService.rewrite(List.of("kb-1"), "问题", context))
+                .thenReturn(QueryRewriteResult.builder()
+                        .query("问题")
+                        .context(context)
+                        .contextApplyMode(QueryRewriteResult.ContextApplyMode.HARD)
+                        .build());
+        RagServiceImpl service = new RagServiceImpl(
+                WebClient.builder(),
+                mapper,
+                rewriteService,
+                bm25QueryService,
+                "http://localhost",
+                "bge-m3:latest",
+                false,
+                false,
+                false,
+                0
+        );
+
+        List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", context, 1);
+
+        assertTrue(results.isEmpty());
+        verifyNoInteractions(mapper, bm25QueryService);
     }
 
     private static HttpServer createEmbeddingServer() throws IOException {

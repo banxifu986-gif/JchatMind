@@ -68,10 +68,30 @@ public interface ChunkBgeM3Mapper {
             @Param("limit") int limit
     );
 
+    List<RagRetrievalResult> searchByTitleContainsWithContext(
+            @Param("kbIds") List<String> kbIds,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("containsPattern") String containsPattern,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
+
     List<RagRetrievalResult> searchByTitleKeywords(
             @Param("kbIds") List<String> kbIds,
             @Param("keywords") List<String> keywords,
             @Param("queryLength") int queryLength,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByTitleKeywordsWithContext(
+            @Param("kbIds") List<String> kbIds,
+            @Param("keywords") List<String> keywords,
+            @Param("queryLength") int queryLength,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
             @Param("limit") int limit
     );
 
@@ -82,9 +102,35 @@ public interface ChunkBgeM3Mapper {
             @Param("limit") int limit
     );
 
-    List<RagRetrievalResult> selectLexicalCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
+    List<RagRetrievalResult> searchByTitleTrigramWithContext(
+            @Param("kbIds") List<String> kbIds,
+            @Param("normalizedTitle") String normalizedTitle,
+            @Param("minScore") double minScore,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
 
-    List<RagRetrievalResult> selectContentLexicalCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
+    List<RagRetrievalResult> searchByTitleBm25(
+            @Param("kbIds") List<String> kbIds,
+            @Param("queryVector") String queryVector,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("indexVersion") int indexVersion,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> searchByContentBm25(
+            @Param("kbIds") List<String> kbIds,
+            @Param("queryVector") String queryVector,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("indexVersion") int indexVersion,
+            @Param("limit") int limit
+    );
 
     List<RagRetrievalResult> selectTitlePathCandidatesByKbIds(@Param("kbIds") List<String> kbIds);
 

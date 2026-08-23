@@ -19,4 +19,13 @@
         SET token = rag_bm25_token_dictionary.token
         RETURNING token, token_id
     </select>
+
+    <select id="selectTokenIds" resultMap="TokenEntryResultMap" useCache="false">
+        SELECT token, token_id
+        FROM rag_bm25_token_dictionary
+        WHERE token IN
+        <foreach collection="tokens" item="token" open="(" separator="," close=")">
+            #{token}
+        </foreach>
+    </select>
 </mapper>
