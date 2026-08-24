@@ -144,7 +144,7 @@
 
 **范围、候选与会话契约。** 必须在实施前冻结“未传 `kbIds`”的产品语义：推荐默认搜索该 Agent 的全部已授权 KB，会话 context 仅作为排序偏置；若需要 sticky scope，必须由显式会话或用户选择收窄，不能隐式采用上次 Top-1 的 KB。`FOLLOW_UP` 至少需要代词/续问标记与已授权上下文，短新标题、代码标识符和 API 路径仍保留标题通道；只有受控层级路径可进入导航 auto-context。RRF 后必须在 rerank 前按明确预算截断候选，rank penalty 必须有界或移除，避免深层精确命中数学上不可能升序。保存 `retrievalContext` 前必须满足相关性阈值及 Top-1/Top-2 gap；无答案、拒答和低置信结果不得更新会话 context。
 
-本轮已落地该契约中的排序局部：RRF 和 `HARD` 过滤完成后最多对前 50 个候选执行 rerank，预算外候选保持原 RRF 顺序；rank penalty 以 `0.15` 为上限。组内去重/校准、会话 context 置信门禁和其余 G2 子项仍待后续 RED/GREEN 验收。
+本轮已落地该契约中的排序局部：RRF 和 `HARD` 过滤完成后最多对前 50 个候选执行 rerank，预算外候选保持原 RRF 顺序；rank penalty 以 `0.15` 为上限。2026-08-24 提交 `1e96e44` 进一步在跨组 RRF 前对 `vector_*` 与 `title_*` 做同源组内去重/校准，同一 chunk 在组内只保留最佳 rank 的一次贡献，并在 `RagRetrievalResult.retrievalProvenance` 保留 `vector_original`、`vector_standalone`、`title_exact` 等通道/query 来源；`RagServiceImplTest` 8/8 通过且独立审查无 P0/P1/P2。会话 context 置信门禁、默认 KB 范围、Router 接线和其余 G2 子项仍待后续 RED/GREEN 验收。
 
 **Router 与证据资产契约。** Router 只能在 `KnowledgeTools`/MCP 已收窄的可访问 KB 范围内输出计划，不能自行访问未授权 KB 或外部工具。`ABSTAIN`、`CLARIFY`、`EXTERNAL_TOOL` 需在真实入口生效，而非仅由 Router 单测断言。非文本能力增加前，先定义资产的 `assetType`、文档 ID、页码/坐标、关联 chunk、内容哈希、解析版本和状态；回答引用须可回跳资产及关联文本。当前 PDF 文本/页码并不等价于图片、表格或公式检索已实现。
 

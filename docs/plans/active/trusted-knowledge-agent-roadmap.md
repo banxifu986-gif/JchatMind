@@ -248,6 +248,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-21 局部实现记录。** 按 G2-3a 的候选排序契约，`RagServiceImpl` 现已在 RRF 与 `HARD` 过滤后将可 rerank 候选限制为前 50 个，并把原先随排名线性增长的 penalty 封顶为 `0.15`；预算外候选保留 RRF 顺序。这只修复深层精确候选无法翻盘和 rerank 无界计算两个局部边界，不代表同源通道组内去重/校准、retrieval context 置信门禁或 G2-0/G2-1/G2-2/G2-3/G2-4 已完成。`RagServiceImplTest.shouldLetDeepExactCandidateRiseWithinBoundedRerankBudget` 已先 RED 后 GREEN，固定第 35 名精确候选可在预算内升至首位。
 
+**2026-08-24 G2-3a 局部收口记录。** 提交 `1e96e44` 在跨组 RRF 前将 `vector_*` 查询通道和 `title_*` 标题通道分别归并为同源组；同一 chunk 在组内多次命中只保留最佳 rank，因此每个同源组最多贡献一次 RRF 投票，`content_bm25` 仍作为独立跨组信号。`RagRetrievalResult.retrievalProvenance` 保留通道与 query source（例如 `vector_original`、`vector_standalone`、`title_exact`），并在跨组融合时按稳定顺序合并。`RagServiceImplTest` 的 3 个新增 RED/GREEN 用例与原有 5 个用例共 8/8 通过；独立代码审查无 P0/P1/P2。尚未覆盖同组重复命中最佳 rank 的精确贡献、不同首次出现顺序下的稳定排序和标题/BM25 provenance 全并集，这些是非阻断补强项；会话 context 置信门禁、默认 KB 范围、Router 接线及多模态资产仍未完成。
+
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
 1. `findTitleBm25Candidates` 与 `findContentBm25Candidates` 通过 Mapper 把授权 KB 的候选 chunk 拉回 JVM，再由应用计算 BM25。数据量随 KB 增长线性放大，且数据库无法利用原生倒排索引、按范围先过滤再取 Top-N。
@@ -256,7 +258,7 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 4. `RagRouter` 目前没有生产调用点；单元测试通过只证明分类规则，不证明授权范围、外部许可、拒答和实际召回链路正确。
 5. 多格式摄入已覆盖 Markdown/HTML/PDF 文本，但没有图片、表格或公式的独立资产、相对位置和跨元素关系，无法形成 RAG-Anything 所强调的可定位多模态证据。
 6. 未传 `kbIds` 时，`KnowledgeTools` 会以会话上次命中的 `retrievalContext.kbId` 隐式收窄可搜 KB。这与“默认搜索 Agent 所有可访问 KB、会话仅提供偏置”的产品语义不同，会令跨 KB 的 topic switch 在改写器识别前已经不可能召回。安全收窄本身正确，但默认范围必须显式定义，不能由上一条结果悄然决定。
-7. 同源标题通道与多 query 向量通道仍未完成组内去重/校准；当前仅已落实 RRF 后 50 个候选的 rerank 预算和有界 rank penalty，尚未证明重复通道不会放大投票。
+7. 同源标题通道与多 query 向量通道已完成组内去重/校准并记录 provenance；仍需在冻结集验证校准对 Recall/MRR、p95 和来源诊断的影响。
 8. 有会话上下文的短新实体/标题可能被判为 `FOLLOW_UP`，进而关闭所有标题通道；任意 `/` 或 `\\` 又可能被判为导航并触发无上限的 title/path 候选扫描，还可能误施加 `HARD` 约束。
 9. `KnowledgeTools` 在任何非空 Top-1 后都会覆盖 session retrieval context；低相关或无答案检索会把错误来源写回下一轮，形成 context 自我强化。
 
