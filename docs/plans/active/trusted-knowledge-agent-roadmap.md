@@ -443,7 +443,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G2-02 | 隔离 `g2-vchord-poc` PostgreSQL；VectorChord-bm25 固定镜像 digest；真实 Mapper 与临时 embedding HTTP | `backend_v2/target/surefire-reports/com.kama.jchatmind.rag.VchordBm25QueryServiceL2Test.txt` | 标题/正文原生 BM25、`SET LOCAL search_path`、字面量路径过滤、删除重建与 `EXPLAIN` 均通过；新增 `RagServiceImpl -> VchordBm25QueryService -> Mapper` 正文/标题调用链回归，结果保留 `content_bm25`/`title_bm25` provenance | 2026-08-24 | Codex | 部分通过（L1/L2 原生 provider 与生产调用链；冻结集规模对比、p95、备份恢复和 mMARCO/CRUD-RAG 评测待执行） |
 | TC-G2-03 | 同上；范围外高分 chunk、范围内标题/正文 gold 与 `HARD` 文件/类型/路径条件 | `backend_v2/target/surefire-reports/com.kama.jchatmind.rag.VchordBm25QueryServiceL2Test.txt` | 标题/正文 BM25 的 `kb_id`、文件名、类型、规范化路径均在数据库 `LIMIT` 前过滤；组合链路只返回范围内 gold，`SET LOCAL` 与每次原生查询使用同一事务连接 | 2026-08-24 | Codex | 部分通过（KB 与上下文 L2；owner/Agent 默认范围/会话收窄的真实 PostgreSQL 组合验收待执行） |
 | TC-G2-04 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
-| TC-G2-05 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
+| TC-G2-05 | `RagRouterTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest`；mock 授权范围与 RAG 返回值 | `backend_v2/target/surefire-reports/` | Agent/MCP 均执行 Router `topK`；无授权外部请求在检索前拒绝；MCP 空检索返回证据不足并审计为 `ABSTAIN/no_evidence`，非空证据才审计为 `ALLOW/retrieved` | 2026-08-24 | Codex | 部分通过（28 项 L0/L1 入口、拒答与审计；数值证据阈值、受控外部工具实际调用、固定链路消融、p95/token 成本与授权 L2 待执行） |
 | TC-G2-06 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-07 | `QueryRewriteServiceImplTest` L0；无外部服务 | `backend_v2/target/surefire-reports/` | API/Windows 路径不再进入 `NAVIGATION`/`FOLLOW_UP`/`HARD` 或调用 LLM；章节与 Markdown 文档导航保持 | 2026-08-24 | Codex | 部分通过（21 项改写 L0；跨 KB topic switch、合法导航扫描与真实 PostgreSQL Recall/p95 待验收） |
 | TC-G2-08 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |

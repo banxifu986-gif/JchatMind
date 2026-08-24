@@ -152,6 +152,8 @@
 
 2026-08-24 已补齐 Router 的入口计划执行：`KnowledgeTools` 与 `McpKnowledgeTool` 不再各自固定检索条数，而是把已授权范围内的 `RagRouteDecision.topK()` 传给 `RagService`。先 RED 证明 Agent 多模态计划的 `5` 被固定 `3` 覆盖、MCP 私有计划的 `3` 被固定 `5` 覆盖；GREEN 后，MCP 多模态测试进一步断言 `topK=5` 与 `ALLOW/retrieved` 审计，防止回退为固定值。`RagRouterTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest`、`RagServiceImplTest` 和 `QueryRewriteServiceImplTest` 共 52/52 通过；独立审查和 P2 修复复核均无 P0/P1/P2。该契约只签收本地检索入口的路线执行，不宣称 Router 消融收益、受控外部工具、OCR/图片/表格/公式或资产回跳引用已完成。
 
+2026-08-24 已补齐 MCP 无证据拒答的审计语义：`McpKnowledgeTool` 仅在检索到非空证据时写入 `ALLOW/retrieved`；空结果返回证据不足，并写入 `ABSTAIN/no_evidence`，防止把拒答统计为已检索成功。该变更由先 RED 的 `McpKnowledgeToolTest.shouldAuditNoEvidenceAsAbstain` 固定，随后 `RagRouterTest`、`KnowledgeToolsScopeTest` 和 `McpKnowledgeToolTest` 共 28/28 通过。这里的“无证据”只指空检索结果；数值质量阈值须由冻结集校准后再启用，受控外部工具、消融收益、p95 与 token 成本仍未验收。
+
 2026-08-24 已收窄导航判定：`>` 才作为章节导航自动选择 context，`.md`/`.markdown` 文档定位保持既有导航；`/`、`\\` 只代表结构化 API/代码路径，不触发标题路径候选扫描。审查发现的 P1 进一步固定了 active context 语义：`>`、`/`、`\\` 都不能进入低信息 `FOLLOW_UP/HARD`，也不能触发 LLM 改写。`/api/v1/agents` 与 `src\\main\\java\\Agent.java` 均以 `FACTOID/SOFT` 和仅原问执行；测试以 LLM spy 断言累计零调用，并保留 Markdown 导航与 API 零标题路径扫描断言。`QueryRewriteServiceImplTest` 21/21、`RagServiceImplTest` 8/8、`KnowledgeToolsScopeTest` 15/15，共 44/44 通过，修复复审无 P0/P1/P2。合法导航的候选读取上限、冻结集收益与真实 PostgreSQL p95 仍待独立验收。
 
 **Router 与证据资产契约。** Router 只能在 `KnowledgeTools`/MCP 已收窄的可访问 KB 范围内输出计划，不能自行访问未授权 KB 或外部工具。`ABSTAIN`、`CLARIFY`、`EXTERNAL_TOOL` 需在真实入口生效，而非仅由 Router 单测断言。非文本能力增加前，先定义资产的 `assetType`、文档 ID、页码/坐标、关联 chunk、内容哈希、解析版本和状态；回答引用须可回跳资产及关联文本。当前 PDF 文本/页码并不等价于图片、表格或公式检索已实现。

@@ -93,9 +93,13 @@ class McpKnowledgeToolTest {
         when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-123");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         try {
+            RagRetrievalResult evidence = new RagRetrievalResult();
+            evidence.setChunkId("chunk-1");
+            evidence.setKbId("kb-own");
+            evidence.setContent("可用证据");
             when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
                     .thenReturn(List.of("kb-own"));
-            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of());
+            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of(evidence));
 
             tool.search("查询", List.of("kb-own"));
 
@@ -105,6 +109,42 @@ class McpKnowledgeToolTest {
                     "ALLOW",
                     List.of("kb-own"),
                     "retrieved"
+            );
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldAuditNoEvidenceAsAbstain() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        McpKnowledgeTool tool = createAuditedTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                principalAccessService
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-no-evidence");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of());
+
+            String response = tool.search("查询", List.of("kb-own"));
+
+            assertThat(response).contains("没有足够证据");
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    "request-no-evidence",
+                    "ABSTAIN",
+                    List.of("kb-own"),
+                    "no_evidence"
             );
         } finally {
             RequestContextHolder.resetRequestAttributes();
@@ -203,9 +243,14 @@ class McpKnowledgeToolTest {
         when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-multimodal");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         try {
+            RagRetrievalResult evidence = new RagRetrievalResult();
+            evidence.setChunkId("chunk-pdf");
+            evidence.setKbId("kb-own");
+            evidence.setContent("第 2 页表格证据");
             when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
                     .thenReturn(List.of("kb-own"));
-            when(ragService.retrieve(List.of("kb-own"), "请定位 PDF 第 2 页的表格", 5)).thenReturn(List.of());
+            when(ragService.retrieve(List.of("kb-own"), "请定位 PDF 第 2 页的表格", 5))
+                    .thenReturn(List.of(evidence));
 
             tool.search("请定位 PDF 第 2 页的表格", List.of("kb-own"));
 

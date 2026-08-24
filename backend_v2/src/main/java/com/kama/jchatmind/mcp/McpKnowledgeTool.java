@@ -96,6 +96,16 @@ public class McpKnowledgeTool {
                 return route.reason();
             }
             List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, route.topK());
+            if (results == null || results.isEmpty()) {
+                mcpPrincipalAccessService.recordKnowledgeQuery(
+                        caller,
+                        resolveCorrelationId(),
+                        "ABSTAIN",
+                        accessibleKbIds,
+                        "no_evidence"
+                );
+                return "当前授权知识范围内没有足够证据，无法可靠回答。";
+            }
             mcpPrincipalAccessService.recordKnowledgeQuery(
                     caller,
                     resolveCorrelationId(),
@@ -103,9 +113,6 @@ public class McpKnowledgeTool {
                     accessibleKbIds,
                     "retrieved"
             );
-            if (results == null || results.isEmpty()) {
-                return "当前授权知识范围内没有足够证据，无法可靠回答。";
-            }
             return formatResults(results, buildKbNameMap(accessibleKbIds));
         } catch (BizException e) {
             mcpPrincipalAccessService.recordKnowledgeQuery(
