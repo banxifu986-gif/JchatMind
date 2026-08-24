@@ -58,6 +58,58 @@ class QueryRewriteServiceImplTest {
     }
 
     @Test
+    void shouldKeepShortNewTitleOutOfFollowUpClassification() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > intro")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "Redis", context);
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("Redis"), result.getRetrievalQueries());
+    }
+
+    @Test
+    void shouldTreatShortTitleWithOneSharedContextTermAsTopicSwitch() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > system design")
+                .build();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "system cache", context);
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("system cache"), result.getRetrievalQueries());
+    }
+
+    @Test
+    void shouldKeepHistoricalContextAsSoftBiasForLowInformationFollowUp() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        RagRetrievalContext context = historicalContextBias();
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1", "kb-2"), "这个", context);
+
+        assertEquals(QueryRewriteResult.Intent.FOLLOW_UP, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, result.getContextApplyMode());
+        assertEquals(
+                List.of("resume.md interview > answer 这个", "这个"),
+                result.getRetrievalQueries()
+        );
+    }
+
+    @Test
     void shouldNotResolveChatClientRegistryDuringConstruction() {
         AtomicInteger resolutionCount = new AtomicInteger();
         ObjectProvider<ChatClientRegistry> chatClientRegistryProvider = new CountingObjectProvider<>(resolutionCount, null);
@@ -329,6 +381,16 @@ class QueryRewriteServiceImplTest {
         result.setKbId(kbId);
         result.setMetadata(metadata);
         return result;
+    }
+
+    private static RagRetrievalContext historicalContextBias() {
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("resume.md")
+                .contentPath("interview > answer")
+                .sessionContextBias(true)
+                .build();
+        return context;
     }
 
     private static class StubChunkBgeM3Mapper implements ChunkBgeM3Mapper {

@@ -11,6 +11,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -55,7 +57,12 @@ class KnowledgeToolsScopeTest {
                 .sourceName("旧文档")
                 .build();
         when(sessionService.getRetrievalContext("session-1", "7")).thenReturn(previousContext);
-        when(ragService.retrieve(List.of("kb-1", "kb-2"), "新主题", previousContext, 3))
+        when(ragService.retrieve(
+                eq(List.of("kb-1", "kb-2")),
+                eq("新主题"),
+                argThat(context -> context != null && context.isSessionContextBias()),
+                eq(3)
+        ))
                 .thenReturn(List.of());
 
         KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
@@ -66,7 +73,15 @@ class KnowledgeToolsScopeTest {
 
         tool.knowledgeQuery("新主题", null);
 
-        verify(ragService).retrieve(List.of("kb-1", "kb-2"), "新主题", previousContext, 3);
+        verify(ragService).retrieve(
+                eq(List.of("kb-1", "kb-2")),
+                eq("新主题"),
+                argThat(context -> context != null
+                        && context.isSessionContextBias()
+                        && "kb-1".equals(context.getKbId())
+                        && "旧文档".equals(context.getSourceName())),
+                eq(3)
+        );
     }
 
     @Test
@@ -199,12 +214,19 @@ class KnowledgeToolsScopeTest {
     }
 
     @Test
-    void shouldHonorExplicitSessionKnowledgeBaseScopeWithoutSourceContext() {
+    void shouldSearchAllAuthorizedKnowledgeBasesWhenOnlyHistoricalKnowledgeBaseContextExists() {
         RagService ragService = mock(RagService.class);
         ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
         RagRetrievalContext explicitScope = RagRetrievalContext.builder().kbId("kb-1").build();
         when(sessionService.getRetrievalContext("session-1", "7")).thenReturn(explicitScope);
-        when(ragService.retrieve(List.of("kb-1"), "问题", explicitScope, 3)).thenReturn(List.of());
+        when(ragService.retrieve(
+                eq(List.of("kb-1", "kb-2")),
+                eq("问题"),
+                argThat(context -> context != null
+                        && context.isSessionContextBias()
+                        && "kb-1".equals(context.getKbId())),
+                eq(3)
+        )).thenReturn(List.of());
 
         KnowledgeTools tool = new KnowledgeTools(ragService, sessionService)
                 .fork("7", "session-1", List.of(
@@ -214,7 +236,14 @@ class KnowledgeToolsScopeTest {
 
         tool.knowledgeQuery("问题", null);
 
-        verify(ragService).retrieve(List.of("kb-1"), "问题", explicitScope, 3);
+        verify(ragService).retrieve(
+                eq(List.of("kb-1", "kb-2")),
+                eq("问题"),
+                argThat(context -> context != null
+                        && context.isSessionContextBias()
+                        && "kb-1".equals(context.getKbId())),
+                eq(3)
+        );
     }
 
     @Test

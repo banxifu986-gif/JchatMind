@@ -208,9 +208,6 @@ public class KnowledgeTools implements Tool {
             return List.of();
         }
         if (CollectionUtils.isEmpty(kbIds)) {
-            if (isExplicitSessionScope(retrievalContext)) {
-                return List.of(retrievalContext.getKbId());
-            }
             return new ArrayList<>(allowedKbMap.keySet());
         }
         return kbIds.stream()
@@ -219,15 +216,6 @@ public class KnowledgeTools implements Tool {
                 .filter(allowedKbMap::containsKey)
                 .distinct()
                 .toList();
-    }
-
-    private boolean isExplicitSessionScope(RagRetrievalContext retrievalContext) {
-        return retrievalContext != null
-                && StringUtils.hasText(retrievalContext.getKbId())
-                && allowedKbMap.containsKey(retrievalContext.getKbId())
-                && !StringUtils.hasText(retrievalContext.getSourceType())
-                && !StringUtils.hasText(retrievalContext.getSourceName())
-                && !StringUtils.hasText(retrievalContext.getContentPath());
     }
 
     private RagRetrievalContext alignRetrievalContext(
@@ -240,10 +228,10 @@ public class KnowledgeTools implements Tool {
         }
         if (CollectionUtils.isEmpty(requestedKbIds)) {
             if (!StringUtils.hasText(retrievalContext.getKbId())) {
-                return retrievalContext;
+                return markAsSessionContextBias(retrievalContext);
             }
             if (effectiveKbIds.contains(retrievalContext.getKbId())) {
-                return retrievalContext;
+                return markAsSessionContextBias(retrievalContext);
             }
             return null;
         }
@@ -254,6 +242,16 @@ public class KnowledgeTools implements Tool {
             return null;
         }
         return retrievalContext;
+    }
+
+    private RagRetrievalContext markAsSessionContextBias(RagRetrievalContext context) {
+        return RagRetrievalContext.builder()
+                .kbId(context.getKbId())
+                .sourceType(context.getSourceType())
+                .sourceName(context.getSourceName())
+                .contentPath(context.getContentPath())
+                .sessionContextBias(true)
+                .build();
     }
 
     private String formatResults(List<RagRetrievalResult> results) {

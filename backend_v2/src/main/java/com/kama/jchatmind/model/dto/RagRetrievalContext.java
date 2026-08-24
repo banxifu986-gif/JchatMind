@@ -19,6 +19,9 @@ public class RagRetrievalContext {
 
     private String contentPath;
 
+    @Builder.Default
+    private boolean sessionContextBias = false;
+
     public boolean hasContext() {
         return StringUtils.hasText(kbId)
                 || StringUtils.hasText(sourceType)

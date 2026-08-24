@@ -155,7 +155,10 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         if (containsAnalyticalMarker(normalizedQuery)) {
             return QueryRewriteResult.Intent.ANALYTICAL;
         }
-        if (context != null && context.hasContext() && isLowInformationFollowUp(normalizedQuery)) {
+        if (context != null
+                && context.hasContext()
+                && isLowInformationFollowUp(normalizedQuery)
+                && !hasTopicSwitchSignal(normalizedQuery, context)) {
             return QueryRewriteResult.Intent.FOLLOW_UP;
         }
         return QueryRewriteResult.Intent.FACTOID;
@@ -168,6 +171,9 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     ) {
         if (context == null || !context.hasContext()) {
             return QueryRewriteResult.ContextApplyMode.NONE;
+        }
+        if (context.isSessionContextBias()) {
+            return QueryRewriteResult.ContextApplyMode.SOFT;
         }
         if (intent == QueryRewriteResult.Intent.NAVIGATION) {
             return topicSwitchSignal
@@ -200,7 +206,6 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             queries.add(llmRewrittenQuery);
             sources.add("llm");
         } else if (intent == QueryRewriteResult.Intent.FOLLOW_UP
-                && contextApplyMode == QueryRewriteResult.ContextApplyMode.HARD
                 && context != null
                 && context.hasContext()) {
             String standalone = buildStandaloneFollowUpQuery(context, sanitizedQuery);
@@ -377,9 +382,12 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         }
         double pathOverlap = overlapRatio(queryTerms, terms(normalize(context.getContentPath())));
         double sourceOverlap = overlapRatio(queryTerms, terms(normalize(context.getSourceName())));
-        return pathOverlap == 0D
-                && sourceOverlap == 0D
-                && !FOLLOW_UP_MARKERS.stream().anyMatch(normalizedQuery::contains);
+        if (FOLLOW_UP_MARKERS.stream().anyMatch(normalizedQuery::contains)) {
+            return false;
+        }
+        double maxContextOverlap = Math.max(pathOverlap, sourceOverlap);
+        return maxContextOverlap == 0D
+                || (queryTerms.size() > 1 && maxContextOverlap < 1D);
     }
 
     private boolean isSamePathBranch(String normalizedQuery, String normalizedContextPath) {
@@ -605,6 +613,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 .sourceType(trimToNull(context.getSourceType()))
                 .sourceName(trimToNull(context.getSourceName()))
                 .contentPath(trimToNull(context.getContentPath()))
+                .sessionContextBias(context.isSessionContextBias())
                 .build();
     }
 
