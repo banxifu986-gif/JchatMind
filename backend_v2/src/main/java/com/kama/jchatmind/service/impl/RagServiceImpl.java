@@ -532,7 +532,7 @@ public class RagServiceImpl implements RagService {
         }
 
         Map<String, RagRetrievalResult> mergedByChunkId = new LinkedHashMap<>();
-        for (RetrievalChannel channel : channels) {
+        for (RetrievalChannel channel : collapseSameSourceChannels(channels)) {
             List<RagRetrievalResult> results = channel.results();
             for (int i = 0; i < results.size(); i++) {
                 RagRetrievalResult incoming = results.get(i);
@@ -565,6 +565,60 @@ public class RagServiceImpl implements RagService {
         return fused;
     }
 
+    private List<RetrievalChannel> collapseSameSourceChannels(List<RetrievalChannel> channels) {
+        Map<String, LinkedHashMap<String, GroupedRetrieval>> grouped = new LinkedHashMap<>();
+        for (RetrievalChannel channel : channels) {
+            String group = retrievalGroup(channel.name());
+            LinkedHashMap<String, GroupedRetrieval> groupResults = grouped.computeIfAbsent(
+                    group,
+                    key -> new LinkedHashMap<>()
+            );
+            List<RagRetrievalResult> results = channel.results();
+            for (int i = 0; i < results.size(); i++) {
+                RagRetrievalResult incoming = results.get(i);
+                if (!StringUtils.hasText(incoming.getChunkId())) {
+                    continue;
+                }
+                int incomingRank = safeRank(incoming.getRank()) == Integer.MAX_VALUE ? i + 1 : incoming.getRank();
+                GroupedRetrieval existing = groupResults.get(incoming.getChunkId());
+                if (existing == null) {
+                    RagRetrievalResult copy = copyResult(incoming);
+                    copy.setRank(incomingRank);
+                    existing = new GroupedRetrieval(copy, incomingRank, new LinkedHashSet<>());
+                    groupResults.put(incoming.getChunkId(), existing);
+                } else {
+                    mergeSignals(existing.result(), incoming);
+                    if (incomingRank < existing.bestRank()) {
+                        existing.result().setRank(incomingRank);
+                        existing.setBestRank(incomingRank);
+                    }
+                }
+                existing.provenance().add(channel.name());
+            }
+        }
+        return grouped.entrySet().stream()
+                .map(entry -> new RetrievalChannel(
+                        entry.getKey(),
+                        entry.getValue().values().stream()
+                                .map(GroupedRetrieval::result)
+                                .peek(result -> result.setRetrievalProvenance(
+                                        List.copyOf(entry.getValue().get(result.getChunkId()).provenance())
+                                ))
+                                .toList()
+                ))
+                .toList();
+    }
+
+    private String retrievalGroup(String channelName) {
+        if (channelName.startsWith("vector_")) {
+            return "vector";
+        }
+        if (channelName.startsWith("title_")) {
+            return "title";
+        }
+        return channelName;
+    }
+
     private RagRetrievalResult copyResult(RagRetrievalResult source) {
         RagRetrievalResult copy = new RagRetrievalResult();
         copy.setChunkId(source.getChunkId());
@@ -582,10 +636,21 @@ public class RagServiceImpl implements RagService {
         copy.setContentBm25Rank(source.getContentBm25Rank());
         copy.setContentBm25Score(source.getContentBm25Score());
         copy.setRerankScore(source.getRerankScore());
+        copy.setRetrievalProvenance(source.getRetrievalProvenance() == null
+                ? null
+                : List.copyOf(source.getRetrievalProvenance()));
         return copy;
     }
 
     private void mergeSignals(RagRetrievalResult merged, RagRetrievalResult incoming) {
+        if (incoming.getRetrievalProvenance() != null) {
+            LinkedHashSet<String> provenance = new LinkedHashSet<>();
+            if (merged.getRetrievalProvenance() != null) {
+                provenance.addAll(merged.getRetrievalProvenance());
+            }
+            provenance.addAll(incoming.getRetrievalProvenance());
+            merged.setRetrievalProvenance(List.copyOf(provenance));
+        }
         if (!StringUtils.hasText(merged.getContent()) && StringUtils.hasText(incoming.getContent())) {
             merged.setContent(incoming.getContent());
         }
@@ -1198,6 +1263,38 @@ public class RagServiceImpl implements RagService {
             String name,
             List<RagRetrievalResult> results
     ) {
+    }
+
+    private static final class GroupedRetrieval {
+        private final RagRetrievalResult result;
+        private int bestRank;
+        private final LinkedHashSet<String> provenance;
+
+        private GroupedRetrieval(
+                RagRetrievalResult result,
+                int bestRank,
+                LinkedHashSet<String> provenance
+        ) {
+            this.result = result;
+            this.bestRank = bestRank;
+            this.provenance = provenance;
+        }
+
+        private RagRetrievalResult result() {
+            return result;
+        }
+
+        private int bestRank() {
+            return bestRank;
+        }
+
+        private void setBestRank(int bestRank) {
+            this.bestRank = bestRank;
+        }
+
+        private LinkedHashSet<String> provenance() {
+            return provenance;
+        }
     }
 
     private record RetrievalContext(

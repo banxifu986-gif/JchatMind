@@ -1,5 +1,7 @@
 package com.kama.jchatmind.model.dto;
 
+import java.util.List;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -37,4 +39,6 @@ public class RagRetrievalResult {
     private Double contentBm25Score;
 
     private Double rerankScore;
+
+    private List<String> retrievalProvenance;
 }
