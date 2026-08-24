@@ -250,6 +250,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-24 G2-3a 局部收口记录。** 提交 `1e96e44` 在跨组 RRF 前将 `vector_*` 查询通道和 `title_*` 标题通道分别归并为同源组；同一 chunk 在组内多次命中只保留最佳 rank，因此每个同源组最多贡献一次 RRF 投票，`content_bm25` 仍作为独立跨组信号。`RagRetrievalResult.retrievalProvenance` 保留通道与 query source（例如 `vector_original`、`vector_standalone`、`title_exact`），并在跨组融合时按稳定顺序合并。`RagServiceImplTest` 的 3 个新增 RED/GREEN 用例与原有 5 个用例共 8/8 通过；独立代码审查无 P0/P1/P2。尚未覆盖同组重复命中最佳 rank 的精确贡献、不同首次出现顺序下的稳定排序和标题/BM25 provenance 全并集，这些是非阻断补强项；会话 context 置信门禁、默认 KB 范围、Router 接线及多模态资产仍未完成。
 
+**2026-08-24 G2-3 范围与改写局部收口记录。** 提交 `4a57d34` 冻结了入口语义：未传 `kbIds` 时总是搜索 Agent 的全部授权 KB，只有工具请求中的显式 `kbIds` 才能收窄；已撤销的历史 KB context 仍被清除。入口将有效历史 context 复制为瞬时 `sessionContextBias`，改写器在该标记下固定 `SOFT`，因此不会对 KB、来源或路径施加 `HARD` 过滤，但明确 follow-up 仍保留一个受控 standalone query 与原问。短新标题（包括与旧路径仅部分词重叠的标题）改判为 `FACTOID` 并保留标题通道，避免误归为 `FOLLOW_UP`。该阶段先后修复独立审查发现的 context 未标记、部分重叠标题误判和 soft-bias 丢失 standalone 三个 P1；最终 `QueryRewriteServiceImplTest` 17/17、`KnowledgeToolsScopeTest` 14/14，共 31/31 通过，复审无 P0/P1/P2。它不覆盖任意 `/` 或 `\\` 导航误判、Router 生产接线、引用资产或外部基准，G2 未整体完成。
+
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
 1. `findTitleBm25Candidates` 与 `findContentBm25Candidates` 通过 Mapper 把授权 KB 的候选 chunk 拉回 JVM，再由应用计算 BM25。数据量随 KB 增长线性放大，且数据库无法利用原生倒排索引、按范围先过滤再取 Top-N。
@@ -257,9 +259,9 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 3. 改写后的多个向量查询与原问在 RRF 中等权；而标题/正文 BM25 固定使用原问。低信息追问既可能让改写通道过度影响排序，也无法让受控的 standalone query 补足正文词法召回。
 4. `RagRouter` 目前没有生产调用点；单元测试通过只证明分类规则，不证明授权范围、外部许可、拒答和实际召回链路正确。
 5. 多格式摄入已覆盖 Markdown/HTML/PDF 文本，但没有图片、表格或公式的独立资产、相对位置和跨元素关系，无法形成 RAG-Anything 所强调的可定位多模态证据。
-6. 未传 `kbIds` 时，`KnowledgeTools` 会以会话上次命中的 `retrievalContext.kbId` 隐式收窄可搜 KB。这与“默认搜索 Agent 所有可访问 KB、会话仅提供偏置”的产品语义不同，会令跨 KB 的 topic switch 在改写器识别前已经不可能召回。安全收窄本身正确，但默认范围必须显式定义，不能由上一条结果悄然决定。
+6. 默认多 KB 范围、历史 context 的 soft-bias 与显式 `kbIds` 收窄已按 `4a57d34` 固定；仍需在冻结集验证跨 KB topic switch 的 Recall、p95 和 context 更新质量。
 7. 同源标题通道与多 query 向量通道已完成组内去重/校准并记录 provenance；仍需在冻结集验证校准对 Recall/MRR、p95 和来源诊断的影响。
-8. 有会话上下文的短新实体/标题可能被判为 `FOLLOW_UP`，进而关闭所有标题通道；任意 `/` 或 `\\` 又可能被判为导航并触发无上限的 title/path 候选扫描，还可能误施加 `HARD` 约束。
+8. 短新实体/标题的 follow-up 误判已按 `4a57d34` 处理；任意 `/` 或 `\\` 仍可能被判为导航并触发无上限的 title/path 候选扫描，还可能误施加 `HARD` 约束。
 9. `KnowledgeTools` 在任何非空 Top-1 后都会覆盖 session retrieval context；低相关或无答案检索会把错误来源写回下一轮，形成 context 自我强化。
 
 **BM25 目标与选型边界。** G2 要把标题和正文 BM25 迁为 PostgreSQL 内的原生倒排查询，应用层只接收 `chunkId`、通道、通道内 rank、可选 lexical score 与必要展示字段，继续使用 RRF 融合排名，不把 BM25 原始分数直接与向量距离比较。首个隔离 PoC 优先验证 ParadeDB 的 `pg_search`：其定位覆盖 PostgreSQL 内的全文、向量和混合检索；但其 AGPL-3.0 许可证、目标 PostgreSQL 版本、镜像中 pgvector 扩展和备份恢复兼容性必须在引入前完成审查。VectorChord-bm25 是备选原生 BM25 索引，需同样验证许可证、目标 PostgreSQL 版本、索引维护和运维包兼容性。不得同时把两个插件带入生产，也不得以长期双读/双写作为迁移方案；PoC 仅在隔离数据库对同一冻结数据集比较，达到门禁后选择唯一 provider 并删除 JVM 全量 BM25 路径。

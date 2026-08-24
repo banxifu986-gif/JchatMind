@@ -146,6 +146,8 @@
 
 本轮已落地该契约中的排序局部：RRF 和 `HARD` 过滤完成后最多对前 50 个候选执行 rerank，预算外候选保持原 RRF 顺序；rank penalty 以 `0.15` 为上限。2026-08-24 提交 `1e96e44` 进一步在跨组 RRF 前对 `vector_*` 与 `title_*` 做同源组内去重/校准，同一 chunk 在组内只保留最佳 rank 的一次贡献，并在 `RagRetrievalResult.retrievalProvenance` 保留 `vector_original`、`vector_standalone`、`title_exact` 等通道/query 来源；`RagServiceImplTest` 8/8 通过且独立审查无 P0/P1/P2。会话 context 置信门禁、默认 KB 范围、Router 接线和其余 G2 子项仍待后续 RED/GREEN 验收。
 
+2026-08-24 提交 `4a57d34` 已落实默认 KB 范围的入口边界：未传 `kbIds` 时检索 Agent 的全部授权 KB，历史命中只复制为本次调用的 `sessionContextBias`，改写器固定使用 `SOFT`，不能借旧 `kbId`、来源或路径触发 `HARD` 过滤；只有调用方显式 `kbIds` 才收窄。撤销的历史 KB context 会清除。`FOLLOW_UP` 在 soft-bias 下仍生成最多一个受控 standalone query 并始终保留原问；短新标题和与旧路径仅部分重叠的标题走 `FACTOID` 与标题通道。`QueryRewriteServiceImplTest` 和 `KnowledgeToolsScopeTest` 共 31/31 通过，独立复审无 P0/P1/P2。任意 slash 导航误判、Router、引用资产和其余 G2 项仍待后续 RED/GREEN 验收。
+
 **Router 与证据资产契约。** Router 只能在 `KnowledgeTools`/MCP 已收窄的可访问 KB 范围内输出计划，不能自行访问未授权 KB 或外部工具。`ABSTAIN`、`CLARIFY`、`EXTERNAL_TOOL` 需在真实入口生效，而非仅由 Router 单测断言。非文本能力增加前，先定义资产的 `assetType`、文档 ID、页码/坐标、关联 chunk、内容哈希、解析版本和状态；回答引用须可回跳资产及关联文本。当前 PDF 文本/页码并不等价于图片、表格或公式检索已实现。
 
 **G2-4a 资产持久化契约。** [2026-08-22-create-document-asset.sql](../../sql/ingestion/2026-08-22-create-document-asset.sql) 定义 `document_asset` 与 `document_asset_chunk`：资产以 `(document_id, asset_type, asset_key)` 作为稳定定位键，保存可选 `page_number`、JSON `locator`、小写 SHA-256 `content_hash`、`parser_version` 与 `PENDING`/`READY`/`FAILED` 状态；关系表分别携带 `asset_document_id` 和 `chunk_document_id`，通过相等检查约束两者属于同一文档，再以资产 `(asset_id, document_id)` 与 chunk `(id, doc_id)` 的复合级联外键关联。该模型由数据库引用完整性阻止跨文档关联，也阻止已关联的资产或 chunk 换文档，不依赖易产生并发检查-写入竞态的触发器。初始合法资产类型为 `PDF_PAGE_TEXT`、`IMAGE`、`TABLE` 和 `FORMULA`，但本阶段只有契约和迁移已落地，尚未启用 OCR、图片、表格或公式解析、索引或引用输出。后续每种资产类型必须先独立 RED，再补摄入、幂等替换、权限、召回和定位引用 GREEN。
