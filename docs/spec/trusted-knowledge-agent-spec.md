@@ -343,19 +343,19 @@ rag:
 
 #### 4.7.3.1 外部基准评测契约
 
-本项目首次外部基准评测同时接入 mMARCO 与 CRUD-RAG，但两者保持独立报告、独立指标和独立结论：
+本项目首次外部基准评测同时接入 mMARCO 与 CRUD-RAG，但两者保持独立报告、独立指标和独立结论。官方入口分别为 mMARCO 的 [GitHub 仓库](https://github.com/unicamp-dl/mMARCO) 与 [Hugging Face 数据集](https://huggingface.co/datasets/unicamp-dl/mmarco)，以及 CRUD-RAG 的 [GitHub 仓库](https://github.com/IAAR-Shanghai/CRUD_RAG) 和 [论文](https://arxiv.org/abs/2401.17043)：
 
 | 数据集 | 评测对象 | 输入与 gold | 必报指标 | 主要边界 |
 | --- | --- | --- | --- | --- |
 | mMARCO | 多语言 passage retrieval；向量、VectorChord BM25 和 RRF 融合候选召回 | 官方 query、语言、split、相关 passage 标注；映射到本项目文档/chunk 后保留原始 ID 和映射版本 | `Recall@1/5/10`、`MRR@10`、`nDCG@10`、每语言样本数、p50/p95 检索延迟、索引/embedding 版本 | 不覆盖本项目私有 owner 权限、会话范围、拒答、引用和最终答案质量 |
-| CRUD-RAG | 动态知识库在 Create/Read/Update/Delete 事件后的检索一致性 | 初始 corpus、按顺序执行的 CRUD 事件、每个事件后的 gold 版本和应失效 chunk；事件序列必须可重放 | `Recall@K`、`MRR@K`、stale-hit rate、删除后残留率、更新生效延迟、重复重放一致性、p95 | 不替代 mMARCO 的多语言横向检索，也不单独证明 VectorChord 性能或授权链路 |
+| CRUD-RAG | 中文 RAG 综合基准中的检索与生成任务；官方仓库提供 `data/crud`、`data/crud_split`、`data/80000_docs` 和任务脚本 | 官方数据划分、文档库、问答/摘要/续写/事实修改任务输入与参考答案；保留官方任务定义和评测脚本版本 | 检索链路另报 `Recall@K`/`MRR@K` 等；官方任务另报其定义的答案质量指标、样本数和 p95 | 不替代 mMARCO 的多语言横向检索，也不单独证明 VectorChord 性能、动态 CRUD 事件一致性或授权链路 |
 
 外部基准执行约束：
 
 1. 下载前登记官方来源 URL、版本/发布日期、许可证和文件 SHA-256；若官方信息未核对，保持 `准备中`，不把结果写成通过。
-2. 使用独立测试数据库、独立 KB/文档/chunk ID 命名空间和独立文件目录；禁止写入真实业务库或复用生产索引。所有预处理脚本、字段映射、语言过滤和 CRUD 事件序列均须版本化。
+2. 使用独立测试数据库、独立 KB/文档/chunk ID 命名空间和独立文件目录；禁止写入真实业务库或复用生产索引。所有预处理脚本、字段映射、语言过滤、官方任务选择和数据划分均须版本化。
 3. 将 development split 与 untouched test split 分离。embedding 模型、chunk 策略、BM25 词典、RRF 参数和 rerank 配置只能在 development split 决定；test split 只允许一次冻结执行或明确记录重跑原因。
-4. mMARCO 按语言分别聚合，不跨语言平均原始分数；CRUD-RAG 按事件类型分别聚合，不把新增、更新、删除混为单一 Recall。两个数据集不计算未经定义的综合分数。
+4. mMARCO 按语言分别聚合，不跨语言平均原始分数；CRUD-RAG 按官方任务和 split 分组聚合，不把问答、摘要、续写和事实修改混为未经定义的单一 Recall。两个数据集不计算未经定义的综合分数。
 5. 报告同时包含 `datasetVersion`、`license`、`sourceSha256`、`preprocessVersion`、`mappingVersion`、`indexVersion`、`embeddingModel`、`configSha256`、`sampleSize`、`evaluated/skipped`、`skipReasons` 和延迟统计。
 
 建议报告路径：`backend_v2/target/rag-eval/external/mmarco-<version>-report.json` 与 `backend_v2/target/rag-eval/external/crud-rag-<version>-report.json`。外部基准通过只表示对应数据集和配置下的可复现结果；G2 阶段仍须另外通过 `TC-G2-02` 至 `TC-G2-08` 的权限、Router、拒答、引用和冻结集验收。

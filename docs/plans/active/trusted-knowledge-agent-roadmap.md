@@ -89,14 +89,14 @@ JSONB `allowedKbs` 已从 `agent` 持久化模型移除，不能作为授权或�
 
 #### 3.3.1 外部基准接入（mMARCO 与 CRUD-RAG）
 
-首次外部基准测评采用两个互补数据集，分别回答“多语言检索是否有效”和“知识库发生 CRUD 变化后是否仍然可信”两个问题：
+首次外部基准测评采用两个互补数据集，分别回答“多语言检索是否有效”和“中文 RAG 在多类任务上的检索与生成表现如何”两个问题：
 
-- **mMARCO**：作为多语言 passage retrieval 基准，保留官方语言、query、正例/负例和 split；首轮只测 Retriever/RAG 的候选召回，不把英文或其他语言的结果合并为一个无语义总分。报告至少分语言记录 `Recall@K`、`MRR@K`、`nDCG@K`、样本数和 p95 检索延迟。
-- **CRUD-RAG**：作为动态知识库基准，按 Create、Read、Update、Delete 事件重放同一知识集合的版本变化；重点验证新增内容可见、更新后旧内容不再优先、删除后无 stale hit，以及权限范围内的结果稳定。报告按 CRUD 事件类型记录 `Recall@K`、`MRR@K`、stale-hit rate、删除后残留率、更新生效延迟和 p95。
+- **mMARCO**：官方仓库为 `https://github.com/unicamp-dl/mMARCO`，数据入口为 `https://huggingface.co/datasets/unicamp-dl/mmarco`；作为多语言 passage retrieval 基准，保留官方语言、query、正例/负例和 split。首轮只测 Retriever/RAG 的候选召回，不把英文或其他语言的结果合并为一个无语义总分。报告至少分语言记录 `Recall@K`、`MRR@K`、`nDCG@K`、样本数和 p95 检索延迟。仓库代码带 Apache-2.0 LICENSE，但 mMARCO 由 MS MARCO 翻译而来，数据再分发仍需同时核对数据集页和 MS MARCO 条款。
+- **CRUD-RAG**：官方仓库为 `https://github.com/IAAR-Shanghai/CRUD_RAG`，论文入口为 `https://arxiv.org/abs/2401.17043`；它是中文 RAG 综合基准，仓库包含 `data/crud/`、`data/crud_split/` 和 `data/80000_docs/`，覆盖问答、摘要、续写和事实修改/幻觉等任务。README 展示 Apache-2.0 徽章，但仓库当前没有可被 GitHub 自动识别的 LICENSE 文件，执行前必须保留 README/论文版本并人工核对数据条款。应按官方数据划分和任务脚本执行，重点报告检索候选质量与官方任务指标；不得把名称中的 CRUD 解释为本项目的 Create/Read/Update/Delete 事件回放。
 
 外部数据集不能直接写入或覆盖真实业务库。执行前必须建立独立 PostgreSQL/VectorChord 测试库和独立上传目录，记录官方来源 URL、版本/发布日期、许可证、下载文件 SHA-256、预处理脚本版本、语言或事件过滤条件，以及映射到本项目 `kb_id`/`doc_id`/`chunk_id` 的映射清单。评测集不得参与 embedding、BM25 词典或 RRF 参数调优；需要调参时必须另行划分 development split，并保留 untouched test split。
 
-两个基准分别出报告并与同一配置下的 G0 fixture、G2 pre-BM25 基线和当前 VectorChord 链路对比；不做跨数据集平均，不以单一 Recall 数值宣称 G2 已完成。mMARCO 主要支撑公开检索能力的横向比较，CRUD-RAG 主要支撑索引更新、删除和动态知识可信度，二者都不能替代本项目的 owner/Agent/会话授权、拒答和引用准确性冻结集。
+两个基准分别出报告并与同一配置下的 G0 fixture、G2 pre-BM25 基线和当前 VectorChord 链路对比；不做跨数据集平均，不以单一 Recall 数值宣称 G2 已完成。mMARCO 主要支撑公开多语言检索能力的横向比较，CRUD-RAG 主要支撑中文 RAG 任务覆盖；二者都不能替代本项目的 owner/Agent/会话授权、拒答、动态更新一致性和引用准确性冻结集。
 
 ## 4. 能力规格与依赖关系
 
@@ -333,7 +333,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | 基准 | 最小执行范围 | 必须记录 | 不得据此宣称 |
 | --- | --- | --- | --- |
 | mMARCO | 按官方语言和 split 对 query-passage 检索；至少运行原问向量、VectorChord BM25 和融合链路三种配置 | 数据集版本、语言、split、样本数、gold 定义、`Recall@K`/`MRR@K`/`nDCG@K`、p95、索引/embedding 版本、配置 SHA | 私有知识库权限、中文业务术语、答案忠实性或引用准确性已验收 |
-| CRUD-RAG | 按 Create/Read/Update/Delete 事件顺序重放；至少覆盖新增可见、更新去旧、删除无残留和重复重放 | 初始 corpus 版本、事件序列 SHA、事件类型、预期生效版本、stale-hit rate、删除残留率、更新生效延迟、p95、数据库/索引版本 | 通用公开检索能力或 G2 全部 `TC-G2-02` 至 `TC-G2-08` 已完成 |
+| CRUD-RAG | 按官方 `crud`/`crud_split` 数据和任务脚本执行；至少固定数据划分、文档库构建、问答/摘要/续写/事实修改任务的输入输出 | 数据集版本、任务与 split、样本数、gold/参考答案定义、检索指标、官方任务指标、p95、数据库/索引/模型版本 | 通用多语言检索、私有知识库授权或 G2 全部 `TC-G2-02` 至 `TC-G2-08` 已完成 |
 
 若官方许可证、版本或字段语义尚未核对，测试只能标记为“准备中”，不能提交数据文件或标记通过。报告必须把下载、预处理、入库、索引构建和查询执行分成可审计步骤；任何失败、跳过或无法映射的 case 都要记录原因。
 
