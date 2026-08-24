@@ -11,7 +11,7 @@
 - **MCP 服务端** — 将知识库检索、邮件、数据库工具暴露为 MCP 工具，支持 Notion 等外部客户端调用
 
 ### 改进
-- **RAG 链路** — 多路召回、查询改写评测基线、Ollama Embed 适配、pgvector 余弦距离
+- **RAG 链路** — 多路召回、查询改写评测基线、Ollama Embed 适配、pgvector 余弦距离、可控的 TEI cross-encoder 重排序
 - **工具稳定性** — 压缩阶段防截断工具调用对、工具指标接入、SSE 超时处理
 - **基础设施** — docker-compose 一键启停（PostgreSQL + Redis + RabbitMQ）
 
@@ -33,7 +33,7 @@ javamind_agents
 
 ## 启动
 
-1. 启动基础设施（PostgreSQL + pgvector + Redis + RabbitMQ）：
+1. 启动基础设施（PostgreSQL + pgvector + Redis + RabbitMQ + Ollama + TEI reranker）：
 
 ```bash
 docker compose up -d
@@ -71,6 +71,23 @@ cd ui
 npm install
 npm run dev
 ```
+
+### 可选 BGE 重排序
+
+`docker compose up -d` 会额外启动本地 CPU TEI 服务 `jchatmind-reranker`，使用
+`BAAI/bge-reranker-v2-m3`，宿主入口为 `http://127.0.0.1:8081/rerank`。模型缓存保存在
+Docker volume `jchatmind_tei_data`，首次启动需要下载模型。
+
+后端默认不使用该服务，`rag.rerank.enabled` 默认值为 `false`，因此启动基础设施不会改变已有检索排序。
+完成冻结基准的 A/B 对比后，才通过运行环境设置以下非敏感配置开启：
+
+```text
+RAG_RERANK_ENABLED=true
+RAG_RERANK_BASE_URL=http://127.0.0.1:8081
+RAG_RERANK_TIMEOUT_MS=3000
+```
+
+启用后，RRF 与上下文过滤完成的前 50 个候选会发送到 TEI；服务超时、不可用或返回非法响应时，后端保持现有本地 rerank 作为回退。
 
 ## 许可证
 

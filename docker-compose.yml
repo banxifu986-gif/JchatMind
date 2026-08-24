@@ -39,9 +39,21 @@ services:
       - ollama_data:/root/.ollama
     restart: unless-stopped
 
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    container_name: jchatmind-reranker
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3"]
+    ports:
+      - "8081:80"
+    volumes:
+      - tei_data:/data
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     external: true
     name: jchatmind_postgres_data
   ollama_data:
     name: jchatmind_ollama_data
+  tei_data:
+    name: jchatmind_tei_data
