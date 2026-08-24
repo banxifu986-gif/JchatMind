@@ -87,6 +87,17 @@ JSONB `allowedKbs` 已从 `agent` 持久化模型移除，不能作为授权或�
 
 构建独立于调参语料的评测集，首期目标 100 个人工复核 case，至少包含：精确术语、改写、多文档综合、多轮追问、图文/表格问答、无答案拒答和权限越界拒答。每个 case 记录 `query`、`queryType`、`goldChunkIds`、`goldFacts`、`shouldAbstain`、`kbScope` 和数据集版本。
 
+#### 3.3.1 外部基准接入（mMARCO 与 CRUD-RAG）
+
+首次外部基准测评采用两个互补数据集，分别回答“多语言检索是否有效”和“知识库发生 CRUD 变化后是否仍然可信”两个问题：
+
+- **mMARCO**：作为多语言 passage retrieval 基准，保留官方语言、query、正例/负例和 split；首轮只测 Retriever/RAG 的候选召回，不把英文或其他语言的结果合并为一个无语义总分。报告至少分语言记录 `Recall@K`、`MRR@K`、`nDCG@K`、样本数和 p95 检索延迟。
+- **CRUD-RAG**：作为动态知识库基准，按 Create、Read、Update、Delete 事件重放同一知识集合的版本变化；重点验证新增内容可见、更新后旧内容不再优先、删除后无 stale hit，以及权限范围内的结果稳定。报告按 CRUD 事件类型记录 `Recall@K`、`MRR@K`、stale-hit rate、删除后残留率、更新生效延迟和 p95。
+
+外部数据集不能直接写入或覆盖真实业务库。执行前必须建立独立 PostgreSQL/VectorChord 测试库和独立上传目录，记录官方来源 URL、版本/发布日期、许可证、下载文件 SHA-256、预处理脚本版本、语言或事件过滤条件，以及映射到本项目 `kb_id`/`doc_id`/`chunk_id` 的映射清单。评测集不得参与 embedding、BM25 词典或 RRF 参数调优；需要调参时必须另行划分 development split，并保留 untouched test split。
+
+两个基准分别出报告并与同一配置下的 G0 fixture、G2 pre-BM25 基线和当前 VectorChord 链路对比；不做跨数据集平均，不以单一 Recall 数值宣称 G2 已完成。mMARCO 主要支撑公开检索能力的横向比较，CRUD-RAG 主要支撑索引更新、删除和动态知识可信度，二者都不能替代本项目的 owner/Agent/会话授权、拒答和引用准确性冻结集。
+
 ## 4. 能力规格与依赖关系
 
 ### 4.1 异步任务中心与队列
@@ -316,6 +327,15 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | 阶段退出 | 本阶段所有必需 `TC-ID` 通过，且对应报告、数据集版本、配置版本和基线对比已回填本计划。 |
 
 报告默认保存在 `backend_v2/target/surefire-reports/`、`backend_v2/target/rag-eval/` 或 Playwright 报告目录；本计划的“阶段验收证据”表只记录相对路径、日期、执行人和结论，不新建平行测试文档。
+
+#### 6.2.1 外部基准执行门禁
+
+| 基准 | 最小执行范围 | 必须记录 | 不得据此宣称 |
+| --- | --- | --- | --- |
+| mMARCO | 按官方语言和 split 对 query-passage 检索；至少运行原问向量、VectorChord BM25 和融合链路三种配置 | 数据集版本、语言、split、样本数、gold 定义、`Recall@K`/`MRR@K`/`nDCG@K`、p95、索引/embedding 版本、配置 SHA | 私有知识库权限、中文业务术语、答案忠实性或引用准确性已验收 |
+| CRUD-RAG | 按 Create/Read/Update/Delete 事件顺序重放；至少覆盖新增可见、更新去旧、删除无残留和重复重放 | 初始 corpus 版本、事件序列 SHA、事件类型、预期生效版本、stale-hit rate、删除残留率、更新生效延迟、p95、数据库/索引版本 | 通用公开检索能力或 G2 全部 `TC-G2-02` 至 `TC-G2-08` 已完成 |
+
+若官方许可证、版本或字段语义尚未核对，测试只能标记为“准备中”，不能提交数据文件或标记通过。报告必须把下载、预处理、入库、索引构建和查询执行分成可审计步骤；任何失败、跳过或无法映射的 case 都要记录原因。
 
 ### 6.3 G0-G5 验收矩阵
 
