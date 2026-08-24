@@ -249,6 +249,74 @@ class QueryRewriteServiceImplTest {
     }
 
     @Test
+    void shouldTreatApiPathAsFactoidAndSkipNavigationCandidateScan() {
+        AtomicInteger titlePathLookupCount = new AtomicInteger();
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of(), titlePathLookupCount)
+        );
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "/api/v1/agents", null);
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.NONE, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+        assertEquals(List.of("/api/v1/agents"), result.getRetrievalQueries());
+        assertEquals(0, titlePathLookupCount.get());
+    }
+
+    @Test
+    void shouldKeepMarkdownDocumentPathAsNavigationQuery() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "docs/agents.md", null);
+
+        assertEquals(QueryRewriteResult.Intent.NAVIGATION, result.getIntent());
+        assertTrue(result.isTitleQuery());
+    }
+
+    @Test
+    void shouldTreatWindowsCodePathAsFactoid() {
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
+
+        QueryRewriteResult result = service.rewrite(List.of("kb-1"), "src\\main\\java\\Agent.java", null);
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, result.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.NONE, result.getContextApplyMode());
+        assertTrue(result.isTitleQuery());
+    }
+
+    @Test
+    void shouldNotApplyHardContextOrLlmRewriteToApiAndWindowsCodePaths() {
+        AtomicInteger llmCallCount = new AtomicInteger();
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                new StubChunkBgeM3Mapper(List.of()),
+                (query, context, intent) -> {
+                    llmCallCount.incrementAndGet();
+                    return "unexpected rewrite";
+                },
+                null,
+                true,
+                "deepseek-chat"
+        );
+        RagRetrievalContext context = RagRetrievalContext.builder()
+                .kbId("kb-1")
+                .sourceName("api.md")
+                .contentPath("api > v1 > agents")
+                .build();
+
+        QueryRewriteResult apiResult = service.rewrite(List.of("kb-1"), "/api/v1/agents", context);
+        QueryRewriteResult windowsResult = service.rewrite(List.of("kb-1"), "src\\main\\java\\Agent.java", context);
+
+        assertEquals(QueryRewriteResult.Intent.FACTOID, apiResult.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, apiResult.getContextApplyMode());
+        assertEquals(List.of("/api/v1/agents"), apiResult.getRetrievalQueries());
+        assertEquals(QueryRewriteResult.Intent.FACTOID, windowsResult.getIntent());
+        assertEquals(QueryRewriteResult.ContextApplyMode.SOFT, windowsResult.getContextApplyMode());
+        assertEquals(List.of("src\\main\\java\\Agent.java"), windowsResult.getRetrievalQueries());
+        assertEquals(0, llmCallCount.get());
+    }
+
+    @Test
     void shouldTreatCompactKeywordQueryAsTitleQuery() {
         QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(new StubChunkBgeM3Mapper(List.of()));
 
@@ -395,13 +463,23 @@ class QueryRewriteServiceImplTest {
 
     private static class StubChunkBgeM3Mapper implements ChunkBgeM3Mapper {
         private final List<RagRetrievalResult> titlePathCandidates;
+        private final AtomicInteger titlePathLookupCount;
 
         private StubChunkBgeM3Mapper(List<RagRetrievalResult> titlePathCandidates) {
+            this(titlePathCandidates, new AtomicInteger());
+        }
+
+        private StubChunkBgeM3Mapper(
+                List<RagRetrievalResult> titlePathCandidates,
+                AtomicInteger titlePathLookupCount
+        ) {
             this.titlePathCandidates = titlePathCandidates;
+            this.titlePathLookupCount = titlePathLookupCount;
         }
 
         @Override
         public List<RagRetrievalResult> selectTitlePathCandidatesByKbIds(List<String> kbIds) {
+            titlePathLookupCount.incrementAndGet();
             return titlePathCandidates;
         }
 

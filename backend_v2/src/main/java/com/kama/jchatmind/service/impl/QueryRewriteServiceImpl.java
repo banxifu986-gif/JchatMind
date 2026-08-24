@@ -280,13 +280,13 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             if (intent == QueryRewriteResult.Intent.ANALYTICAL
                     && contextApplyMode != QueryRewriteResult.ContextApplyMode.NONE) {
                 String normalizedQuery = normalize(sanitizedQuery);
-                return !isPathAwareQuery(normalizedQuery)
+                return !isStructuredPathQuery(normalizedQuery)
                         && terms(normalizedQuery).size() <= LLM_REWRITE_MAX_TERM_COUNT;
             }
             return false;
         }
         String normalizedQuery = normalize(sanitizedQuery);
-        return !isPathAwareQuery(normalizedQuery)
+        return !isStructuredPathQuery(normalizedQuery)
                 && terms(normalizedQuery).size() <= LLM_REWRITE_MAX_TERM_COUNT;
     }
 
@@ -361,7 +361,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         }
         Set<String> queryTerms = terms(normalizedQuery);
         return normalizedQuery.length() <= LOW_INFO_QUERY_MAX_LENGTH
-                && !isPathAwareQuery(normalizedQuery)
+                && !isStructuredPathQuery(normalizedQuery)
                 && queryTerms.size() <= LOW_INFO_QUERY_MAX_TERM_COUNT;
     }
 
@@ -534,7 +534,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         if (!StringUtils.hasText(normalizedQuery)) {
             return false;
         }
-        return isPathAwareQuery(normalizedQuery)
+        return isNavigationPathQuery(normalizedQuery)
                 || normalizedQuery.contains(".md")
                 || normalizedQuery.contains(".markdown");
     }
@@ -581,8 +581,12 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 || normalizedQuery.contains("\uFF1B");
     }
 
-    private boolean isPathAwareQuery(String normalizedQuery) {
-        return normalizedQuery.contains(">")
+    private boolean isNavigationPathQuery(String normalizedQuery) {
+        return normalizedQuery.contains(">");
+    }
+
+    private boolean isStructuredPathQuery(String normalizedQuery) {
+        return isNavigationPathQuery(normalizedQuery)
                 || normalizedQuery.contains("/")
                 || normalizedQuery.contains("\\");
     }

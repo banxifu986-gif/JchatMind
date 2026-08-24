@@ -254,6 +254,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-24 G2-4 Router 入口计划局部收口记录。** `KnowledgeTools` 与 `McpKnowledgeTool` 已有 Router 拒答、无证据、外部许可和稳定引用输出的入口调用；本轮先 RED 固定此前遗漏的计划执行：Agent 多模态路由应传 `topK=5`（旧实现固定 `3`），MCP 私有路由应传 `topK=3`（旧实现固定 `5`）。最小 GREEN 统一改为 `route.topK()`，不触碰既有授权、审计、拒答或格式化逻辑。独立审查发现 MCP 普通私有查询测试不足以防止退化为固定 `3` 的 P2，已改为多模态 `topK=5`，并断言关联 ID 审计仍为 `ALLOW/retrieved`；复核无 P0/P1/P2。最终 `RagRouterTest` 4/4、`KnowledgeToolsScopeTest` 15/15、`McpKnowledgeToolTest` 8/8、`RagServiceImplTest` 8/8、`QueryRewriteServiceImplTest` 17/17，共 52/52 通过。该局部收口不代表 Router 相对固定链路的冻结集收益、成本/p95 对比已完成，也不代表外部工具执行、OCR、图片、表格、公式或可回跳资产引用已实现。
 
+**2026-08-24 G2-3 导航判定局部收口记录。** 初始 RED 证明 `/api/v1/agents` 因任意 slash 被错误归为 `NAVIGATION`；最小 GREEN 将章节导航缩为 `>`，`.md`/`.markdown` 文档定位保持导航。首轮独立审查发现 P1：显式 context 下 API/代码路径仍可能被低信息 follow-up 升为 `HARD`，且 LLM 可能改写。后续将“可导航章节”与“结构化路径形态”拆分：`>` 仅控制导航与标题路径候选，`>`、`/`、`\\` 均禁止低信息 follow-up 和 LLM 改写。API 与 Windows 代码路径在 active context 下均固定为 `FACTOID/SOFT`、保留原问、不调用 LLM；API 路径也断言零 title/path Mapper 扫描，Markdown 文档定位仍为 `NAVIGATION`。`QueryRewriteServiceImplTest` 21/21、`RagServiceImplTest` 8/8、`KnowledgeToolsScopeTest` 15/15，共 44/44 通过；P1 修复复审无 P0/P1/P2。它只排除 slash/backslash 误触发，合法导航仍使用现有标题路径候选读取，尚未在冻结集或真实 PostgreSQL 度量其范围、Recall 和 p95。
+
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
 1. `findTitleBm25Candidates` 与 `findContentBm25Candidates` 通过 Mapper 把授权 KB 的候选 chunk 拉回 JVM，再由应用计算 BM25。数据量随 KB 增长线性放大，且数据库无法利用原生倒排索引、按范围先过滤再取 Top-N。
@@ -263,7 +265,7 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 5. 多格式摄入已覆盖 Markdown/HTML/PDF 文本，但没有图片、表格或公式的独立资产、相对位置和跨元素关系，无法形成 RAG-Anything 所强调的可定位多模态证据。
 6. 默认多 KB 范围、历史 context 的 soft-bias 与显式 `kbIds` 收窄已按 `4a57d34` 固定；仍需在冻结集验证跨 KB topic switch 的 Recall、p95 和 context 更新质量。
 7. 同源标题通道与多 query 向量通道已完成组内去重/校准并记录 provenance；仍需在冻结集验证校准对 Recall/MRR、p95 和来源诊断的影响。
-8. 短新实体/标题的 follow-up 误判已按 `4a57d34` 处理；任意 `/` 或 `\\` 仍可能被判为导航并触发无上限的 title/path 候选扫描，还可能误施加 `HARD` 约束。
+8. 短新实体/标题、API 与 Windows 代码路径的 follow-up/导航误判已按 `4a57d34` 及导航判定子项处理；合法章节或 Markdown 文档导航仍读取标题路径候选，需在冻结集/真实 PostgreSQL 验证其范围、Recall 与 p95。
 9. `KnowledgeTools` 在任何非空 Top-1 后都会覆盖 session retrieval context；低相关或无答案检索会把错误来源写回下一轮，形成 context 自我强化。
 
 **BM25 目标与选型边界。** G2 要把标题和正文 BM25 迁为 PostgreSQL 内的原生倒排查询，应用层只接收 `chunkId`、通道、通道内 rank、可选 lexical score 与必要展示字段，继续使用 RRF 融合排名，不把 BM25 原始分数直接与向量距离比较。首个隔离 PoC 优先验证 ParadeDB 的 `pg_search`：其定位覆盖 PostgreSQL 内的全文、向量和混合检索；但其 AGPL-3.0 许可证、目标 PostgreSQL 版本、镜像中 pgvector 扩展和备份恢复兼容性必须在引入前完成审查。VectorChord-bm25 是备选原生 BM25 索引，需同样验证许可证、目标 PostgreSQL 版本、索引维护和运维包兼容性。不得同时把两个插件带入生产，也不得以长期双读/双写作为迁移方案；PoC 仅在隔离数据库对同一冻结数据集比较，达到门禁后选择唯一 provider 并删除 JVM 全量 BM25 路径。
@@ -443,7 +445,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G2-04 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-05 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G2-06 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
-| TC-G2-07 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
+| TC-G2-07 | `QueryRewriteServiceImplTest` L0；无外部服务 | `backend_v2/target/surefire-reports/` | API/Windows 路径不再进入 `NAVIGATION`/`FOLLOW_UP`/`HARD` 或调用 LLM；章节与 Markdown 文档导航保持 | 2026-08-24 | Codex | 部分通过（21 项改写 L0；跨 KB topic switch、合法导航扫描与真实 PostgreSQL Recall/p95 待验收） |
 | TC-G2-08 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G3-01 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
 | TC-G3-02 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
