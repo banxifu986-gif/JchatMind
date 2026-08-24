@@ -2,9 +2,15 @@ package com.kama.jchatmind.rag;
 
 import com.kama.jchatmind.mapper.Bm25TokenDictionaryMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
+import com.kama.jchatmind.model.dto.QueryRewriteResult;
+import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.service.QueryRewriteService;
+import com.kama.jchatmind.service.impl.BgeRerankerService;
+import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.VchordBm25QueryService;
 import com.kama.jchatmind.typehandler.PgVectorTypeHandler;
+import com.sun.net.httpserver.HttpServer;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.mapping.Environment;
@@ -27,8 +33,11 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import javax.sql.DataSource;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -162,6 +171,78 @@ class VchordBm25QueryServiceL2Test {
         ).get(0).getChunkId(), "删除并重建索引后应恢复当前投影，而非陈旧命中");
     }
 
+    @Test
+    void retrievesHardScopedContentBm25ThroughRagService() throws Exception {
+        DATABASE.assertIsolation();
+        prepareSchemaAndFixture();
+        context = new AnnotationConfigApplicationContext(QueryServiceL2Configuration.class);
+        VchordBm25QueryService queryService = context.getBean(VchordBm25QueryService.class);
+        RecordingDataSource dataSource = context.getBean(RecordingDataSource.class);
+        HttpServer embeddingServer = createEmbeddingServer();
+        embeddingServer.start();
+
+        try {
+            RagRetrievalContext retrievalContext = RagRetrievalContext.builder()
+                    .kbId(KB_ID)
+                    .sourceName("architecture.md")
+                    .sourceType("md")
+                    .contentPath("rag > body")
+                    .build();
+            QueryRewriteService rewriteService = (kbIds, query, queryContext) -> QueryRewriteResult.builder()
+                    .query(query)
+                    .context(queryContext)
+                    .titleQuery("title".equals(query))
+                    .contextApplyMode(QueryRewriteResult.ContextApplyMode.HARD)
+                    .retrievalQueries(List.of(query))
+                    .retrievalQuerySources(List.of("original"))
+                    .build();
+            RagServiceImpl ragService = new RagServiceImpl(
+                    org.springframework.web.reactive.function.client.WebClient.builder(),
+                    org.mockito.Mockito.mock(ChunkBgeM3Mapper.class),
+                    rewriteService,
+                    queryService,
+                    org.mockito.Mockito.mock(BgeRerankerService.class),
+                    "http://localhost:" + embeddingServer.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            dataSource.clearExecutions();
+            List<RagRetrievalResult> results = ragService.retrieve(
+                    List.of(KB_ID), "content", retrievalContext, 1
+            );
+
+            assertEquals(List.of(CONTENT_CHUNK_ID), results.stream().map(RagRetrievalResult::getChunkId).toList());
+            assertEquals(List.of("content_bm25"), results.get(0).getRetrievalProvenance());
+            assertEquals(1, results.get(0).getContentBm25Rank());
+            assertTrue(dataSource.executedSql().stream().anyMatch(sql -> sql.contains("to_bm25query")));
+            assertSameTransactionConnection(dataSource);
+
+            dataSource.clearExecutions();
+            List<RagRetrievalResult> titleResults = ragService.retrieve(
+                    List.of(KB_ID),
+                    "title",
+                    RagRetrievalContext.builder()
+                            .kbId(KB_ID)
+                            .sourceName("architecture.md")
+                            .sourceType("md")
+                            .contentPath("rag > title")
+                            .build(),
+                    1
+            );
+
+            assertEquals(List.of(TITLE_CHUNK_ID), titleResults.stream().map(RagRetrievalResult::getChunkId).toList());
+            assertTrue(titleResults.get(0).getRetrievalProvenance().contains("title_bm25"));
+            assertEquals(1, titleResults.get(0).getTitleBm25Rank());
+            assertEachBm25SearchUsesItsOwnTransactionConnection(dataSource);
+        } finally {
+            embeddingServer.stop(0);
+        }
+    }
+
     private void prepareSchemaAndFixture() throws Exception {
         DATABASE.sql("DROP TABLE IF EXISTS public.chunk_bge_m3 CASCADE");
         DATABASE.sql("DROP TABLE IF EXISTS public.rag_bm25_token_dictionary CASCADE");
@@ -197,13 +278,26 @@ class VchordBm25QueryServiceL2Test {
                 .formatted(sourceName, sourceType, contentPath);
     }
 
+    private HttpServer createEmbeddingServer() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/embed", exchange -> {
+            byte[] response = "{\"embeddings\":[[0.1,0.2,0.3]]}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        return server;
+    }
+
     private void assertSameTransactionConnection(RecordingDataSource dataSource) {
         assertTrue(dataSource.connectionIdsFor(SEARCH_PATH).size() == 1);
-        assertEquals(
-                dataSource.connectionIdsFor(SEARCH_PATH),
-                dataSource.connectionIdsFor("to_bm25query"),
-                "SET LOCAL 与原生 BM25 查询必须使用同一连接"
-        );
+        dataSource.assertEveryNativeBm25QueryUsesPrecedingSearchPathConnection();
+    }
+
+    private void assertEachBm25SearchUsesItsOwnTransactionConnection(RecordingDataSource dataSource) {
+        dataSource.assertEveryNativeBm25QueryUsesPrecedingSearchPathConnection();
     }
 
     @org.springframework.context.annotation.Configuration
@@ -306,6 +400,27 @@ class VchordBm25QueryServiceL2Test {
                 }
             }
             return connectionIds;
+        }
+
+        void assertEveryNativeBm25QueryUsesPrecedingSearchPathConnection() {
+            Integer searchPathConnectionId = null;
+            int nativeBm25QueryCount = 0;
+            for (Execution execution : executions) {
+                if (execution.sql().contains("set local search_path")) {
+                    searchPathConnectionId = execution.connectionId();
+                    continue;
+                }
+                if (execution.sql().contains("to_bm25query")) {
+                    assertEquals(
+                            searchPathConnectionId,
+                            Integer.valueOf(execution.connectionId()),
+                            "每次原生 BM25 查询必须使用紧邻 SET LOCAL 的事务连接"
+                    );
+                    nativeBm25QueryCount++;
+                    searchPathConnectionId = null;
+                }
+            }
+            assertTrue(nativeBm25QueryCount > 0, "测试必须至少记录一次原生 BM25 查询");
         }
 
         private Connection wrapConnection(Connection connection, int connectionId) {
