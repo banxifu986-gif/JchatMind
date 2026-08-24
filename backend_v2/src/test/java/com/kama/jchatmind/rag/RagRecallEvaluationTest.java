@@ -22,6 +22,7 @@ import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.QueryRewriteService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.DocumentStorageServiceImpl;
+import com.kama.jchatmind.service.impl.BgeRerankerService;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
@@ -970,6 +971,7 @@ class RagRecallEvaluationTest {
                 chunkBgeM3Mapper,
                 queryRewriteService,
                 org.mockito.Mockito.mock(VchordBm25QueryService.class),
+                new BgeRerankerService(WebClient.builder(), false, "http://127.0.0.1:8081", 3_000),
                 ollamaBaseUrl,
                 embeddingModel,
                 false,

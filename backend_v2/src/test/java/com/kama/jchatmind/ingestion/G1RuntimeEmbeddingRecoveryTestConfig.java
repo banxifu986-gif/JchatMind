@@ -10,6 +10,7 @@ import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
+import com.kama.jchatmind.service.impl.BgeRerankerService;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.VchordBm25QueryService;
@@ -100,6 +101,7 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
                 chunkBgeM3Mapper,
                 new QueryRewriteServiceImpl(chunkBgeM3Mapper),
                 mock(VchordBm25QueryService.class),
+                disabledBgeRerankerService(),
                 "http://127.0.0.1:1",
                 "g1-unavailable-embedding",
                 false,
@@ -112,6 +114,7 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
                 chunkBgeM3Mapper,
                 new QueryRewriteServiceImpl(chunkBgeM3Mapper),
                 mock(VchordBm25QueryService.class),
+                disabledBgeRerankerService(),
                 requiredProperty("g1.ollama.base-url"),
                 requiredProperty("g1.ollama.model"),
                 false,
@@ -120,6 +123,10 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
                 0
         );
         return new FailFirstEmbeddingRagService(unavailable, recovered, embeddingRecoveryProbe);
+    }
+
+    private BgeRerankerService disabledBgeRerankerService() {
+        return new BgeRerankerService(WebClient.builder(), false, "http://127.0.0.1:8081", 3_000);
     }
 
     @Bean

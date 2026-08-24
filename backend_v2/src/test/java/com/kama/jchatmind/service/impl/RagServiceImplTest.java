@@ -55,6 +55,7 @@ class RagServiceImplTest {
                     mock(ChunkBgeM3Mapper.class),
                     mock(QueryRewriteService.class),
                     mock(VchordBm25QueryService.class),
+                    mock(BgeRerankerService.class),
                     "http://localhost:" + server.getAddress().getPort(),
                     "bge-m3:latest",
                     false,
@@ -118,6 +119,7 @@ class RagServiceImplTest {
                     mapper,
                     rewriteService,
                     bm25QueryService,
+                    mock(BgeRerankerService.class),
                     "http://localhost:" + server.getAddress().getPort(),
                     "bge-m3:latest",
                     false,
@@ -197,6 +199,7 @@ class RagServiceImplTest {
                     mapper,
                     rewriteService,
                     bm25QueryService,
+                    mock(BgeRerankerService.class),
                     "http://localhost:" + server.getAddress().getPort(),
                     "bge-m3:latest",
                     false,
@@ -258,6 +261,7 @@ class RagServiceImplTest {
                 mapper,
                 rewriteService,
                 bm25QueryService,
+                mock(BgeRerankerService.class),
                 "http://localhost",
                 "bge-m3:latest",
                 false,
@@ -270,6 +274,70 @@ class RagServiceImplTest {
 
         assertTrue(results.isEmpty());
         verifyNoInteractions(mapper, bm25QueryService);
+    }
+
+    @Test
+    void shouldUseBgeRerankerScoresForTopCandidates() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            BgeRerankerService rerankerService = mock(BgeRerankerService.class);
+            List<RagRetrievalResult> candidates = IntStream.rangeClosed(1, 3)
+                    .mapToObj(index -> {
+                        RagRetrievalResult result = new RagRetrievalResult();
+                        result.setChunkId("chunk-" + index);
+                        result.setKbId("kb-1");
+                        result.setContent("通用正文 " + index);
+                        result.setMetadata("{\"retrievableTitle\":\"通用标题\"}");
+                        result.setDistance(0.5D);
+                        result.setRank(index);
+                        return result;
+                    })
+                    .toList();
+            when(rewriteService.rewrite(List.of("kb-1"), "问题", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("问题")
+                            .retrievalQueries(List.of("问题"))
+                            .retrievalQuerySources(List.of("original"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(candidates);
+            when(bm25QueryService.searchContent(List.of("kb-1"), "问题", null, null, null, 20))
+                    .thenReturn(List.of());
+            when(rerankerService.rerank(
+                    "问题",
+                    candidates.stream()
+                            .map(result -> "通用标题\n" + result.getContent())
+                            .toList()
+            )).thenReturn(List.of(0.1D, 0.95D, 0.2D));
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    rerankerService,
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    false,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", 3);
+
+            assertEquals(List.of("chunk-2", "chunk-3", "chunk-1"),
+                    results.stream().map(RagRetrievalResult::getChunkId).toList());
+            assertEquals(List.of(0.95D, 0.2D, 0.1D),
+                    results.stream().map(RagRetrievalResult::getRerankScore).toList());
+        } finally {
+            server.stop(0);
+        }
     }
 
     private static HttpServer createEmbeddingServer() throws IOException {

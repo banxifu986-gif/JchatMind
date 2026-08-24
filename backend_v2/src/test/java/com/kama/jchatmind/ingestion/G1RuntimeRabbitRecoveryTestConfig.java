@@ -8,6 +8,7 @@ import com.kama.jchatmind.mapper.IngestionTaskMapper;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
+import com.kama.jchatmind.service.impl.BgeRerankerService;
 import com.kama.jchatmind.service.impl.QueryRewriteServiceImpl;
 import com.kama.jchatmind.service.impl.RagServiceImpl;
 import com.kama.jchatmind.service.impl.VchordBm25QueryService;
@@ -81,6 +82,7 @@ public class G1RuntimeRabbitRecoveryTestConfig {
                 chunkBgeM3Mapper,
                 new QueryRewriteServiceImpl(chunkBgeM3Mapper),
                 mock(VchordBm25QueryService.class),
+                new BgeRerankerService(WebClient.builder(), false, "http://127.0.0.1:8081", 3_000),
                 "http://127.0.0.1:1",
                 "g1-disabled-embedding",
                 false,

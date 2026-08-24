@@ -56,6 +56,7 @@ public class RagServiceImpl implements RagService {
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
     private final QueryRewriteService queryRewriteService;
     private final VchordBm25QueryService vchordBm25QueryService;
+    private final BgeRerankerService bgeRerankerService;
     private final String embeddingModel;
     private final boolean rerankDebug;
     private final boolean disableQueryExpansion;
@@ -68,6 +69,7 @@ public class RagServiceImpl implements RagService {
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             QueryRewriteService queryRewriteService,
             VchordBm25QueryService vchordBm25QueryService,
+            BgeRerankerService bgeRerankerService,
             @Value("${ollama.base-url}") String ollamaBaseUrl,
             @Value("${ollama.embedding-model}") String embeddingModel,
             @Value("${rag.rerank.debug:false}") boolean rerankDebug,
@@ -79,6 +81,7 @@ public class RagServiceImpl implements RagService {
         this.chunkBgeM3Mapper = chunkBgeM3Mapper;
         this.queryRewriteService = queryRewriteService;
         this.vchordBm25QueryService = vchordBm25QueryService;
+        this.bgeRerankerService = bgeRerankerService;
         this.embeddingModel = embeddingModel;
         this.rerankDebug = rerankDebug;
         this.disableQueryExpansion = disableQueryExpansion;
@@ -578,6 +581,7 @@ public class RagServiceImpl implements RagService {
         copy.setTitleBm25Score(source.getTitleBm25Score());
         copy.setContentBm25Rank(source.getContentBm25Rank());
         copy.setContentBm25Score(source.getContentBm25Score());
+        copy.setRerankScore(source.getRerankScore());
         return copy;
     }
 
@@ -672,6 +676,10 @@ public class RagServiceImpl implements RagService {
         int rerankCandidateCount = Math.min(RERANK_CANDIDATE_LIMIT, candidates.size());
         List<RagRetrievalResult> rerankCandidates = candidates.subList(0, rerankCandidateCount);
         List<RagRetrievalResult> remainingCandidates = candidates.subList(rerankCandidateCount, candidates.size());
+        List<Double> bgeScores = rerankWithBge(normalizedQuery, rerankCandidates);
+        if (bgeScores.size() == rerankCandidateCount) {
+            return applyBgeRerank(rerankCandidates, remainingCandidates, bgeScores);
+        }
         List<ScoredRagResult> scoredResults = rerankCandidates.stream()
                 .map(result -> new ScoredRagResult(result, rerankScore(normalizedQuery, context, result)))
                 .toList();
@@ -700,6 +708,56 @@ public class RagServiceImpl implements RagService {
         }
         results.addAll(remainingCandidates);
         return results;
+    }
+
+    private List<Double> rerankWithBge(String normalizedQuery, List<RagRetrievalResult> candidates) {
+        try {
+            return bgeRerankerService.rerank(
+                    normalizedQuery,
+                    candidates.stream().map(this::rerankText).toList()
+            );
+        } catch (RuntimeException exception) {
+            log.warn("BGE reranker unavailable; fallback to local rerank: {}", exception.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<RagRetrievalResult> applyBgeRerank(
+            List<RagRetrievalResult> rerankCandidates,
+            List<RagRetrievalResult> remainingCandidates,
+            List<Double> bgeScores
+    ) {
+        List<RerankedRagResult> scoredResults = new ArrayList<>(rerankCandidates.size());
+        for (int i = 0; i < rerankCandidates.size(); i++) {
+            scoredResults.add(new RerankedRagResult(rerankCandidates.get(i), bgeScores.get(i)));
+        }
+        List<RerankedRagResult> reranked = scoredResults.stream()
+                .sorted(Comparator
+                        .comparingDouble(RerankedRagResult::score)
+                        .reversed()
+                        .thenComparing(item -> item.result().getDistance(), Comparator.nullsLast(Double::compareTo))
+                        .thenComparingInt(item -> safeRank(item.result().getRank())))
+                .toList();
+        List<RagRetrievalResult> results = new ArrayList<>(rerankCandidates.size() + remainingCandidates.size());
+        for (int i = 0; i < reranked.size(); i++) {
+            RagRetrievalResult result = reranked.get(i).result();
+            result.setRerankScore(reranked.get(i).score());
+            result.setRank(i + 1);
+            results.add(result);
+        }
+        for (int i = 0; i < remainingCandidates.size(); i++) {
+            remainingCandidates.get(i).setRank(rerankCandidates.size() + i + 1);
+            results.add(remainingCandidates.get(i));
+        }
+        return results;
+    }
+
+    private String rerankText(RagRetrievalResult result) {
+        String title = extractRetrievableTitle(result.getMetadata());
+        if (!StringUtils.hasText(title)) {
+            return result.getContent();
+        }
+        return title + "\n" + (result.getContent() == null ? "" : result.getContent());
     }
 
     private RerankScore rerankScore(String normalizedQuery, RetrievalContext context, RagRetrievalResult result) {
@@ -1127,6 +1185,12 @@ public class RagServiceImpl implements RagService {
     private record ScoredRagResult(
             RagRetrievalResult result,
             RerankScore score
+    ) {
+    }
+
+    private record RerankedRagResult(
+            RagRetrievalResult result,
+            double score
     ) {
     }
 

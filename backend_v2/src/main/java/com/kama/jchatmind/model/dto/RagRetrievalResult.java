@@ -35,4 +35,6 @@ public class RagRetrievalResult {
     private Integer contentBm25Rank;
 
     private Double contentBm25Score;
+
+    private Double rerankScore;
 }
