@@ -63,13 +63,13 @@ class McpKnowledgeToolTest {
                     .thenReturn(List.of("kb-own"));
             when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
                     .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("用户 7 知识库").build()));
-            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of(result));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of(result));
 
             String response = tool.search("查询", List.of("kb-own"));
 
             assertThat(response).contains("知识库: 用户 7 知识库").contains("仅属于用户 7 的内容");
             verify(knowledgeBaseAccessService).requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7");
-            verify(ragService).retrieve(List.of("kb-own"), "查询", 5);
+            verify(ragService).retrieve(List.of("kb-own"), "查询", 3);
         } finally {
             RequestContextHolder.resetRequestAttributes();
         }
@@ -95,7 +95,7 @@ class McpKnowledgeToolTest {
         try {
             when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
                     .thenReturn(List.of("kb-own"));
-            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of());
+            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of());
 
             tool.search("查询", List.of("kb-own"));
 
@@ -185,6 +185,44 @@ class McpKnowledgeToolTest {
     }
 
     @Test
+    void shouldUseRouterRetrievalLimitAndKeepAuditForMultimodalMcpQuery() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                principalAccessService,
+                new RagRouter()
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(caller);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-multimodal");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(ragService.retrieve(List.of("kb-own"), "请定位 PDF 第 2 页的表格", 5)).thenReturn(List.of());
+
+            tool.search("请定位 PDF 第 2 页的表格", List.of("kb-own"));
+
+            verify(ragService).retrieve(List.of("kb-own"), "请定位 PDF 第 2 页的表格", 5);
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    "request-multimodal",
+                    "ALLOW",
+                    List.of("kb-own"),
+                    "retrieved"
+            );
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
     void shouldRefuseWhenMcpRetrievalHasNoEvidence() {
         RagService ragService = mock(RagService.class);
         KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
@@ -202,7 +240,7 @@ class McpKnowledgeToolTest {
         try {
             when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
                     .thenReturn(List.of("kb-own"));
-            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of());
+            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of());
 
             String response = tool.search("查询", List.of("kb-own"));
 
@@ -238,7 +276,7 @@ class McpKnowledgeToolTest {
                     .thenReturn(List.of("kb-own"));
             when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
                     .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("研发知识库").build()));
-            when(ragService.retrieve(List.of("kb-own"), "查询", 5)).thenReturn(List.of(evidence));
+            when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of(evidence));
 
             String response = tool.search("查询", List.of("kb-own"));
 

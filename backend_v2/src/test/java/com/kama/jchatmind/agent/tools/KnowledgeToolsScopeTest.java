@@ -287,6 +287,18 @@ class KnowledgeToolsScopeTest {
     }
 
     @Test
+    void shouldUseRouterRetrievalLimitForMultimodalQuery() {
+        RagService ragService = mock(RagService.class);
+        when(ragService.retrieve(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5)).thenReturn(List.of());
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.knowledgeQuery("请定位 PDF 第 2 页的表格", null);
+
+        verify(ragService).retrieve(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5);
+    }
+
+    @Test
     void shouldRefuseWhenAuthorizedRetrievalReturnsNoEvidence() {
         RagService ragService = mock(RagService.class);
         when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of());

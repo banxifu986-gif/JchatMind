@@ -96,7 +96,7 @@ public class KnowledgeTools implements Tool {
         if (route.route() == RagRouteDecision.Route.DIRECT) {
             return route.reason();
         }
-        List<RagRetrievalResult> results = ragService.retrieve(effectiveKbIds, query, retrievalContext, 3);
+        List<RagRetrievalResult> results = ragService.retrieve(effectiveKbIds, query, retrievalContext, route.topK());
         if (results == null || results.isEmpty()) {
             return "当前授权知识范围内没有足够证据，无法可靠回答。";
         }

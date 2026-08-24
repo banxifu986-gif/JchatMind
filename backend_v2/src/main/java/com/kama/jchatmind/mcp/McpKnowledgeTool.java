@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
 public class McpKnowledgeTool {
 
     private static final String PRIVATE_KNOWLEDGE_ACCESS_DENIED = "当前 MCP 调用未绑定用户身份，禁止访问私有知识库。";
-    private static final int DEFAULT_RETRIEVAL_LIMIT = 5;
 
     private final RagService ragService;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
@@ -96,7 +95,7 @@ public class McpKnowledgeTool {
                 );
                 return route.reason();
             }
-            List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, DEFAULT_RETRIEVAL_LIMIT);
+            List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, route.topK());
             mcpPrincipalAccessService.recordKnowledgeQuery(
                     caller,
                     resolveCorrelationId(),

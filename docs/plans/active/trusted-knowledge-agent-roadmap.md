@@ -252,12 +252,14 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-24 G2-3 范围与改写局部收口记录。** 提交 `4a57d34` 冻结了入口语义：未传 `kbIds` 时总是搜索 Agent 的全部授权 KB，只有工具请求中的显式 `kbIds` 才能收窄；已撤销的历史 KB context 仍被清除。入口将有效历史 context 复制为瞬时 `sessionContextBias`，改写器在该标记下固定 `SOFT`，因此不会对 KB、来源或路径施加 `HARD` 过滤，但明确 follow-up 仍保留一个受控 standalone query 与原问。短新标题（包括与旧路径仅部分词重叠的标题）改判为 `FACTOID` 并保留标题通道，避免误归为 `FOLLOW_UP`。该阶段先后修复独立审查发现的 context 未标记、部分重叠标题误判和 soft-bias 丢失 standalone 三个 P1；最终 `QueryRewriteServiceImplTest` 17/17、`KnowledgeToolsScopeTest` 14/14，共 31/31 通过，复审无 P0/P1/P2。它不覆盖任意 `/` 或 `\\` 导航误判、Router 生产接线、引用资产或外部基准，G2 未整体完成。
 
+**2026-08-24 G2-4 Router 入口计划局部收口记录。** `KnowledgeTools` 与 `McpKnowledgeTool` 已有 Router 拒答、无证据、外部许可和稳定引用输出的入口调用；本轮先 RED 固定此前遗漏的计划执行：Agent 多模态路由应传 `topK=5`（旧实现固定 `3`），MCP 私有路由应传 `topK=3`（旧实现固定 `5`）。最小 GREEN 统一改为 `route.topK()`，不触碰既有授权、审计、拒答或格式化逻辑。独立审查发现 MCP 普通私有查询测试不足以防止退化为固定 `3` 的 P2，已改为多模态 `topK=5`，并断言关联 ID 审计仍为 `ALLOW/retrieved`；复核无 P0/P1/P2。最终 `RagRouterTest` 4/4、`KnowledgeToolsScopeTest` 15/15、`McpKnowledgeToolTest` 8/8、`RagServiceImplTest` 8/8、`QueryRewriteServiceImplTest` 17/17，共 52/52 通过。该局部收口不代表 Router 相对固定链路的冻结集收益、成本/p95 对比已完成，也不代表外部工具执行、OCR、图片、表格、公式或可回跳资产引用已实现。
+
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
 1. `findTitleBm25Candidates` 与 `findContentBm25Candidates` 通过 Mapper 把授权 KB 的候选 chunk 拉回 JVM，再由应用计算 BM25。数据量随 KB 增长线性放大，且数据库无法利用原生倒排索引、按范围先过滤再取 Top-N。
 2. `HARD` 会话上下文已下推到向量查询，但词法候选先按整个 KB 取 Top-N、RRF 后才过滤。全局高分 chunk 可挤掉上下文内候选，既浪费读取也会造成召回假阴性。
 3. 改写后的多个向量查询与原问在 RRF 中等权；而标题/正文 BM25 固定使用原问。低信息追问既可能让改写通道过度影响排序，也无法让受控的 standalone query 补足正文词法召回。
-4. `RagRouter` 目前没有生产调用点；单元测试通过只证明分类规则，不证明授权范围、外部许可、拒答和实际召回链路正确。
+4. Router 已在 Agent 与 MCP 检索入口执行拒答、无证据、未授权外部拦截和 `topK` 路由计划；仍缺同一冻结集下相对固定链路的收益、p95 与成本对比，且没有可执行的受控外部工具。
 5. 多格式摄入已覆盖 Markdown/HTML/PDF 文本，但没有图片、表格或公式的独立资产、相对位置和跨元素关系，无法形成 RAG-Anything 所强调的可定位多模态证据。
 6. 默认多 KB 范围、历史 context 的 soft-bias 与显式 `kbIds` 收窄已按 `4a57d34` 固定；仍需在冻结集验证跨 KB topic switch 的 Recall、p95 和 context 更新质量。
 7. 同源标题通道与多 query 向量通道已完成组内去重/校准并记录 provenance；仍需在冻结集验证校准对 Recall/MRR、p95 和来源诊断的影响。
