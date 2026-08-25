@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1",
+  "verifiedAt": "2026-08-24",
+  "checksumPolicy": {
+    "algorithm": "SHA-256",
+    "requiredBeforeImport": true,
+    "rule": "Every downloaded benchmark artifact must have its exact file SHA-256 recorded before preprocessing or import. Repository commits and README hashes do not substitute for artifact checksums."
+  },
+  "benchmarks": {
+    "mmarco": {
+      "officialRepository": "https://github.com/unicamp-dl/mMARCO",
+      "repositoryRevision": "d44cb046284eab152e56f2978abe1d21ce7df3f9",
+      "dataset": "https://huggingface.co/datasets/unicamp-dl/mmarco",
+      "datasetRevision": "6d039c4638c0ba3e46a9cb7b498b145e7edc6230",
+      "datasetLastModified": "2024-03-06T20:49:39Z",
+      "license": {
+        "spdx": "Apache-2.0",
+        "evidence": [
+          "https://raw.githubusercontent.com/unicamp-dl/mMARCO/master/LICENSE",
+          "https://huggingface.co/datasets/unicamp-dl/mmarco/raw/main/README.md"
+        ]
+      },
+      "redistribution": {
+        "status": "conditional",
+        "reason": "The official dataset card declares Apache-2.0, but mMARCO is a multilingual derivative of MS MARCO. Retain attribution and recheck any applicable upstream MS MARCO terms before redistributing extracted or transformed corpus files."
+      },
+      "artifacts": {
+        "status": "not_downloaded",
+        "sha256": null,
+        "requiredArtifacts": [
+          "selected language collection",
+          "selected language query split",
+          "qrels or official run inputs"
+        ]
+      }
+    },
+    "crudRag": {
+      "officialRepository": "https://github.com/IAAR-Shanghai/CRUD_RAG",
+      "repositoryRevision": "1aace383994e1f68efa12cf2a8e2dadfb4102ceb",
+      "officialReadme": "https://raw.githubusercontent.com/IAAR-Shanghai/CRUD_RAG/main/README.md",
+      "license": {
+        "status": "unresolved",
+        "evidence": "The README displays an Apache-2.0 badge, but the GitHub repository license endpoint returned HTTP 404 on 2026-08-24."
+      },
+      "redistribution": {
+        "status": "blocked",
+        "reason": "Do not download, commit, redistribute, or preprocess data/crud, data/crud_split, or data/80000_docs until the rights holder provides explicit data terms."
+      },
+      "artifacts": {
+        "status": "not_downloaded",
+        "sha256": null,
+        "requiredArtifacts": [
+          "data/crud/CRUD_Data.zip",
+          "data/crud/merged.zip",
+          "data/crud_split/split_merged.json",
+          "data/80000_docs source files"
+        ]
+      }
+    }
+  }
+}

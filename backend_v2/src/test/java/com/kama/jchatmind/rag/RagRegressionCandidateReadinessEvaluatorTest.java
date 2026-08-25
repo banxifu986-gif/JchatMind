@@ -53,6 +53,64 @@ class RagRegressionCandidateReadinessEvaluatorTest {
     }
 
     @Test
+    void clearsRuntimeMappingBlockerOnlyForACompleteOneToOneReadOnlyMapping() {
+        RagRegressionCandidateCase approved = new RagRegressionCandidateCase(
+                "approved-001", "问题", "user_like_question", "easy", "interview-qa#章节#0", "章节",
+                "interview-qa", "a".repeat(64), List.of(), List.of(), List.of("interview-qa#章节#0"), List.of("事实"),
+                false, null, "approved", "manual", "reviewer", "2026-08-13T10:00:00+08:00", List.of("test")
+        );
+        RagRegressionCandidateDataset dataset = new RagRegressionCandidateDataset(
+                "ready-candidate", "candidate", "kb", List.of(approved)
+        );
+        RagRegressionCandidateChunkUuidMapping mapping = RagRegressionCandidateChunkUuidMapping.fromItems(
+                "read_only", "kb", List.of(
+                        new RagRegressionCandidateChunkUuidMapping.Item(
+                                "interview-qa#章节#0", "interview-qa", "章节", List.of("uuid-1"), "mapped"
+                        )
+                )
+        );
+
+        RagRegressionCandidateReadinessReport report = new RagRegressionCandidateReadinessEvaluator().evaluate(
+                dataset, new RagRegressionCandidateReadinessEvaluator.Thresholds(1, 0, 0, true), mapping
+        );
+
+        assertTrue(!report.freezeBlockers().contains("runtime_uuid_mapping_not_completed"));
+    }
+
+    @Test
+    void keepsRuntimeMappingBlockerWhenLogicalChunksShareOneRuntimeUuid() {
+        RagRegressionCandidateCase first = new RagRegressionCandidateCase(
+                "approved-001", "问题一", "user_like_question", "easy", "interview-qa#章节一#0", "章节一",
+                "interview-qa", "a".repeat(64), List.of(), List.of(), List.of("interview-qa#章节一#0"), List.of("事实一"),
+                false, null, "approved", "manual", "reviewer", "2026-08-13T10:00:00+08:00", List.of("test")
+        );
+        RagRegressionCandidateCase second = new RagRegressionCandidateCase(
+                "approved-002", "问题二", "user_like_question", "easy", "interview-qa#章节二#0", "章节二",
+                "interview-qa", "a".repeat(64), List.of(), List.of(), List.of("interview-qa#章节二#0"), List.of("事实二"),
+                false, null, "approved", "manual", "reviewer", "2026-08-13T10:00:00+08:00", List.of("test")
+        );
+        RagRegressionCandidateDataset dataset = new RagRegressionCandidateDataset(
+                "ready-candidate", "candidate", "kb", List.of(first, second)
+        );
+        RagRegressionCandidateChunkUuidMapping mapping = RagRegressionCandidateChunkUuidMapping.fromItems(
+                "read_only", "kb", List.of(
+                        new RagRegressionCandidateChunkUuidMapping.Item(
+                                "interview-qa#章节一#0", "interview-qa", "章节一", List.of("uuid-1"), "mapped"
+                        ),
+                        new RagRegressionCandidateChunkUuidMapping.Item(
+                                "interview-qa#章节二#0", "interview-qa", "章节二", List.of("uuid-1"), "mapped"
+                        )
+                )
+        );
+
+        RagRegressionCandidateReadinessReport report = new RagRegressionCandidateReadinessEvaluator().evaluate(
+                dataset, new RagRegressionCandidateReadinessEvaluator.Thresholds(1, 0, 0, true), mapping
+        );
+
+        assertTrue(report.freezeBlockers().contains("runtime_uuid_mapping_not_completed"));
+    }
+
+    @Test
     void excludesRejectedCasesFromFreezeCoverage() {
         RagRegressionCandidateCase rejected = new RagRegressionCandidateCase(
                 "rejected-001", "问题", "user_like_question", "easy", "doc#章节#0", "章节",

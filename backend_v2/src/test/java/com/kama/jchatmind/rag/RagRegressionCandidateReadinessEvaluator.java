@@ -1,10 +1,12 @@
 package com.kama.jchatmind.rag;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 final class RagRegressionCandidateReadinessEvaluator {
 
@@ -16,6 +18,14 @@ final class RagRegressionCandidateReadinessEvaluator {
     }
 
     RagRegressionCandidateReadinessReport evaluate(RagRegressionCandidateDataset dataset, Thresholds thresholds) {
+        return evaluate(dataset, thresholds, null);
+    }
+
+    RagRegressionCandidateReadinessReport evaluate(
+            RagRegressionCandidateDataset dataset,
+            Thresholds thresholds,
+            RagRegressionCandidateChunkUuidMapping runtimeMapping
+    ) {
         List<RagRegressionCandidateCase> cases = dataset.cases();
         List<RagRegressionCandidateCase> eligibleCases = cases.stream()
                 .filter(item -> "approved".equals(item.reviewStatus()))
@@ -57,7 +67,9 @@ final class RagRegressionCandidateReadinessEvaluator {
         if (candidateCases > 0) {
             blockers.add("pending_human_review");
         }
-        if (thresholds.requireRuntimeUuidMapping()) {
+        if (thresholds.requireRuntimeUuidMapping() && !hasCompleteRuntimeUuidMapping(
+                dataset, runtimeEligibleCases, runtimeMapping
+        )) {
             blockers.add("runtime_uuid_mapping_not_completed");
         }
         return new RagRegressionCandidateReadinessReport(
@@ -66,6 +78,38 @@ final class RagRegressionCandidateReadinessEvaluator {
                 multiTurnCases, crossDocumentCases, candidateCases, approvedCases, rejectedCases,
                 Map.copyOf(queryTypeCounts), List.copyOf(blockers)
         );
+    }
+
+    private boolean hasCompleteRuntimeUuidMapping(
+            RagRegressionCandidateDataset dataset,
+            List<RagRegressionCandidateCase> runtimeEligibleCases,
+            RagRegressionCandidateChunkUuidMapping runtimeMapping
+    ) {
+        if (runtimeMapping == null || !"read_only".equals(runtimeMapping.executionStatus())
+                || !dataset.sourceKnowledgeBaseId().equals(runtimeMapping.knowledgeBaseId())
+                || runtimeMapping.items() == null) {
+            return false;
+        }
+        Set<String> expectedLogicalChunkIds = runtimeEligibleCases.stream()
+                .filter(item -> Boolean.FALSE.equals(item.shouldAbstain()))
+                .flatMap(item -> item.retrievalGoldLogicalChunkIds().stream())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (runtimeMapping.total() != expectedLogicalChunkIds.size()
+                || runtimeMapping.items().size() != expectedLogicalChunkIds.size()
+                || runtimeMapping.mapped() != expectedLogicalChunkIds.size()
+                || runtimeMapping.unmapped() != 0 || runtimeMapping.ambiguous() != 0) {
+            return false;
+        }
+        Set<String> runtimeChunkUuids = new HashSet<>();
+        for (RagRegressionCandidateChunkUuidMapping.Item item : runtimeMapping.items()) {
+            if (!expectedLogicalChunkIds.remove(item.logicalChunkId()) || !"mapped".equals(item.status())
+                    || item.runtimeChunkUuids() == null || item.runtimeChunkUuids().size() != 1
+                    || item.runtimeChunkUuids().get(0).isBlank()
+                    || !runtimeChunkUuids.add(item.runtimeChunkUuids().get(0))) {
+                return false;
+            }
+        }
+        return expectedLogicalChunkIds.isEmpty();
     }
 
     private boolean isRuntimeMappable(RagRegressionCandidateCase item) {

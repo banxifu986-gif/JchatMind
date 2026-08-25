@@ -1,0 +1,27 @@
+name: jchatmind-rag-eval
+
+services:
+  postgres:
+    build:
+      context: ./docker/postgres
+    image: jchatmind-rag-eval-postgres-vchord-bm25:0.3.0
+    container_name: jchatmind-rag-eval-postgres
+    environment:
+      POSTGRES_DB: jchatmind_rag_eval
+      POSTGRES_USER: rag_eval
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - rag_eval_postgres_data:/var/lib/postgresql/data
+      - ./rag-eval/init:/docker-entrypoint-initdb.d:ro
+      - ./rag-eval/uploads:/var/lib/jchatmind/rag-eval/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_eval -d jchatmind_rag_eval"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: "no"
+
+volumes:
+  rag_eval_postgres_data:
