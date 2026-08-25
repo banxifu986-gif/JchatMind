@@ -16,6 +16,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -82,26 +83,98 @@ public class KnowledgeTools implements Tool {
             description = "从可访问知识库中执行语义检索（RAG）。参数为查询文本（query）和可选知识库 ID 数组（kbIds）；不传 kbIds 时默认搜索当前 Agent 全部可访问知识库；返回结果带知识库、来源和路径信息。"
     )
     public String knowledgeQuery(String query, List<String> kbIds) {
+        KnowledgeQueryResult queryResult = executeKnowledgeQuery(query, kbIds);
+        if (!StringUtils.hasText(queryResult.message())) {
+            return formatResults(queryResult.results());
+        }
+        return queryResult.message();
+    }
+
+    public List<RagRetrievalResult> retrieveKnowledge(String query, List<String> kbIds) {
+        return executeKnowledgeQuery(query, kbIds).results();
+    }
+
+    private KnowledgeQueryResult executeKnowledgeQuery(String query, List<String> kbIds) {
         RagRetrievalContext retrievalContext = loadRetrievalContext();
         List<String> effectiveKbIds = resolveEffectiveKbIds(kbIds, retrievalContext);
         if (effectiveKbIds.isEmpty()) {
-            return "未找到可检索的知识库，请检查当前 Agent 是否已配置可访问知识库，或传入的 kbIds 是否都在授权范围内。";
+            return KnowledgeQueryResult.empty("未找到可检索的知识库，请检查当前 Agent 是否已配置可访问知识库，或传入的 kbIds 是否都在授权范围内。");
         }
         retrievalContext = alignRetrievalContext(retrievalContext, kbIds, effectiveKbIds);
         RagRouteDecision route = ragRouter.decide(query, effectiveKbIds, true, false, true);
         if (route.route() == RagRouteDecision.Route.ABSTAIN
                 || route.route() == RagRouteDecision.Route.CLARIFY) {
-            return route.reason();
+            return KnowledgeQueryResult.empty(route.reason());
         }
         if (route.route() == RagRouteDecision.Route.DIRECT) {
-            return route.reason();
+            return KnowledgeQueryResult.empty(route.reason());
+        }
+        List<RagRetrievalResult> markdownTableAssetResults = List.of();
+        List<RagRetrievalResult> pdfPageAssetResults = List.of();
+        if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
+            try {
+                markdownTableAssetResults = ragService.retrieveMarkdownTableAssets(
+                        effectiveKbIds,
+                        query,
+                        retrievalContext,
+                        route.topK()
+                );
+            } catch (RuntimeException e) {
+                markdownTableAssetResults = List.of();
+            }
+            try {
+                pdfPageAssetResults = ragService.retrievePdfPageAssets(effectiveKbIds, query, retrievalContext, route.topK());
+            } catch (RuntimeException e) {
+                pdfPageAssetResults = List.of();
+            }
         }
         List<RagRetrievalResult> results = ragService.retrieve(effectiveKbIds, query, retrievalContext, route.topK());
+        if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
+            results = mergeMultimodalResults(
+                    markdownTableAssetResults,
+                    pdfPageAssetResults,
+                    results,
+                    route.topK()
+                );
+        }
         if (results == null || results.isEmpty()) {
-            return "当前授权知识范围内没有足够证据，无法可靠回答。";
+            return KnowledgeQueryResult.empty("当前授权知识范围内没有足够证据，无法可靠回答。");
         }
         updateRetrievalContext(results);
-        return formatResults(results);
+        return new KnowledgeQueryResult(List.copyOf(results), null);
+    }
+
+    private List<RagRetrievalResult> mergeMultimodalResults(
+            List<RagRetrievalResult> markdownTableAssetResults,
+            List<RagRetrievalResult> pdfPageAssetResults,
+            List<RagRetrievalResult> ordinaryResults,
+            int limit
+    ) {
+        List<RagRetrievalResult> merged = new ArrayList<>();
+        LinkedHashSet<String> seenChunkIds = new LinkedHashSet<>();
+        appendUniqueResults(merged, seenChunkIds, markdownTableAssetResults);
+        appendUniqueResults(merged, seenChunkIds, pdfPageAssetResults);
+        appendUniqueResults(merged, seenChunkIds, ordinaryResults);
+        return merged.stream().limit(limit).toList();
+    }
+
+    private void appendUniqueResults(
+            List<RagRetrievalResult> target,
+            LinkedHashSet<String> seenChunkIds,
+            List<RagRetrievalResult> candidates
+    ) {
+        if (candidates == null) {
+            return;
+        }
+        for (RagRetrievalResult candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            if (StringUtils.hasText(candidate.getChunkId()) && !seenChunkIds.add(candidate.getChunkId())) {
+                continue;
+            }
+            target.add(candidate);
+        }
     }
 
     private RagRetrievalContext loadRetrievalContext() {
@@ -268,13 +341,43 @@ public class KnowledgeTools implements Tool {
         String sourceName = extractMetadataText(result.getMetadata(), "sourceName");
         String contentPath = extractMetadataText(result.getMetadata(), "contentPath");
         String pageNumber = extractMetadataText(result.getMetadata(), "pageNumber");
+        String tableLineRange = extractTableLineRange(result.getMetadata());
         String content = StringUtils.hasText(result.getContent()) ? result.getContent().trim() : "";
         return "知识库: " + kbName + "\n"
                 + "来源: " + defaultText(sourceName) + "\n"
                 + "路径: " + defaultText(contentPath) + "\n"
-                + "引用: " + defaultText(result.getChunkId())
-                + (StringUtils.hasText(pageNumber) ? " | 页码: " + pageNumber : "") + "\n"
+                + "引用: " + defaultText(result.getChunkId()) + extractAssetCitation(result.getMetadata())
+                + (StringUtils.hasText(pageNumber) ? " | 页码: " + pageNumber : "")
+                + (StringUtils.hasText(tableLineRange) ? " | 行号: " + tableLineRange : "") + "\n"
                 + "内容: " + content;
+    }
+
+    private String extractAssetCitation(String metadata) {
+        try {
+            JsonNode asset = objectMapper.readTree(metadata).path("asset");
+            String assetId = asset.path("id").asText();
+            String assetType = asset.path("type").asText();
+            if (StringUtils.hasText(assetId) && StringUtils.hasText(assetType)) {
+                return " | 资产: " + assetType + ":" + assetId;
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        return "";
+    }
+
+    private String extractTableLineRange(String metadata) {
+        try {
+            JsonNode locator = objectMapper.readTree(metadata).path("asset").path("locator");
+            int startLine = locator.path("startLine").asInt();
+            int endLine = locator.path("endLine").asInt();
+            if (startLine > 0 && endLine >= startLine) {
+                return startLine + "-" + endLine;
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        return "";
     }
 
     private String resolveKnowledgeBaseName(String kbId) {
@@ -290,5 +393,12 @@ public class KnowledgeTools implements Tool {
 
     private String defaultText(String value) {
         return StringUtils.hasText(value) ? value : "未知";
+    }
+
+    private record KnowledgeQueryResult(List<RagRetrievalResult> results, String message) {
+
+        private static KnowledgeQueryResult empty(String message) {
+            return new KnowledgeQueryResult(List.of(), message);
+        }
     }
 }

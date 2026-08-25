@@ -5,6 +5,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import com.vladsch.flexmark.ast.Heading;
 import com.vladsch.flexmark.ext.tables.TableBlock;
+import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Block;
 import com.vladsch.flexmark.util.ast.Document;
@@ -34,6 +35,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
 
     public MarkdownParserServiceImpl() {
         MutableDataSet options = new MutableDataSet();
+        options.set(Parser.EXTENSIONS, List.of(TablesExtension.create()));
         this.parser = Parser.builder(options).build();
     }
 
@@ -51,6 +53,19 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
         } catch (Exception e) {
             log.error("解析 Markdown 失败", e);
             throw new RuntimeException("解析 Markdown 失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<MarkdownTable> parseMarkdownTables(InputStream inputStream) {
+        try {
+            String markdown = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            Document document = parser.parse(markdown);
+            List<MarkdownTable> tables = new ArrayList<>();
+            collectMarkdownTables(document, markdown, tables);
+            return tables;
+        } catch (IOException e) {
+            throw new RuntimeException("读取 Markdown 表格失败", e);
         }
     }
 
@@ -335,6 +350,45 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             log.warn("提取表格 Markdown 失败，退回纯文本提取: {}", e.getMessage());
             return extractPlainText(tableNode);
         }
+    }
+
+    private void collectMarkdownTables(Node node, String markdown, List<MarkdownTable> tables) {
+        if (node instanceof TableBlock) {
+            BasedSequence chars = node.getChars();
+            if (chars == null || chars.isEmpty()) {
+                return;
+            }
+            int startOffset = chars.getStartOffset();
+            int endOffset = chars.getEndOffset();
+            if (startOffset < 0 || endOffset <= startOffset || endOffset > markdown.length()) {
+                return;
+            }
+            String content = markdown.substring(startOffset, endOffset).trim();
+            if (!content.isEmpty()) {
+                tables.add(new MarkdownTable(
+                        content,
+                        lineNumberAt(markdown, startOffset),
+                        lineNumberAt(markdown, endOffset - 1)
+                ));
+            }
+            return;
+        }
+
+        Node child = node.getFirstChild();
+        while (child != null) {
+            collectMarkdownTables(child, markdown, tables);
+            child = child.getNext();
+        }
+    }
+
+    private int lineNumberAt(String content, int offset) {
+        int line = 1;
+        for (int index = 0; index < offset; index++) {
+            if (content.charAt(index) == '\n') {
+                line++;
+            }
+        }
+        return line;
     }
 
     private String extractPlainText(Node node) {

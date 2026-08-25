@@ -63,6 +63,26 @@ class MarkdownParserServiceImplTest {
     }
 
     @Test
+    void shouldExtractMarkdownTableWithStableLineLocator() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String markdown = """
+                # 发布配置
+                | 指标 | 值 |
+                | --- | --- |
+                | 超时 | 30s |
+                """;
+
+        List<MarkdownParserService.MarkdownTable> tables = service.parseMarkdownTables(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(1, tables.size());
+        assertEquals("| 指标 | 值 |\n| --- | --- |\n| 超时 | 30s |", tables.get(0).content());
+        assertEquals(2, tables.get(0).startLine());
+        assertEquals(4, tables.get(0).endLine());
+    }
+
+    @Test
     void shouldExtractMultiLevelHeadingStructure() {
         MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
         String markdown = """

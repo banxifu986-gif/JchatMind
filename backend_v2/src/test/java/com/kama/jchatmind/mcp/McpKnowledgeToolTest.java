@@ -268,6 +268,199 @@ class McpKnowledgeToolTest {
     }
 
     @Test
+    void shouldMergePdfPageAssetCandidatesAheadOfOrdinaryMultimodalMcpResults() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                principalAccessService,
+                new RagRouter()
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(caller);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            RagRetrievalResult ordinary = new RagRetrievalResult();
+            ordinary.setChunkId("chunk-ordinary");
+            ordinary.setKbId("kb-own");
+            ordinary.setContent("普通文本证据");
+            RagRetrievalResult asset = new RagRetrievalResult();
+            asset.setChunkId("chunk-pdf-page-2");
+            asset.setKbId("kb-own");
+            asset.setContent("PDF 第二页表格证据");
+            asset.setMetadata("{\"asset\":{\"id\":\"asset-page-2\",\"type\":\"PDF_PAGE_TEXT\"}}");
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
+                    .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("研发知识库").build()));
+            when(ragService.retrieve(List.of("kb-own"), "请定位 PDF 第 2 页的表格", 5))
+                    .thenReturn(List.of(ordinary, asset));
+            when(ragService.retrievePdfPageAssets(List.of("kb-own"), "请定位 PDF 第 2 页的表格", null, 5))
+                    .thenReturn(List.of(asset));
+
+            String response = tool.search("请定位 PDF 第 2 页的表格", List.of("kb-own"));
+
+            verify(ragService).retrievePdfPageAssets(List.of("kb-own"), "请定位 PDF 第 2 页的表格", null, 5);
+            assertThat(response)
+                    .contains("引用: chunk-pdf-page-2")
+                    .contains("引用: chunk-ordinary")
+                    .contains("资产: PDF_PAGE_TEXT:asset-page-2");
+            assertThat(response.indexOf("引用: chunk-pdf-page-2"))
+                    .isLessThan(response.indexOf("引用: chunk-ordinary"));
+            assertThat(response.indexOf("引用: chunk-pdf-page-2"))
+                    .isEqualTo(response.lastIndexOf("引用: chunk-pdf-page-2"));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldMergeMarkdownTableAssetCandidatesAheadOfPdfAndOrdinaryMultimodalMcpResults() {
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        RagRetrievalResult ordinary = new RagRetrievalResult();
+        ordinary.setChunkId("chunk-ordinary");
+        ordinary.setKbId("kb-own");
+        ordinary.setContent("普通文本证据");
+        RagRetrievalResult pdfAsset = new RagRetrievalResult();
+        pdfAsset.setChunkId("chunk-pdf-page-2");
+        pdfAsset.setKbId("kb-own");
+        pdfAsset.setContent("PDF 页文本证据");
+        pdfAsset.setMetadata("{\"asset\":{\"id\":\"asset-page-2\",\"type\":\"PDF_PAGE_TEXT\"}}");
+        RagRetrievalResult tableAsset = new RagRetrievalResult();
+        tableAsset.setChunkId("chunk-markdown-table-2");
+        tableAsset.setKbId("kb-own");
+        tableAsset.setContent("| 阶段 | 负责人 |\n| --- | --- |\n| G2 | 平台组 |");
+        tableAsset.setMetadata("{\"asset\":{\"id\":\"asset-table-2\",\"type\":\"TABLE\",\"locator\":{\"startLine\":12,\"endLine\":14}}}");
+        RagService ragService = mock(RagService.class, invocation -> switch (invocation.getMethod().getName()) {
+            case "retrieveMarkdownTableAssets" -> List.of(tableAsset);
+            case "retrievePdfPageAssets" -> List.of(pdfAsset);
+            case "retrieve" -> List.of(ordinary, pdfAsset);
+            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                principalAccessService,
+                new RagRouter()
+        );
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(new McpCallerIdentity(11L, 7L));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
+                    .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("研发知识库").build()));
+
+            String response = tool.search("请定位 G2 Markdown 表格", List.of("kb-own"));
+
+            assertThat(org.mockito.Mockito.mockingDetails(ragService).getInvocations())
+                    .anyMatch(invocation -> "retrieveMarkdownTableAssets".equals(invocation.getMethod().getName()));
+            assertThat(response)
+                    .contains("引用: chunk-markdown-table-2")
+                    .contains("资产: TABLE:asset-table-2")
+                    .contains("行号: 12-14")
+                    .contains("引用: chunk-pdf-page-2")
+                    .contains("引用: chunk-ordinary");
+            assertThat(response.indexOf("引用: chunk-markdown-table-2"))
+                    .isLessThan(response.indexOf("引用: chunk-pdf-page-2"));
+            assertThat(response.indexOf("引用: chunk-pdf-page-2"))
+                    .isLessThan(response.indexOf("引用: chunk-ordinary"));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldFallBackToOrdinaryMcpResultsWhenMarkdownTableAssetCandidatesFail() {
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        RagRetrievalResult ordinary = new RagRetrievalResult();
+        ordinary.setChunkId("chunk-ordinary");
+        ordinary.setKbId("kb-own");
+        ordinary.setContent("普通文本证据");
+        RagService ragService = mock(RagService.class, invocation -> switch (invocation.getMethod().getName()) {
+            case "retrieveMarkdownTableAssets" -> throw new IllegalStateException("表格资产候选不可用");
+            case "retrievePdfPageAssets" -> List.of();
+            case "retrieve" -> List.of(ordinary);
+            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class),
+                new RagRouter()
+        );
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(new McpCallerIdentity(11L, 7L));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
+                    .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("研发知识库").build()));
+
+            String response = tool.search("请定位 G2 Markdown 表格", List.of("kb-own"));
+
+            assertThat(org.mockito.Mockito.mockingDetails(ragService).getInvocations())
+                    .anyMatch(invocation -> "retrieveMarkdownTableAssets".equals(invocation.getMethod().getName()));
+            assertThat(response).contains("引用: chunk-ordinary");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldFallBackToOrdinaryMcpResultsWhenPdfPageAssetCandidatesFail() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                knowledgeBaseMapper,
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class),
+                new RagRouter()
+        );
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(new McpCallerIdentity(11L, 7L));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            RagRetrievalResult ordinary = new RagRetrievalResult();
+            ordinary.setChunkId("chunk-ordinary");
+            ordinary.setKbId("kb-own");
+            ordinary.setContent("普通文本证据");
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+            when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
+                    .thenReturn(List.of(KnowledgeBase.builder().id("kb-own").name("研发知识库").build()));
+            when(ragService.retrieve(List.of("kb-own"), "请定位 PDF 第 2 页的表格", 5))
+                    .thenReturn(List.of(ordinary));
+            when(ragService.retrievePdfPageAssets(List.of("kb-own"), "请定位 PDF 第 2 页的表格", null, 5))
+                    .thenThrow(new IllegalStateException("资产候选不可用"));
+
+            String response = tool.search("请定位 PDF 第 2 页的表格", List.of("kb-own"));
+
+            assertThat(response).contains("引用: chunk-ordinary");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
     void shouldRefuseWhenMcpRetrievalHasNoEvidence() {
         RagService ragService = mock(RagService.class);
         KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
@@ -316,7 +509,7 @@ class McpKnowledgeToolTest {
             evidence.setChunkId("chunk-1");
             evidence.setKbId("kb-own");
             evidence.setContent("证据正文");
-            evidence.setMetadata("{\"sourceName\":\"设计文档.pdf\",\"contentPath\":\"第 2 页\",\"pageNumber\":2}");
+            evidence.setMetadata("{\"sourceName\":\"设计文档.pdf\",\"contentPath\":\"第 2 页\",\"pageNumber\":2,\"asset\":{\"id\":\"asset-1\",\"type\":\"PDF_PAGE_TEXT\",\"locator\":{\"pageNumber\":2}}}");
             when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
                     .thenReturn(List.of("kb-own"));
             when(knowledgeBaseMapper.selectByIdBatch(List.of("kb-own")))
@@ -325,7 +518,11 @@ class McpKnowledgeToolTest {
 
             String response = tool.search("查询", List.of("kb-own"));
 
-            assertThat(response).contains("引用: chunk-1").contains("页码: 2").contains("证据正文");
+            assertThat(response)
+                    .contains("引用: chunk-1")
+                    .contains("资产: PDF_PAGE_TEXT:asset-1")
+                    .contains("页码: 2")
+                    .contains("证据正文");
         } finally {
             RequestContextHolder.resetRequestAttributes();
         }

@@ -173,6 +173,106 @@ public class RagServiceImpl implements RagService {
         return retrieveWithPlan(effectiveKbIds, rewritten, limit);
     }
 
+    @Override
+    public List<RagRetrievalResult> retrievePdfPageAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        return retrieveAssetCandidates(
+                kbIds,
+                query,
+                context,
+                limit,
+                "asset_pdf_page_text",
+                chunkBgeM3Mapper::similaritySearchPdfPageAssets
+        );
+    }
+
+    @Override
+    public List<RagRetrievalResult> retrieveMarkdownTableAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        return retrieveAssetCandidates(
+                kbIds,
+                query,
+                context,
+                limit,
+                "asset_table",
+                chunkBgeM3Mapper::similaritySearchMarkdownTableAssets
+        );
+    }
+
+    private List<RagRetrievalResult> retrieveAssetCandidates(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit,
+            String channelPrefix,
+            AssetCandidateSearcher assetCandidateSearcher
+    ) {
+        if (limit <= 0 || !StringUtils.hasText(query)) {
+            return List.of();
+        }
+
+        List<String> effectiveKbIds = sanitizeKbIds(kbIds);
+        if (effectiveKbIds.isEmpty()) {
+            return List.of();
+        }
+
+        QueryRewriteResult rewritten = queryRewriteService.rewrite(effectiveKbIds, query, context);
+        if (rewritten == null) {
+            return List.of();
+        }
+        List<String> retrievalQueries = disableQueryExpansion
+                ? List.of(rewritten.getQuery())
+                : rewritten.getRetrievalQueries() == null || rewritten.getRetrievalQueries().isEmpty()
+                ? List.of(rewritten.getQuery())
+                : rewritten.getRetrievalQueries();
+        List<String> retrievalQuerySources = rewritten.getRetrievalQuerySources() == null
+                || rewritten.getRetrievalQuerySources().size() != retrievalQueries.size()
+                ? Collections.nCopies(retrievalQueries.size(), "original")
+                : rewritten.getRetrievalQuerySources();
+        int candidateLimit = scaledCandidateLimit(limit, scopeMultiplier(effectiveKbIds.size()));
+        Map<String, String> embeddingLiteralCache = new LinkedHashMap<>();
+        List<RetrievalChannel> channels = new ArrayList<>();
+        RetrievalContext normalizedContext = normalizeContext(rewritten.getContext(), rewritten.getContextApplyMode());
+        List<String> candidateKbIds = scopedKbIds(effectiveKbIds, normalizedContext);
+        if (candidateKbIds.isEmpty()) {
+            return List.of();
+        }
+
+        for (int i = 0; i < retrievalQueries.size(); i++) {
+            String retrievalQuery = retrievalQueries.get(i);
+            String queryEmbedding = embeddingLiteral(embeddingLiteralCache, retrievalQuery);
+            if (!StringUtils.hasText(queryEmbedding)) {
+                continue;
+            }
+            List<RagRetrievalResult> candidates = assetCandidateSearcher.search(
+                    candidateKbIds,
+                    queryEmbedding,
+                    hardContextValue(normalizedContext, RetrievalContext::sourceName),
+                    hardContextValue(normalizedContext, RetrievalContext::sourceType),
+                    hardContextValue(normalizedContext, RetrievalContext::contentPathPrefix),
+                    candidateLimit
+            );
+            if (candidates != null && !candidates.isEmpty()) {
+                channels.add(new RetrievalChannel(
+                        channelPrefix + "_" + retrievalQuerySources.get(i),
+                        annotateVectorCandidates(candidates)
+                ));
+            }
+        }
+
+        return rrfFuse(channels).stream()
+                .limit(limit)
+                .toList();
+    }
+
     private List<RagRetrievalResult> retrieveWithPlan(List<String> kbIds, QueryRewriteResult rewritten, int limit) {
         String originalQuery = rewritten.getQuery();
         String normalizedOriginalQuery = normalize(originalQuery);
@@ -1245,6 +1345,18 @@ public class RagServiceImpl implements RagService {
             Function<RetrievalContext, String> field
     ) {
         return context.applyMode() == QueryRewriteResult.ContextApplyMode.HARD ? field.apply(context) : null;
+    }
+
+    @FunctionalInterface
+    private interface AssetCandidateSearcher {
+        List<RagRetrievalResult> search(
+                List<String> kbIds,
+                String vectorLiteral,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        );
     }
 
     private record ScoredRagResult(

@@ -243,7 +243,7 @@ class DefaultIngestionTaskProcessorTest {
         ArgumentCaptor<ChunkBgeM3> chunkCaptor = ArgumentCaptor.forClass(ChunkBgeM3.class);
         verify(chunkBgeM3Mapper).insert(chunkCaptor.capture());
         assertThat(chunkCaptor.getValue().getContent()).isEqualTo("plain markdown text");
-        verifyNoInteractions(documentAssetMapper);
+        verify(documentAssetMapper).deleteByDocumentId("doc-1");
     }
 
     @Test
@@ -395,8 +395,87 @@ class DefaultIngestionTaskProcessorTest {
                 .containsExactly("00000000-0000-0000-0000-00000000a201", "00000000-0000-0000-0000-00000000a202");
         assertThat(assetDocumentIdCaptor.getAllValues()).containsOnly("doc-1");
         assertThat(chunkDocumentIdCaptor.getAllValues()).containsOnly("doc-1");
+        ObjectMapper objectMapper = new ObjectMapper();
+        assertThat(List.of(
+                objectMapper.readTree(chunkCaptor.getAllValues().get(0).getMetadata()).path("asset").path("id").asText(),
+                objectMapper.readTree(chunkCaptor.getAllValues().get(1).getMetadata()).path("asset").path("id").asText()
+        )).containsExactlyElementsOf(assetIdCaptor.getAllValues());
+        assertThat(List.of(
+                objectMapper.readTree(chunkCaptor.getAllValues().get(0).getMetadata()).path("asset").path("type").asText(),
+                objectMapper.readTree(chunkCaptor.getAllValues().get(1).getMetadata()).path("asset").path("type").asText()
+        )).containsExactly("PDF_PAGE_TEXT", "PDF_PAGE_TEXT");
         verify(documentAssetMapper).deleteByDocumentId("doc-1");
         verify(markdownParserService).parsePdf(any());
+    }
+
+    @Test
+    void shouldPersistMarkdownTableAssetAndLinkItToGeneratedChunk() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path storedFile = temporaryDirectory.resolve("deployment.md");
+        String tableContent = "| 指标 | 值 |\n| --- | --- |\n| 超时 | 30s |";
+        Files.writeString(storedFile, "# 发布配置\n" + tableContent, StandardCharsets.UTF_8);
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("deployment.md")
+                .filetype("md")
+                .metadata("{\"filePath\":\"kb-1/doc-1/deployment.md\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/deployment.md")).thenReturn(storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a301");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                new MarkdownParserServiceImpl(),
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper).insert(assetCaptor.capture());
+        assertThat(assetCaptor.getValue())
+                .extracting(
+                        DocumentAsset::getDocumentId,
+                        DocumentAsset::getAssetType,
+                        DocumentAsset::getAssetKey,
+                        DocumentAsset::getPageNumber,
+                        DocumentAsset::getContentHash,
+                        DocumentAsset::getParserVersion,
+                        DocumentAsset::getStatus
+                )
+                .containsExactly("doc-1", "TABLE", "table-1", null, sha256(tableContent), "markdown-table-v1", "READY");
+        ObjectMapper objectMapper = new ObjectMapper();
+        assertThat(objectMapper.readTree(assetCaptor.getValue().getLocator()).path("startLine").asInt()).isEqualTo(2);
+        assertThat(objectMapper.readTree(assetCaptor.getValue().getLocator()).path("endLine").asInt()).isEqualTo(4);
+        ArgumentCaptor<ChunkBgeM3> chunkCaptor = ArgumentCaptor.forClass(ChunkBgeM3.class);
+        verify(chunkBgeM3Mapper).insert(chunkCaptor.capture());
+        assertThat(objectMapper.readTree(chunkCaptor.getValue().getMetadata()).path("asset").path("id").asText())
+                .isEqualTo(assetCaptor.getValue().getAssetId());
+        assertThat(objectMapper.readTree(chunkCaptor.getValue().getMetadata()).path("asset").path("type").asText())
+                .isEqualTo("TABLE");
+        assertThat(assetCaptor.getValue().getCreatedAt()).isEqualTo(chunkCaptor.getValue().getCreatedAt());
+        assertThat(assetCaptor.getValue().getUpdatedAt()).isEqualTo(chunkCaptor.getValue().getUpdatedAt());
+        verify(documentAssetMapper).deleteByDocumentId("doc-1");
+        verify(documentAssetMapper).insertChunkRelation(
+                assetCaptor.getValue().getAssetId(),
+                "00000000-0000-0000-0000-00000000a301",
+                "doc-1",
+                "doc-1"
+        );
     }
 
     @Test

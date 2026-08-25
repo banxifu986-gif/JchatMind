@@ -85,6 +85,27 @@ class KnowledgeToolsScopeTest {
     }
 
     @Test
+    void shouldIncludeLinkedPdfAssetInStableCitation() {
+        RagService ragService = mock(RagService.class);
+        RagRetrievalResult evidence = new RagRetrievalResult();
+        evidence.setChunkId("chunk-1");
+        evidence.setKbId("kb-1");
+        evidence.setContent("第 2 页证据");
+        evidence.setMetadata("{\"sourceName\":\"设计文档.pdf\",\"contentPath\":\"第 2 页\",\"pageNumber\":2,\"asset\":{\"id\":\"asset-1\",\"type\":\"PDF_PAGE_TEXT\",\"locator\":{\"pageNumber\":2}}}");
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(evidence));
+
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").name("研发知识库").build()));
+
+        String response = tool.knowledgeQuery("问题", null);
+
+        assertThat(response)
+                .contains("引用: chunk-1")
+                .contains("资产: PDF_PAGE_TEXT:asset-1")
+                .contains("页码: 2");
+    }
+
+    @Test
     void shouldNotPersistLowConfidenceTopResultAsSessionContext() {
         RagService ragService = mock(RagService.class);
         ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
@@ -296,6 +317,120 @@ class KnowledgeToolsScopeTest {
         tool.knowledgeQuery("请定位 PDF 第 2 页的表格", null);
 
         verify(ragService).retrieve(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5);
+    }
+
+    @Test
+    void shouldMergePdfPageAssetCandidatesAheadOfOrdinaryMultimodalResults() {
+        RagService ragService = mock(RagService.class);
+        RagRetrievalResult ordinary = new RagRetrievalResult();
+        ordinary.setChunkId("chunk-ordinary");
+        ordinary.setKbId("kb-1");
+        ordinary.setContent("普通文本证据");
+        RagRetrievalResult asset = new RagRetrievalResult();
+        asset.setChunkId("chunk-pdf-page-2");
+        asset.setKbId("kb-1");
+        asset.setContent("PDF 第二页表格证据");
+        asset.setMetadata("{\"asset\":{\"id\":\"asset-page-2\",\"type\":\"PDF_PAGE_TEXT\"}}");
+        when(ragService.retrieve(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5))
+                .thenReturn(List.of(ordinary, asset));
+        when(ragService.retrievePdfPageAssets(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5))
+                .thenReturn(List.of(asset));
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").name("研发知识库").build()));
+
+        String response = tool.knowledgeQuery("请定位 PDF 第 2 页的表格", null);
+
+        verify(ragService).retrievePdfPageAssets(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5);
+        assertThat(response)
+                .contains("引用: chunk-pdf-page-2")
+                .contains("引用: chunk-ordinary")
+                .contains("资产: PDF_PAGE_TEXT:asset-page-2");
+        assertThat(response.indexOf("引用: chunk-pdf-page-2"))
+                .isLessThan(response.indexOf("引用: chunk-ordinary"));
+        assertThat(response.indexOf("引用: chunk-pdf-page-2"))
+                .isEqualTo(response.lastIndexOf("引用: chunk-pdf-page-2"));
+    }
+
+    @Test
+    void shouldMergeMarkdownTableAssetCandidatesAheadOfPdfAndOrdinaryMultimodalResults() {
+        RagRetrievalResult ordinary = new RagRetrievalResult();
+        ordinary.setChunkId("chunk-ordinary");
+        ordinary.setKbId("kb-1");
+        ordinary.setContent("普通文本证据");
+        RagRetrievalResult pdfAsset = new RagRetrievalResult();
+        pdfAsset.setChunkId("chunk-pdf-page-2");
+        pdfAsset.setKbId("kb-1");
+        pdfAsset.setContent("PDF 页文本证据");
+        pdfAsset.setMetadata("{\"asset\":{\"id\":\"asset-page-2\",\"type\":\"PDF_PAGE_TEXT\"}}");
+        RagRetrievalResult tableAsset = new RagRetrievalResult();
+        tableAsset.setChunkId("chunk-markdown-table-2");
+        tableAsset.setKbId("kb-1");
+        tableAsset.setContent("| 阶段 | 负责人 |\n| --- | --- |\n| G2 | 平台组 |");
+        tableAsset.setMetadata("{\"asset\":{\"id\":\"asset-table-2\",\"type\":\"TABLE\",\"locator\":{\"startLine\":12,\"endLine\":14}}}");
+        RagService ragService = mock(RagService.class, invocation -> switch (invocation.getMethod().getName()) {
+            case "retrieveMarkdownTableAssets" -> List.of(tableAsset);
+            case "retrievePdfPageAssets" -> List.of(pdfAsset);
+            case "retrieve" -> List.of(ordinary, pdfAsset);
+            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").name("研发知识库").build()));
+
+        String response = tool.knowledgeQuery("请定位 G2 Markdown 表格", null);
+
+        assertThat(org.mockito.Mockito.mockingDetails(ragService).getInvocations())
+                .anyMatch(invocation -> "retrieveMarkdownTableAssets".equals(invocation.getMethod().getName()));
+        assertThat(response)
+                .contains("引用: chunk-markdown-table-2")
+                .contains("资产: TABLE:asset-table-2")
+                .contains("行号: 12-14")
+                .contains("引用: chunk-pdf-page-2")
+                .contains("引用: chunk-ordinary");
+        assertThat(response.indexOf("引用: chunk-markdown-table-2"))
+                .isLessThan(response.indexOf("引用: chunk-pdf-page-2"));
+        assertThat(response.indexOf("引用: chunk-pdf-page-2"))
+                .isLessThan(response.indexOf("引用: chunk-ordinary"));
+    }
+
+    @Test
+    void shouldFallBackToOrdinaryResultsWhenMarkdownTableAssetCandidatesFail() {
+        RagRetrievalResult ordinary = new RagRetrievalResult();
+        ordinary.setChunkId("chunk-ordinary");
+        ordinary.setKbId("kb-1");
+        ordinary.setContent("普通文本证据");
+        RagService ragService = mock(RagService.class, invocation -> switch (invocation.getMethod().getName()) {
+            case "retrieveMarkdownTableAssets" -> throw new IllegalStateException("表格资产候选不可用");
+            case "retrievePdfPageAssets" -> List.of();
+            case "retrieve" -> List.of(ordinary);
+            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").name("研发知识库").build()));
+
+        String response = tool.knowledgeQuery("请定位 G2 Markdown 表格", null);
+
+        assertThat(org.mockito.Mockito.mockingDetails(ragService).getInvocations())
+                .anyMatch(invocation -> "retrieveMarkdownTableAssets".equals(invocation.getMethod().getName()));
+        assertThat(response).contains("引用: chunk-ordinary");
+    }
+
+    @Test
+    void shouldFallBackToOrdinaryResultsWhenPdfPageAssetCandidatesFail() {
+        RagService ragService = mock(RagService.class);
+        RagRetrievalResult ordinary = new RagRetrievalResult();
+        ordinary.setChunkId("chunk-ordinary");
+        ordinary.setKbId("kb-1");
+        ordinary.setContent("普通文本证据");
+        when(ragService.retrieve(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5))
+                .thenReturn(List.of(ordinary));
+        when(ragService.retrievePdfPageAssets(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5))
+                .thenThrow(new IllegalStateException("资产候选不可用"));
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").name("研发知识库").build()));
+
+        String response = tool.knowledgeQuery("请定位 PDF 第 2 页的表格", null);
+
+        assertThat(response).contains("引用: chunk-ordinary");
     }
 
     @Test

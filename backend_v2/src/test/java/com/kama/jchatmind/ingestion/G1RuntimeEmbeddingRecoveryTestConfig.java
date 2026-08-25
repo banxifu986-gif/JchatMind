@@ -243,6 +243,26 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
         ) {
             return recovered.retrieve(kbIds, query, context, limit);
         }
+
+        @Override
+        public List<RagRetrievalResult> retrievePdfPageAssets(
+                List<String> kbIds,
+                String query,
+                RagRetrievalContext context,
+                int limit
+        ) {
+            return recovered.retrievePdfPageAssets(kbIds, query, context, limit);
+        }
+
+        @Override
+        public List<RagRetrievalResult> retrieveMarkdownTableAssets(
+                List<String> kbIds,
+                String query,
+                RagRetrievalContext context,
+                int limit
+        ) {
+            return recovered.retrieveMarkdownTableAssets(kbIds, query, context, limit);
+        }
     }
 
     static class EmbeddingRecoveryProbe {

@@ -19,6 +19,10 @@ public interface MarkdownParserService {
      */
     List<MarkdownSection> parseMarkdown(InputStream inputStream);
 
+    default List<MarkdownTable> parseMarkdownTables(InputStream inputStream) {
+        return List.of();
+    }
+
     default List<MarkdownSection> parseHtml(InputStream inputStream) {
         return parseMarkdown(inputStream);
     }
@@ -65,5 +69,12 @@ public interface MarkdownParserService {
         PARENT_OVERVIEW,
         LEAF_CONTENT,
         LEAF_QA
+    }
+
+    record MarkdownTable(
+            String content,
+            int startLine,
+            int endLine
+    ) {
     }
 }

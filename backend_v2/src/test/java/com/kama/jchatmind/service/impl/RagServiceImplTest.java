@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.stream.IntStream;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,10 +27,150 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RagServiceImplTest {
+
+    @Test
+    void shouldRetrieveOnlyMarkdownTableAssetCandidatesWithinAuthorizedKnowledgeBasesAndHardContext() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            RagRetrievalResult assetCandidate = new RagRetrievalResult();
+            assetCandidate.setChunkId("chunk-markdown-table-2");
+            assetCandidate.setKbId("kb-1");
+            assetCandidate.setDocId("document-1");
+            assetCandidate.setContent("| phase | owner |\n| --- | --- |\n| G2 | platform |");
+            assetCandidate.setMetadata("{\"asset\":{\"id\":\"asset-table-2\",\"type\":\"TABLE\"}}");
+            assetCandidate.setDistance(0.1D);
+            assetCandidate.setRank(1);
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class, invocation -> {
+                if ("similaritySearchMarkdownTableAssets".equals(invocation.getMethod().getName())) {
+                    return List.of(assetCandidate);
+                }
+                return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+            });
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            RagRetrievalContext context = RagRetrievalContext.builder()
+                    .kbId("kb-1")
+                    .sourceName("roadmap.md")
+                    .sourceType("md")
+                    .contentPath("G2 > table assets")
+                    .build();
+            when(rewriteService.rewrite(List.of("kb-1"), "定位 G2 表格", context))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("定位 G2 表格")
+                            .context(context)
+                            .contextApplyMode(QueryRewriteResult.ContextApplyMode.HARD)
+                            .retrievalQueries(List.of("定位 G2 表格"))
+                            .retrievalQuerySources(List.of("original"))
+                            .build());
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    mock(VchordBm25QueryService.class),
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = retrieveMarkdownTableAssets(
+                    service,
+                    List.of("kb-1"),
+                    "定位 G2 表格",
+                    context,
+                    3
+            );
+
+            assertEquals(List.of("chunk-markdown-table-2"),
+                    results.stream().map(RagRetrievalResult::getChunkId).toList());
+            assertEquals(List.of("asset_table_original"), results.get(0).getRetrievalProvenance());
+            assertTrue(mockingDetails(mapper).getInvocations().stream().anyMatch(invocation ->
+                    "similaritySearchMarkdownTableAssets".equals(invocation.getMethod().getName())
+                            && List.of("kb-1").equals(invocation.getArguments()[0])
+                            && "[0.1,0.2,0.3]".equals(invocation.getArguments()[1])
+                            && "roadmap.md".equals(invocation.getArguments()[2])
+                            && "md".equals(invocation.getArguments()[3])
+                            && "g2 > table assets".equals(invocation.getArguments()[4])
+                            && Integer.valueOf(3).equals(invocation.getArguments()[5])
+            ));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldRetrieveOnlyPdfPageAssetCandidatesWithinAuthorizedKnowledgeBases() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            RagRetrievalResult assetCandidate = new RagRetrievalResult();
+            assetCandidate.setChunkId("chunk-pdf-page-2");
+            assetCandidate.setKbId("kb-1");
+            assetCandidate.setDocId("document-1");
+            assetCandidate.setContent("第二页的表格说明");
+            assetCandidate.setMetadata("{\"asset\":{\"id\":\"asset-page-2\",\"type\":\"PDF_PAGE_TEXT\"}}");
+            assetCandidate.setDistance(0.1D);
+            assetCandidate.setRank(1);
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class, invocation -> {
+                if ("similaritySearchPdfPageAssets".equals(invocation.getMethod().getName())) {
+                    return List.of(assetCandidate);
+                }
+                return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+            });
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "定位 PDF 第二页表格", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("定位 PDF 第二页表格")
+                            .retrievalQueries(List.of("定位 PDF 第二页表格"))
+                            .retrievalQuerySources(List.of("original"))
+                            .build());
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    mock(VchordBm25QueryService.class),
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = retrievePdfPageAssets(
+                    service,
+                    List.of("kb-1"),
+                    "定位 PDF 第二页表格",
+                    3
+            );
+
+            assertEquals(List.of("chunk-pdf-page-2"),
+                    results.stream().map(RagRetrievalResult::getChunkId).toList());
+            assertEquals(List.of("asset_pdf_page_text_original"), results.get(0).getRetrievalProvenance());
+            assertTrue(mockingDetails(mapper).getInvocations().stream().anyMatch(invocation ->
+                    "similaritySearchPdfPageAssets".equals(invocation.getMethod().getName())
+                            && List.of("kb-1").equals(invocation.getArguments()[0])
+                            && "[0.1,0.2,0.3]".equals(invocation.getArguments()[1])
+                            && invocation.getArguments()[2] == null
+                            && invocation.getArguments()[3] == null
+                            && invocation.getArguments()[4] == null
+                            && Integer.valueOf(3).equals(invocation.getArguments()[5])
+            ));
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void shouldCallOllamaEmbedEndpointWithInputAndKeepAlive() throws Exception {
@@ -520,6 +662,63 @@ class RagServiceImplTest {
             }
         });
         return server;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<RagRetrievalResult> retrievePdfPageAssets(
+            RagServiceImpl service,
+            List<String> kbIds,
+            String query,
+            int limit
+    ) {
+        try {
+            Method method = RagServiceImpl.class.getMethod(
+                    "retrievePdfPageAssets",
+                    List.class,
+                    String.class,
+                    RagRetrievalContext.class,
+                    int.class
+            );
+            return (List<RagRetrievalResult>) method.invoke(service, kbIds, query, null, limit);
+        } catch (InvocationTargetException e) {
+            if (e.getCause() instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new AssertionError(e.getCause());
+        } catch (NoSuchMethodException e) {
+            throw new AssertionError("PDF 页资产候选检索尚未实现", e);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<RagRetrievalResult> retrieveMarkdownTableAssets(
+            RagServiceImpl service,
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        try {
+            Method method = RagServiceImpl.class.getMethod(
+                    "retrieveMarkdownTableAssets",
+                    List.class,
+                    String.class,
+                    RagRetrievalContext.class,
+                    int.class
+            );
+            return (List<RagRetrievalResult>) method.invoke(service, kbIds, query, context, limit);
+        } catch (InvocationTargetException e) {
+            if (e.getCause() instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new AssertionError(e.getCause());
+        } catch (NoSuchMethodException e) {
+            throw new AssertionError("Markdown 表格资产候选检索尚未实现", e);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private static void captureRequest(

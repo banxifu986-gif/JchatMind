@@ -29,6 +29,8 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,20 +64,31 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
 
         List<MarkdownParserService.MarkdownSection> sections = parseSections(document, storedFile);
         boolean pdfDocument = "pdf".equalsIgnoreCase(document.getFiletype());
-        if (pdfDocument) {
+        boolean markdownDocument = isMarkdownDocument(document);
+        LocalDateTime now = LocalDateTime.now();
+        List<MarkdownTableAsset> markdownTableAssets = markdownDocument
+                ? createMarkdownTableAssets(document, storedFile, now)
+                : List.of();
+        if (pdfDocument || markdownDocument) {
             documentAssetMapper.deleteByDocumentId(document.getId());
         }
         for (ChunkBgeM3 existingChunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
             chunkBgeM3Mapper.deleteById(existingChunk.getId());
         }
 
-        LocalDateTime now = LocalDateTime.now();
         for (int index = 0; index < sections.size(); index++) {
             MarkdownParserService.MarkdownSection section = sections.get(index);
             if (!StringUtils.hasText(section.getTitle())) {
                 continue;
             }
+            DocumentAsset pdfPageAsset = pdfDocument ? createPdfPageAsset(document, section, now) : null;
             String content = section.getContent() == null ? "" : section.getContent();
+            List<MarkdownTableAsset> sectionTableAssets = markdownTableAssets.stream()
+                    .filter(tableAsset -> content.contains(tableAsset.table().content()))
+                    .toList();
+            DocumentAsset metadataAsset = pdfPageAsset != null
+                    ? pdfPageAsset
+                    : sectionTableAssets.isEmpty() ? null : sectionTableAssets.get(0).asset();
             float[] embedding = ragService.embed(RagChunkSupport.buildChunkEmbeddingText(section));
             VchordBm25ProjectionService.Projection projection = vchordBm25ProjectionService.project(
                     RagChunkSupport.buildRetrievableTitleSearchText(section, document.getFilename()),
@@ -85,7 +98,7 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
                     .kbId(document.getKbId())
                     .docId(document.getId())
                     .content(content)
-                    .metadata(buildMetadata(section, document, index))
+                    .metadata(buildMetadata(section, document, index, metadataAsset))
                     .embedding(embedding)
                     .titleBm25Vector(projection.titleVector())
                     .contentBm25Vector(projection.contentVector())
@@ -96,28 +109,26 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
             if (chunkBgeM3Mapper.insert(chunk) <= 0) {
                 throw new BizException("文档分块写入失败");
             }
-            if (pdfDocument) {
-                persistPdfPageAsset(document, section, chunk, now);
+            if (pdfPageAsset != null) {
+                persistDocumentAsset(document, pdfPageAsset, chunk);
+            }
+            for (MarkdownTableAsset tableAsset : sectionTableAssets) {
+                persistDocumentAsset(document, tableAsset.asset(), chunk);
             }
         }
     }
 
-    private void persistPdfPageAsset(
+    private DocumentAsset createPdfPageAsset(
             Document document,
             MarkdownParserService.MarkdownSection section,
-            ChunkBgeM3 chunk,
             LocalDateTime now
     ) {
         Integer pageNumber = section.getPageNumber();
         if (pageNumber == null || pageNumber <= 0) {
             throw new BizException("PDF 页码缺失");
         }
-        if (!StringUtils.hasText(chunk.getId())) {
-            throw new BizException("文档分块标识生成失败");
-        }
-
         String content = section.getContent() == null ? "" : section.getContent();
-        DocumentAsset asset = DocumentAsset.builder()
+        return DocumentAsset.builder()
                 .assetId(UUID.randomUUID().toString())
                 .documentId(document.getId())
                 .assetType("PDF_PAGE_TEXT")
@@ -130,6 +141,16 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
+    }
+
+    private void persistDocumentAsset(
+            Document document,
+            DocumentAsset asset,
+            ChunkBgeM3 chunk
+    ) {
+        if (!StringUtils.hasText(chunk.getId())) {
+            throw new BizException("文档分块标识生成失败");
+        }
         if (documentAssetMapper.insert(asset) <= 0) {
             throw new BizException("文档资产写入失败");
         }
@@ -146,6 +167,58 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
     private String buildPdfPageLocator(int pageNumber) {
         try {
             return objectMapper.writeValueAsString(Map.of("pageNumber", pageNumber));
+        } catch (JsonProcessingException e) {
+            throw new BizException("文档资产定位信息序列化失败");
+        }
+    }
+
+    private List<MarkdownTableAsset> createMarkdownTableAssets(
+            Document document,
+            Path storedFile,
+            LocalDateTime now
+    ) {
+        List<MarkdownParserService.MarkdownTable> tables;
+        try (InputStream inputStream = Files.newInputStream(storedFile)) {
+            tables = markdownParserService.parseMarkdownTables(inputStream);
+        } catch (IOException e) {
+            throw new BizException("读取文档文件失败");
+        }
+        if (tables == null || tables.isEmpty()) {
+            return List.of();
+        }
+
+        List<MarkdownTableAsset> assets = new ArrayList<>();
+        for (int index = 0; index < tables.size(); index++) {
+            MarkdownParserService.MarkdownTable table = tables.get(index);
+            if (table == null || !StringUtils.hasText(table.content())
+                    || table.startLine() <= 0 || table.endLine() < table.startLine()) {
+                continue;
+            }
+            assets.add(new MarkdownTableAsset(
+                    table,
+                    DocumentAsset.builder()
+                            .assetId(UUID.randomUUID().toString())
+                            .documentId(document.getId())
+                            .assetType("TABLE")
+                            .assetKey("table-" + (index + 1))
+                            .locator(buildTableLocator(table))
+                            .contentHash(sha256(table.content()))
+                            .parserVersion("markdown-table-v1")
+                            .status("READY")
+                            .createdAt(now)
+                            .updatedAt(now)
+                            .build()
+            ));
+        }
+        return List.copyOf(assets);
+    }
+
+    private String buildTableLocator(MarkdownParserService.MarkdownTable table) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "startLine", table.startLine(),
+                    "endLine", table.endLine()
+            ));
         } catch (JsonProcessingException e) {
             throw new BizException("文档资产定位信息序列化失败");
         }
@@ -198,6 +271,11 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         throw new BizException("不支持的文档类型");
     }
 
+    private boolean isMarkdownDocument(Document document) {
+        return "md".equalsIgnoreCase(document.getFiletype())
+                || "markdown".equalsIgnoreCase(document.getFiletype());
+    }
+
     private MarkdownParserService.MarkdownSection plainDocumentSection(Document document, String content) {
         String title = document.getFilename();
         int extensionIndex = title == null ? -1 : title.lastIndexOf('.');
@@ -236,18 +314,32 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
     private String buildMetadata(
             MarkdownParserService.MarkdownSection section,
             Document document,
-            int index
+            int index,
+            DocumentAsset asset
     ) {
         try {
-            return RagChunkSupport.buildChunkMetadataJson(
-                    objectMapper,
+            Map<String, Object> metadata = new LinkedHashMap<>(RagChunkSupport.buildChunkMetadata(
                     section,
                     document.getFiletype(),
                     document.getFilename(),
                     index
-            );
+            ));
+            if (asset != null) {
+                metadata.put("asset", Map.of(
+                        "id", asset.getAssetId(),
+                        "type", asset.getAssetType(),
+                        "locator", objectMapper.readTree(asset.getLocator())
+                ));
+            }
+            return objectMapper.writeValueAsString(metadata);
         } catch (JsonProcessingException e) {
             throw new BizException("分块元数据序列化失败");
         }
+    }
+
+    private record MarkdownTableAsset(
+            MarkdownParserService.MarkdownTable table,
+            DocumentAsset asset
+    ) {
     }
 }

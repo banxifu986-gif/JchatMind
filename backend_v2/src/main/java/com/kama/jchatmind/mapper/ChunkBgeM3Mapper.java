@@ -44,6 +44,24 @@ public interface ChunkBgeM3Mapper {
             @Param("limit") int limit
     );
 
+    List<RagRetrievalResult> similaritySearchPdfPageAssets(
+            @Param("kbIds") List<String> kbIds,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
+
+    List<RagRetrievalResult> similaritySearchMarkdownTableAssets(
+            @Param("kbIds") List<String> kbIds,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("sourceName") String sourceName,
+            @Param("sourceType") String sourceType,
+            @Param("contentPathPrefix") String contentPathPrefix,
+            @Param("limit") int limit
+    );
+
     List<RagRetrievalResult> searchByTitleExact(
             @Param("kbIds") List<String> kbIds,
             @Param("normalizedTitle") String normalizedTitle,

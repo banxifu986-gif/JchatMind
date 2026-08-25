@@ -212,6 +212,99 @@
         LIMIT #{limit}
     </select>
 
+    <select id="similaritySearchPdfPageAssets" resultMap="RagRetrievalResultMap">
+        <![CDATA[
+        SELECT chunk.id AS chunk_id,
+               chunk.kb_id,
+               chunk.doc_id,
+               chunk.content,
+               chunk.metadata::text AS metadata,
+               chunk.embedding <=> #{vectorLiteral}::vector AS distance,
+               ROW_NUMBER() OVER (ORDER BY chunk.embedding <=> #{vectorLiteral}::vector) AS rank
+        FROM chunk_bge_m3 chunk
+        JOIN document_asset_chunk relation
+          ON relation.chunk_id = chunk.id
+         AND relation.chunk_document_id = chunk.doc_id
+        JOIN document_asset asset
+          ON asset.asset_id = relation.asset_id
+         AND asset.document_id = relation.asset_document_id
+        WHERE
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
+          AND asset.asset_type = 'PDF_PAGE_TEXT'
+          AND asset.status = 'READY'
+          AND chunk.embedding IS NOT NULL
+        ]]>
+        <if test="sourceName != null and sourceName != ''">
+          AND chunk.metadata->>'sourceName' = #{sourceName}
+        </if>
+        <if test="sourceType != null and sourceType != ''">
+          AND chunk.metadata->>'sourceType' = #{sourceType}
+        </if>
+        <if test="contentPathPrefix != null and contentPathPrefix != ''">
+          AND lower(regexp_replace(trim(COALESCE(chunk.metadata->>'contentPath', '')), '\s+', ' ', 'g')) LIKE CONCAT(REPLACE(REPLACE(REPLACE(#{contentPathPrefix}, '\', '\\'), '%', '\%'), '_', '\_'), '%') ESCAPE '\'
+        </if>
+        <![CDATA[
+        ORDER BY chunk.embedding <=> #{vectorLiteral}::vector
+        LIMIT #{limit}
+        ]]>
+    </select>
+
+    <select id="similaritySearchMarkdownTableAssets" resultMap="RagRetrievalResultMap">
+        <![CDATA[
+        SELECT chunk.id AS chunk_id,
+               chunk.kb_id,
+               chunk.doc_id,
+               chunk.content,
+               jsonb_set(
+                       COALESCE(chunk.metadata, '{}'::jsonb),
+                       '{asset}',
+                       jsonb_build_object(
+                               'id', asset.asset_id,
+                               'type', asset.asset_type,
+                               'locator', asset.locator
+                       ),
+                       true
+               )::text AS metadata,
+               chunk.embedding <=> #{vectorLiteral}::vector AS distance,
+               ROW_NUMBER() OVER (
+                       ORDER BY chunk.embedding <=> #{vectorLiteral}::vector,
+                                asset.asset_key ASC,
+                                asset.asset_id ASC
+               ) AS rank
+        FROM chunk_bge_m3 chunk
+        JOIN document_asset_chunk relation
+          ON relation.chunk_id = chunk.id
+         AND relation.chunk_document_id = chunk.doc_id
+        JOIN document_asset asset
+          ON asset.asset_id = relation.asset_id
+         AND asset.document_id = relation.asset_document_id
+        WHERE
+        ]]>
+        <include refid="KbIdsWhereClause"/>
+        <![CDATA[
+          AND asset.asset_type = 'TABLE'
+          AND asset.status = 'READY'
+          AND chunk.embedding IS NOT NULL
+        ]]>
+        <if test="sourceName != null and sourceName != ''">
+          AND chunk.metadata->>'sourceName' = #{sourceName}
+        </if>
+        <if test="sourceType != null and sourceType != ''">
+          AND chunk.metadata->>'sourceType' = #{sourceType}
+        </if>
+        <if test="contentPathPrefix != null and contentPathPrefix != ''">
+          AND lower(regexp_replace(trim(COALESCE(chunk.metadata->>'contentPath', '')), '\s+', ' ', 'g')) LIKE CONCAT(REPLACE(REPLACE(REPLACE(#{contentPathPrefix}, '\', '\\'), '%', '\%'), '_', '\_'), '%') ESCAPE '\'
+        </if>
+        <![CDATA[
+        ORDER BY chunk.embedding <=> #{vectorLiteral}::vector,
+                 asset.asset_key ASC,
+                 asset.asset_id ASC
+        LIMIT #{limit}
+        ]]>
+    </select>
+
     <select id="searchByTitleExact" resultMap="RagRetrievalResultMap">
         <![CDATA[
         SELECT id AS chunk_id,

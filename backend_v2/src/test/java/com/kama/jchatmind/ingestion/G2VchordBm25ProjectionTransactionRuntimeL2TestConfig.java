@@ -181,6 +181,26 @@ public class G2VchordBm25ProjectionTransactionRuntimeL2TestConfig {
             ) {
                 throw new UnsupportedOperationException("事务 L2 不覆盖检索");
             }
+
+            @Override
+            public List<RagRetrievalResult> retrievePdfPageAssets(
+                    List<String> kbIds,
+                    String query,
+                    RagRetrievalContext context,
+                    int limit
+            ) {
+                throw new UnsupportedOperationException("事务 L2 不覆盖检索");
+            }
+
+            @Override
+            public List<RagRetrievalResult> retrieveMarkdownTableAssets(
+                    List<String> kbIds,
+                    String query,
+                    RagRetrievalContext context,
+                    int limit
+            ) {
+                throw new UnsupportedOperationException("事务 L2 不覆盖检索");
+            }
         };
     }
 

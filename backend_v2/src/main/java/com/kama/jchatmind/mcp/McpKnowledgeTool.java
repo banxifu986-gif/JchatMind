@@ -17,7 +17,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -95,7 +97,34 @@ public class McpKnowledgeTool {
                 );
                 return route.reason();
             }
+            List<RagRetrievalResult> markdownTableAssetResults = List.of();
+            List<RagRetrievalResult> pdfPageAssetResults = List.of();
+            if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
+                try {
+                    markdownTableAssetResults = ragService.retrieveMarkdownTableAssets(
+                            accessibleKbIds,
+                            query,
+                            null,
+                            route.topK()
+                    );
+                } catch (RuntimeException e) {
+                    markdownTableAssetResults = List.of();
+                }
+                try {
+                    pdfPageAssetResults = ragService.retrievePdfPageAssets(accessibleKbIds, query, null, route.topK());
+                } catch (RuntimeException e) {
+                    pdfPageAssetResults = List.of();
+                }
+            }
             List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, route.topK());
+            if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
+                results = mergeMultimodalResults(
+                        markdownTableAssetResults,
+                        pdfPageAssetResults,
+                        results,
+                        route.topK()
+                );
+            }
             if (results == null || results.isEmpty()) {
                 mcpPrincipalAccessService.recordKnowledgeQuery(
                         caller,
@@ -123,6 +152,39 @@ public class McpKnowledgeTool {
                     "knowledge_base_access_denied"
             );
             return PRIVATE_KNOWLEDGE_ACCESS_DENIED;
+        }
+    }
+
+    private List<RagRetrievalResult> mergeMultimodalResults(
+            List<RagRetrievalResult> markdownTableAssetResults,
+            List<RagRetrievalResult> pdfPageAssetResults,
+            List<RagRetrievalResult> ordinaryResults,
+            int limit
+    ) {
+        List<RagRetrievalResult> merged = new ArrayList<>();
+        LinkedHashSet<String> seenChunkIds = new LinkedHashSet<>();
+        appendUniqueResults(merged, seenChunkIds, markdownTableAssetResults);
+        appendUniqueResults(merged, seenChunkIds, pdfPageAssetResults);
+        appendUniqueResults(merged, seenChunkIds, ordinaryResults);
+        return merged.stream().limit(limit).toList();
+    }
+
+    private void appendUniqueResults(
+            List<RagRetrievalResult> target,
+            LinkedHashSet<String> seenChunkIds,
+            List<RagRetrievalResult> candidates
+    ) {
+        if (candidates == null) {
+            return;
+        }
+        for (RagRetrievalResult candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            if (StringUtils.hasText(candidate.getChunkId()) && !seenChunkIds.add(candidate.getChunkId())) {
+                continue;
+            }
+            target.add(candidate);
         }
     }
 
@@ -177,13 +239,43 @@ public class McpKnowledgeTool {
         String sourceName = extractMetadataText(result.getMetadata(), "sourceName");
         String contentPath = extractMetadataText(result.getMetadata(), "contentPath");
         String pageNumber = extractMetadataText(result.getMetadata(), "pageNumber");
+        String tableLineRange = extractTableLineRange(result.getMetadata());
         String content = StringUtils.hasText(result.getContent()) ? result.getContent().trim() : "";
         return "知识库: " + kbName + "\n"
                 + "来源: " + defaultText(sourceName) + "\n"
                 + "路径: " + defaultText(contentPath) + "\n"
-                + "引用: " + defaultText(result.getChunkId())
-                + (StringUtils.hasText(pageNumber) ? " | 页码: " + pageNumber : "") + "\n"
+                + "引用: " + defaultText(result.getChunkId()) + extractAssetCitation(result.getMetadata())
+                + (StringUtils.hasText(pageNumber) ? " | 页码: " + pageNumber : "")
+                + (StringUtils.hasText(tableLineRange) ? " | 行号: " + tableLineRange : "") + "\n"
                 + "内容: " + content;
+    }
+
+    private String extractAssetCitation(String metadata) {
+        try {
+            JsonNode asset = objectMapper.readTree(metadata).path("asset");
+            String assetId = asset.path("id").asText();
+            String assetType = asset.path("type").asText();
+            if (StringUtils.hasText(assetId) && StringUtils.hasText(assetType)) {
+                return " | 资产: " + assetType + ":" + assetId;
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        return "";
+    }
+
+    private String extractTableLineRange(String metadata) {
+        try {
+            JsonNode locator = objectMapper.readTree(metadata).path("asset").path("locator");
+            int startLine = locator.path("startLine").asInt();
+            int endLine = locator.path("endLine").asInt();
+            if (startLine > 0 && endLine >= startLine) {
+                return startLine + "-" + endLine;
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        return "";
     }
 
     private String resolveKbName(String kbId, Map<String, String> kbIdToName) {

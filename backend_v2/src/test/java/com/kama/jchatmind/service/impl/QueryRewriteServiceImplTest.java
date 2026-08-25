@@ -526,6 +526,30 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
+        public List<RagRetrievalResult> similaritySearchPdfPageAssets(
+                List<String> kbIds,
+                String vectorLiteral,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        ) {
+            return List.of();
+        }
+
+        @Override
+        public List<RagRetrievalResult> similaritySearchMarkdownTableAssets(
+                List<String> kbIds,
+                String vectorLiteral,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        ) {
+            return List.of();
+        }
+
+        @Override
         public List<RagRetrievalResult> searchByTitleExact(List<String> kbIds, String normalizedTitle, String vectorLiteral, int limit) {
             throw new UnsupportedOperationException();
         }
