@@ -221,6 +221,21 @@ export interface CreateKnowledgeBaseResponse {
   knowledgeBaseId: string;
 }
 
+export interface DeleteKnowledgeBaseResponse {
+  deletionTaskId: string;
+}
+
+export interface GetKnowledgeBaseDeletionTaskResponse {
+  deletionTaskId: string;
+  status: string;
+  progress: number;
+  attemptCount: number;
+  maxAttempts: number;
+  errorSummary?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
 export async function getKnowledgeBases(): Promise<GetKnowledgeBasesResponse> {
   return get<GetKnowledgeBasesResponse>("/knowledge-bases");
 }
@@ -233,8 +248,14 @@ export async function createKnowledgeBase(
 
 export async function deleteKnowledgeBase(
   knowledgeBaseId: string,
-): Promise<void> {
-  return del<void>(`/knowledge-bases/${knowledgeBaseId}`);
+): Promise<DeleteKnowledgeBaseResponse> {
+  return del<DeleteKnowledgeBaseResponse>(`/knowledge-bases/${knowledgeBaseId}`);
+}
+
+export async function getKnowledgeBaseDeletionTask(
+  deletionTaskId: string,
+): Promise<GetKnowledgeBaseDeletionTaskResponse> {
+  return get<GetKnowledgeBaseDeletionTaskResponse>(`/knowledge-base-deletion-tasks/${deletionTaskId}`);
 }
 
 export async function updateKnowledgeBase(
@@ -468,11 +489,12 @@ export async function getOptionalTools(): Promise<GetOptionalToolsResponse> {
 }
 
 export interface UserMemoryVO {
-  id: string;
-  userId: string;
-  sessionId?: string;
-  memoryType: string;
-  content: string;
+    id: string;
+    userId: string;
+    sessionId?: string;
+    memoryType: string;
+    content: string;
+    expiresAt?: string;
 }
 
 export interface UserMemoryCandidateVO {
@@ -492,6 +514,14 @@ export interface GetUserMemoryCandidatesResponse {
   candidates: UserMemoryCandidateVO[];
 }
 
+export interface UpdateUserMemoryRequest {
+  content: string;
+}
+
+export interface UpdateUserMemoryExpirationRequest {
+  expiresAt: string;
+}
+
 export async function getUserMemories(): Promise<GetUserMemoriesResponse> {
   return get<GetUserMemoriesResponse>("/users/memories");
 }
@@ -506,10 +536,34 @@ export async function confirmUserMemoryCandidate(
   return post<void>(`/users/memory-candidates/${candidateId}/confirm`);
 }
 
+export async function discardUserMemoryCandidate(
+  candidateId: string,
+): Promise<void> {
+  return post<void>(`/users/memory-candidates/${candidateId}/discard`);
+}
+
+export async function updateUserMemory(
+  memoryId: string,
+  request: UpdateUserMemoryRequest,
+): Promise<void> {
+  return patch<void>(`/users/memories/${memoryId}`, request);
+}
+
+export async function updateUserMemoryExpiration(
+  memoryId: string,
+  request: UpdateUserMemoryExpirationRequest,
+): Promise<void> {
+  return patch<void>(`/users/memories/${memoryId}/expiration`, request);
+}
+
 export async function deleteUserMemory(
   memoryId: string,
 ): Promise<void> {
   return del<void>(`/users/memories/${memoryId}`);
+}
+
+export async function clearUserMemories(): Promise<void> {
+  return del<void>("/users/memories");
 }
 
 // ========== Auth APIs ==========

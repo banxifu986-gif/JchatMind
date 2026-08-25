@@ -3,6 +3,8 @@ package com.kama.jchatmind.model.vo;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 @Data
 @Builder
 public class UserMemoryVO {
@@ -14,4 +16,5 @@ public class UserMemoryVO {
     private String importance;
     private String evidenceMessageId;
     private String evidenceText;
+    private LocalDateTime expiresAt;
 }

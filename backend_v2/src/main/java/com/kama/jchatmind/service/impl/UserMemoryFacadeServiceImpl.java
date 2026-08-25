@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.config.ChatClientRegistry;
+import com.kama.jchatmind.event.ChatSessionDeletedEvent;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.UserMemoryCandidateMapper;
 import com.kama.jchatmind.mapper.UserMemoryMapper;
@@ -16,19 +17,23 @@ import com.kama.jchatmind.model.response.GetUserMemoryCandidatesResponse;
 import com.kama.jchatmind.model.vo.UserMemoryCandidateVO;
 import com.kama.jchatmind.model.vo.UserMemoryVO;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
+import com.kama.jchatmind.service.MemoryExtractionResult;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,6 +41,10 @@ import java.util.stream.Collectors;
 public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
 
     private static final String MEMORY_UPDATE_PREFIX = "更新：";
+    private static final int RECENT_MESSAGES_FOR_EXTRACTION = 8;
+    private static final int MIN_NEW_USER_MESSAGES_FOR_EXTRACTION = 3;
+    private static final long DEFAULT_MEMORY_EXPIRATION_DAYS = 365L;
+    private static final double SEMANTIC_DUPLICATE_MAX_COSINE_DISTANCE = 0.05D;
     private static final String MEMORY_EXTRACTION_SYSTEM_PROMPT = """
             你负责从对话中提取值得长期保存的用户信息。
             对每条提取的信息，输出包含以下字段的 JSON 对象：
@@ -62,6 +71,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     private final ChatClient memoryExtractionChatClient;
     private final RagService ragService;
     private final RequestScopeData requestScopeData;
+    private final ConcurrentHashMap<String, ExtractionState> extractionStates = new ConcurrentHashMap<>();
 
     public UserMemoryFacadeServiceImpl(
             UserMemoryMapper userMemoryMapper,
@@ -112,7 +122,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     @Override
     public GetUserMemoriesResponse getUserMemories() {
         String userId = requireUserId();
-        List<UserMemoryVO> result = getConfirmedMemoriesInternal(userId)
+        List<UserMemoryVO> result = userMemoryMapper.selectByUserId(userId)
                 .stream()
                 .map(this::toMemoryVO)
                 .toList();
@@ -134,6 +144,61 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
+    @Transactional
+    public void confirmUserMemoryCandidate(String candidateId) {
+        String userId = requireUserId();
+        UserMemoryCandidate candidate = userMemoryCandidateMapper.selectByIdAndUserId(candidateId, userId);
+        if (candidate == null) {
+            throw new BizException("候选记忆不存在: " + candidateId);
+        }
+        if (!UserMemoryCandidate.STATUS_PENDING.equals(candidate.getStatus())) {
+            throw new BizException("候选记忆状态不可确认");
+        }
+        if (userMemoryCandidateMapper.markPersistedIfPending(candidateId, userId) <= 0) {
+            throw new BizException("候选记忆状态不可确认");
+        }
+
+        String originalContent = normalizeSegment(candidate.getContent());
+        if (!StringUtils.hasText(originalContent)) {
+            throw new BizException("候选记忆内容为空");
+        }
+        boolean isUpdate = originalContent.startsWith(MEMORY_UPDATE_PREFIX);
+        String effectiveContent = isUpdate
+                ? originalContent.substring(MEMORY_UPDATE_PREFIX.length()).trim()
+                : originalContent;
+        if (!StringUtils.hasText(effectiveContent)) {
+            throw new BizException("候选记忆内容为空");
+        }
+        if (findConfirmedMemoryByContent(userId, effectiveContent) != null) {
+            return;
+        }
+        if (isUpdate) {
+            handleConflictUpdate(userId, candidate, effectiveContent);
+        } else {
+            float[] contentEmbedding = generateEmbedding(effectiveContent);
+            if (hasSemanticDuplicate(userId, candidate.getMemoryType(), contentEmbedding)) {
+                return;
+            }
+            insertConfirmedMemory(userId, candidate, effectiveContent, contentEmbedding);
+        }
+    }
+
+    @Override
+    public void discardUserMemoryCandidate(String candidateId) {
+        String userId = requireUserId();
+        UserMemoryCandidate candidate = userMemoryCandidateMapper.selectByIdAndUserId(candidateId, userId);
+        if (candidate == null) {
+            throw new BizException("候选记忆不存在: " + candidateId);
+        }
+        if (!UserMemoryCandidate.STATUS_PENDING.equals(candidate.getStatus())) {
+            throw new BizException("候选记忆状态不可忽略");
+        }
+        if (userMemoryCandidateMapper.markDiscardedIfPending(candidateId, userId) <= 0) {
+            throw new BizException("候选记忆状态不可忽略");
+        }
+    }
+
+    @Override
     public void deleteMemory(String memoryId) {
         String userId = requireUserId();
         UserMemory memory = getConfirmedMemoryById(userId, memoryId);
@@ -147,8 +212,55 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
+    public void updateMemory(String memoryId, String content) {
+        String normalizedContent = normalizeSegment(content);
+        if (!StringUtils.hasText(normalizedContent)) {
+            throw new BizException("用户记忆内容不能为空");
+        }
+        String userId = requireUserId();
+        UserMemory memory = getConfirmedMemoryById(userId, memoryId);
+        if (memory == null) {
+            throw new BizException("用户记忆不存在: " + memoryId);
+        }
+        LocalDateTime expiresAt = LocalDateTime.now().plusDays(DEFAULT_MEMORY_EXPIRATION_DAYS);
+        int result = userMemoryMapper.updateContentEmbeddingAndExpiration(
+                memoryId,
+                userId,
+                normalizedContent,
+                generateEmbedding(normalizedContent),
+                expiresAt
+        );
+        if (result <= 0) {
+            throw new BizException("更新用户记忆失败");
+        }
+    }
+
+    @Override
+    public void updateMemoryExpiration(String memoryId, LocalDateTime expiresAt) {
+        String userId = requireUserId();
+        UserMemory memory = getConfirmedMemoryById(userId, memoryId);
+        if (memory == null) {
+            throw new BizException("用户记忆不存在: " + memoryId);
+        }
+        if (expiresAt == null) {
+            throw new BizException("过期时间不能为空");
+        }
+        if (!expiresAt.isAfter(LocalDateTime.now())) {
+            throw new BizException("过期时间必须晚于当前时间");
+        }
+        if (userMemoryMapper.updateExpiration(memoryId, userId, expiresAt) <= 0) {
+            throw new BizException("更新用户记忆过期时间失败");
+        }
+    }
+
+    @Override
+    public void clearUserMemories() {
+        userMemoryMapper.deleteByUserId(requireUserId());
+    }
+
+    @Override
     public List<UserMemory> getConfirmedMemories(String userId) {
-        return userMemoryMapper.selectByUserId(userId);
+        return userMemoryMapper.selectActiveByUserId(userId);
     }
 
     @Override
@@ -204,33 +316,54 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
-    public void extractMemoryCandidates(String userId, String sessionId) {
+    public MemoryExtractionResult extractMemoryCandidates(String userId, String sessionId) {
         if (!StringUtils.hasText(sessionId)) {
-            return;
+            return MemoryExtractionResult.SKIPPED;
         }
 
-        List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
-                sessionId,
-                8,
-                userId
-        );
-        List<ChatMessageDTO> userMessages = recentMessages.stream()
-                .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)
-                .toList();
-        if (userMessages.isEmpty()) {
-            return;
-        }
+        ExtractionState state = extractionStates.computeIfAbsent(sessionId, ignored -> new ExtractionState());
+        synchronized (state) {
+            int userMessageCount;
+            try {
+                userMessageCount = chatMessageFacadeService.countUserMessagesBySessionId(sessionId, userId);
+            } catch (RuntimeException e) {
+                extractionStates.remove(sessionId, state);
+                throw e;
+            }
+            if (!state.shouldExtract(userMessageCount)) {
+                return MemoryExtractionResult.SKIPPED;
+            }
 
-        List<ExtractedMemory> extracted = memoryExtractionChatClient != null
-                ? extractWithLlm(userId, userMessages)
-                : extractWithKeywords(userMessages);
-        if (memoryExtractionChatClient == null) {
-            log.warn("No ChatClient available for memory extraction, using keyword-based fallback");
-        }
+            List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
+                    sessionId,
+                    RECENT_MESSAGES_FOR_EXTRACTION,
+                    userId
+            );
+            List<ChatMessageDTO> userMessages = recentMessages.stream()
+                    .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)
+                    .toList();
+            if (userMessages.isEmpty()) {
+                return MemoryExtractionResult.SKIPPED;
+            }
 
-        for (ExtractedMemory memory : extracted) {
-            persistAutomatically(userId, sessionId, memory);
+            List<ExtractedMemory> extracted = memoryExtractionChatClient != null
+                    ? extractWithLlm(userId, userMessages)
+                    : extractWithKeywords(userMessages);
+            if (memoryExtractionChatClient == null) {
+                log.warn("No ChatClient available for memory extraction, using keyword-based fallback");
+            }
+
+            for (ExtractedMemory memory : extracted) {
+                persistAutomatically(userId, sessionId, memory);
+            }
+            state.markExtracted(userMessageCount);
+            return MemoryExtractionResult.EXTRACTED;
         }
+    }
+
+    @EventListener
+    public void onChatSessionDeleted(ChatSessionDeletedEvent event) {
+        extractionStates.remove(event.sessionId());
     }
 
     private String toPgVector(float[] vector) {
@@ -256,11 +389,11 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                     .call()
                     .content();
             if (!StringUtils.hasText(response)) {
-                return List.of();
+                throw new IllegalStateException("LLM memory extraction response is blank");
             }
             return parseExtractionResponse(response, userMessages);
         } catch (Exception e) {
-            log.warn("LLM memory extraction failed, falling back to keyword-based", e);
+            log.warn("LLM memory extraction failed, falling back to keyword-based: {}", e.getClass().getName());
             return extractWithKeywords(userMessages);
         }
     }
@@ -297,14 +430,13 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .replaceAll("\\s*```$", "")
                 .trim();
         if (!json.startsWith("[")) {
-            log.warn("LLM extraction response is not a JSON array: {}", response.substring(0, Math.min(200, response.length())));
-            return List.of();
+            throw new IllegalStateException("LLM memory extraction response must be a JSON array");
         }
 
         try {
             JsonNode root = objectMapper.readTree(json);
             if (!root.isArray()) {
-                return List.of();
+                throw new IllegalStateException("LLM memory extraction response must be a JSON array");
             }
 
             List<ExtractedMemory> result = new ArrayList<>();
@@ -346,8 +478,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             }
             return result;
         } catch (JsonProcessingException e) {
-            log.warn("Failed to parse LLM extraction response: {}", e.getMessage());
-            return List.of();
+            throw new IllegalStateException("LLM memory extraction response is invalid", e);
         }
     }
 
@@ -443,15 +574,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         UserMemoryCandidate candidate = insertCandidate(userId, sessionId, extractedMemory, originalContent);
         if (!shouldPersist(extractedMemory)) {
             updateCandidateStatus(candidate.getId(), UserMemoryCandidate.STATUS_DISCARDED);
-            return;
         }
-
-        if (isUpdate) {
-            handleConflictUpdate(userId, candidate, effectiveContent);
-        } else {
-            insertConfirmedMemory(userId, candidate, effectiveContent);
-        }
-        updateCandidateStatus(candidate.getId(), UserMemoryCandidate.STATUS_PERSISTED);
     }
 
     private UserMemoryCandidate insertCandidate(
@@ -500,13 +623,17 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         };
     }
 
-    private void insertConfirmedMemory(String userId, UserMemoryCandidate candidate, String content) {
+    private void insertConfirmedMemory(
+            String userId,
+            UserMemoryCandidate candidate,
+            String content,
+            float[] embedding
+    ) {
         if (findConfirmedMemoryByContent(userId, content) != null) {
             return;
         }
 
         LocalDateTime now = LocalDateTime.now();
-        float[] embedding = generateEmbedding(content);
         UserMemory userMemory = UserMemory.builder()
                 .userId(userId)
                 .sessionId(candidate.getSessionId())
@@ -515,6 +642,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .importance(candidate.getImportance())
                 .evidenceMessageId(candidate.getEvidenceMessageId())
                 .evidenceText(candidate.getEvidence())
+                .expiresAt(now.plusDays(DEFAULT_MEMORY_EXPIRATION_DAYS))
                 .embedding(embedding)
                 .createdAt(now)
                 .updatedAt(now)
@@ -532,10 +660,6 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .findFirst()
                 .orElse(null);
 
-        if (match != null) {
-            userMemoryMapper.deleteById(match.getId());
-        }
-
         LocalDateTime now = LocalDateTime.now();
         float[] embedding = generateEmbedding(newContent);
         UserMemory userMemory = UserMemory.builder()
@@ -546,6 +670,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .importance(candidate.getImportance())
                 .evidenceMessageId(candidate.getEvidenceMessageId())
                 .evidenceText(candidate.getEvidence())
+                .expiresAt(now.plusDays(DEFAULT_MEMORY_EXPIRATION_DAYS))
                 .embedding(embedding)
                 .createdAt(now)
                 .updatedAt(now)
@@ -553,6 +678,10 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         int result = userMemoryMapper.insert(userMemory);
         if (result <= 0) {
             throw new BizException("写入冲突更新记忆失败");
+        }
+        if (match != null && (!StringUtils.hasText(userMemory.getId())
+                || userMemoryMapper.markSupersededById(match.getId(), userMemory.getId()) <= 0)) {
+            throw new BizException("保存记忆冲突关系失败");
         }
     }
 
@@ -568,6 +697,52 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         }
     }
 
+    private boolean hasSemanticDuplicate(String userId, String memoryType, float[] contentEmbedding) {
+        if (contentEmbedding == null) {
+            return false;
+        }
+        try {
+            return getConfirmedMemoriesInternal(userId).stream()
+                    .filter(memory -> memoryType != null && memoryType.equals(memory.getMemoryType()))
+                    .anyMatch(memory -> cosineDistance(contentEmbedding, memory.getEmbedding())
+                            <= SEMANTIC_DUPLICATE_MAX_COSINE_DISTANCE);
+        } catch (Exception e) {
+            log.warn("Failed to check semantic memory duplicates: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private double cosineDistance(float[] first, float[] second) {
+        if (first == null || second == null || first.length == 0 || first.length != second.length) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double dotProduct = 0D;
+        double firstMagnitude = 0D;
+        double secondMagnitude = 0D;
+        for (int i = 0; i < first.length; i++) {
+            double firstValue = first[i];
+            double secondValue = second[i];
+            if (!Double.isFinite(firstValue) || !Double.isFinite(secondValue)) {
+                return Double.POSITIVE_INFINITY;
+            }
+            dotProduct += firstValue * secondValue;
+            firstMagnitude += firstValue * firstValue;
+            secondMagnitude += secondValue * secondValue;
+        }
+        if (!Double.isFinite(dotProduct)
+                || !Double.isFinite(firstMagnitude)
+                || !Double.isFinite(secondMagnitude)
+                || firstMagnitude == 0D
+                || secondMagnitude == 0D) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double similarity = dotProduct / (Math.sqrt(firstMagnitude) * Math.sqrt(secondMagnitude));
+        if (!Double.isFinite(similarity)) {
+            return Double.POSITIVE_INFINITY;
+        }
+        return 1D - Math.max(-1D, Math.min(1D, similarity));
+    }
+
     private void updateCandidateStatus(String candidateId, String status) {
         int result = userMemoryCandidateMapper.updateStatusById(candidateId, status);
         if (result <= 0) {
@@ -576,7 +751,13 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     private List<UserMemoryCandidate> getMemoryCandidatesInternal(String userId) {
-        return userMemoryCandidateMapper.selectByUserId(userId);
+        List<UserMemoryCandidate> candidates = userMemoryCandidateMapper.selectByUserId(userId);
+        if (candidates == null) {
+            return List.of();
+        }
+        return candidates.stream()
+                .filter(candidate -> UserMemoryCandidate.STATUS_PENDING.equals(candidate.getStatus()))
+                .toList();
     }
 
     private UserMemory getConfirmedMemoryById(String userId, String memoryId) {
@@ -596,7 +777,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     private List<UserMemory> getConfirmedMemoriesInternal(String userId) {
-        return userMemoryMapper.selectByUserId(userId);
+        return userMemoryMapper.selectActiveByUserId(userId);
     }
 
     private UserMemoryVO toMemoryVO(UserMemory memory) {
@@ -609,6 +790,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .importance(memory.getImportance())
                 .evidenceMessageId(memory.getEvidenceMessageId())
                 .evidenceText(memory.getEvidenceText())
+                .expiresAt(memory.getExpiresAt())
                 .build();
     }
 
@@ -642,5 +824,19 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             String evidenceMessageId,
             String evidenceText
     ) {
+    }
+
+    private static class ExtractionState {
+        private int lastExtractedUserMessageCount;
+
+        private boolean shouldExtract(int userMessageCount) {
+            return lastExtractedUserMessageCount == 0
+                    || userMessageCount < lastExtractedUserMessageCount
+                    || userMessageCount - lastExtractedUserMessageCount >= MIN_NEW_USER_MESSAGES_FOR_EXTRACTION;
+        }
+
+        private void markExtracted(int userMessageCount) {
+            lastExtractedUserMessageCount = userMessageCount;
+        }
     }
 }

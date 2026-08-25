@@ -5,6 +5,8 @@ import com.kama.jchatmind.agent.JChatMindFactory;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.event.listener.ChatEventListener;
+import com.kama.jchatmind.event.listener.ChatSessionExecutionCoordinator;
+import com.kama.jchatmind.event.listener.MemoryExtractionFailureRegistry;
 import com.kama.jchatmind.mapper.ChatMessageMapper;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.entity.ChatMessage;
@@ -79,6 +81,8 @@ class ChatMessageEventFlowIntegrationTest {
             context.getBeanFactory().registerSingleton("requestScopeData", requestScopeData);
             context.registerBean(JChatMindFactory.class, () -> jChatMindFactory);
             context.registerBean(UserMemoryFacadeService.class, () -> userMemoryFacadeService);
+            context.registerBean(ChatSessionExecutionCoordinator.class);
+            context.registerBean(MemoryExtractionFailureRegistry.class);
             context.registerBean(ChatEventListener.class);
             context.registerBean(ChatMessageFacadeServiceImpl.class);
             context.refresh();

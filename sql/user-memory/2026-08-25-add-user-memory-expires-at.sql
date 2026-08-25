@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE IF EXISTS user_memory
+    ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+
+COMMIT;

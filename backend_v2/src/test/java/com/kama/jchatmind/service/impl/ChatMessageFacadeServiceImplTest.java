@@ -97,6 +97,26 @@ class ChatMessageFacadeServiceImplTest {
         assertThat(response.getChatMessages()).containsExactly(firstVO, secondVO);
     }
 
+    @Test
+    void shouldCountOwnedSessionsUserMessagesOnlyThroughMapper() {
+        ChatMessageMapper chatMessageMapper = mock(ChatMessageMapper.class);
+        ChatSessionFacadeService chatSessionFacadeService = mock(ChatSessionFacadeService.class);
+        ChatMessageFacadeServiceImpl service = new ChatMessageFacadeServiceImpl(
+                chatMessageMapper,
+                mock(ChatMessageConverter.class),
+                chatSessionFacadeService,
+                mock(ApplicationEventPublisher.class),
+                requestScopeData(7L)
+        );
+        when(chatMessageMapper.countUserMessagesBySessionId("session-1")).thenReturn(4);
+
+        int count = service.countUserMessagesBySessionId("session-1", "7");
+
+        assertThat(count).isEqualTo(4);
+        verify(chatSessionFacadeService).getChatSession("session-1", "7");
+        verify(chatMessageMapper).countUserMessagesBySessionId("session-1");
+    }
+
     private RequestScopeData requestScopeData(long userId) {
         RequestScopeData requestScopeData = new RequestScopeData();
         requestScopeData.setUserId(userId);

@@ -16,6 +16,7 @@ import com.kama.jchatmind.converter.AgentConverter;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.converter.ChatSessionConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
+import com.kama.jchatmind.event.listener.ChatSessionExecutionCoordinator;
 import com.kama.jchatmind.mapper.AgentKnowledgeBaseMapper;
 import com.kama.jchatmind.mapper.AgentMapper;
 import com.kama.jchatmind.mapper.ChatMessageMapper;
@@ -248,9 +249,22 @@ public class G1ModelDrivenSessionScopeRuntimeL2TestConfig {
     public ChatSessionFacadeService chatSessionFacadeService(
             ChatSessionMapper chatSessionMapper,
             ChatSessionConverter chatSessionConverter,
+            ChatSessionExecutionCoordinator chatSessionExecutionCoordinator,
+            ApplicationEventPublisher applicationEventPublisher,
             RequestScopeData requestScopeData
     ) {
-        return new ChatSessionFacadeServiceImpl(chatSessionMapper, chatSessionConverter, requestScopeData);
+        return new ChatSessionFacadeServiceImpl(
+                chatSessionMapper,
+                chatSessionConverter,
+                requestScopeData,
+                chatSessionExecutionCoordinator,
+                applicationEventPublisher
+        );
+    }
+
+    @Bean
+    public ChatSessionExecutionCoordinator chatSessionExecutionCoordinator() {
+        return new ChatSessionExecutionCoordinator();
     }
 
     @Bean

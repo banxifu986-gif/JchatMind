@@ -95,6 +95,13 @@
         ORDER BY recent.created_at ASC
     </select>
 
+    <select id="countUserMessagesBySessionId" resultType="int">
+        SELECT COUNT(*)
+        FROM chat_message
+        WHERE session_id = CAST(#{sessionId} AS uuid)
+          AND role = 'user'
+    </select>
+
     <delete id="deleteById">
         DELETE FROM chat_message WHERE id = CAST(#{id} AS uuid)
     </delete>

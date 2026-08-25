@@ -63,6 +63,12 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
+    public int countUserMessagesBySessionId(String sessionId, String userId) {
+        requireOwnedSession(sessionId, userId);
+        return chatMessageMapper.countUserMessagesBySessionId(sessionId);
+    }
+
+    @Override
     public CreateChatMessageResponse createChatMessage(CreateChatMessageRequest request) {
         requireOwnedSession(request.getSessionId());
         ChatMessage chatMessage = doCreateChatMessage(request);

@@ -15,11 +15,20 @@ public class AsyncConfig {
 
     @Bean
     public Executor taskExecutor() {
+        return createExecutor(4, 10, 100, "async-event-");
+    }
+
+    @Bean
+    public Executor agentTaskExecutor() {
+        return createExecutor(2, 4, 50, "agent-event-");
+    }
+
+    private Executor createExecutor(int corePoolSize, int maxPoolSize, int queueCapacity, String threadNamePrefix) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(4);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(100);
-        executor.setThreadNamePrefix("async-event-");
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
+        executor.setThreadNamePrefix(threadNamePrefix);
         executor.setTaskDecorator(task -> {
             RequestAttributes context = RequestContextHolder.currentRequestAttributes();
             return () -> {

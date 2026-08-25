@@ -22,6 +22,8 @@ public interface ChatMessageMapper {
 
     List<ChatMessage> selectBySessionIdRecently(@Param("sessionId") String sessionId, @Param("limit") int limit);
 
+    int countUserMessagesBySessionId(@Param("sessionId") String sessionId);
+
     int deleteById(String id);
 
     int updateById(ChatMessage chatMessage);

@@ -225,6 +225,26 @@ class G1ModelDrivenSessionScopeRuntimeL2Test {
             return List.of(result);
         }
 
+        @Override
+        public List<RagRetrievalResult> retrievePdfPageAssets(
+                List<String> kbIds,
+                String query,
+                RagRetrievalContext context,
+                int limit
+        ) {
+            return retrieve(kbIds, query, context, limit);
+        }
+
+        @Override
+        public List<RagRetrievalResult> retrieveMarkdownTableAssets(
+                List<String> kbIds,
+                String query,
+                RagRetrievalContext context,
+                int limit
+        ) {
+            return retrieve(kbIds, query, context, limit);
+        }
+
         List<List<String>> effectiveKbIdCalls() {
             return new ArrayList<>(effectiveKbIdCalls);
         }

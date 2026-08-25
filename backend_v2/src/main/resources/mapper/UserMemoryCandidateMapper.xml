@@ -114,6 +114,24 @@
         WHERE id = CAST(#{id} AS uuid)
     </update>
 
+    <update id="markPersistedIfPending">
+        UPDATE user_memory_candidate
+        SET status = 'PERSISTED',
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND user_id = #{userId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="markDiscardedIfPending">
+        UPDATE user_memory_candidate
+        SET status = 'DISCARDED',
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND user_id = #{userId}
+          AND status = 'PENDING'
+    </update>
+
     <delete id="deleteById">
         DELETE FROM user_memory_candidate
         WHERE id = CAST(#{id} AS uuid)

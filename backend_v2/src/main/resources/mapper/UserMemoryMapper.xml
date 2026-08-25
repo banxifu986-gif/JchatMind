@@ -13,6 +13,8 @@
         <result property="importance" column="importance" jdbcType="VARCHAR"/>
         <result property="evidenceMessageId" column="evidence_message_id" jdbcType="VARCHAR"/>
         <result property="evidenceText" column="evidence_text" jdbcType="VARCHAR"/>
+        <result property="supersededByMemoryId" column="superseded_by_memory_id" jdbcType="VARCHAR"/>
+        <result property="expiresAt" column="expires_at" jdbcType="TIMESTAMP"/>
         <result property="embedding" column="embedding" jdbcType="OTHER"/>
         <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
         <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
@@ -29,6 +31,8 @@
             importance,
             evidence_message_id,
             evidence_text,
+            superseded_by_memory_id,
+            expires_at,
             embedding,
             created_at,
             updated_at
@@ -48,17 +52,59 @@
                 <otherwise>null</otherwise>
             </choose>,
             #{evidenceText},
+            <choose>
+                <when test="supersededByMemoryId != null">CAST(#{supersededByMemoryId} AS uuid)</when>
+                <otherwise>null</otherwise>
+            </choose>,
+            #{expiresAt,jdbcType=TIMESTAMP},
             #{embedding}::vector,
             #{createdAt},
             #{updatedAt}
         )
     </insert>
 
+    <update id="markSupersededById">
+        UPDATE user_memory
+        SET superseded_by_memory_id = CAST(#{supersededByMemoryId} AS uuid),
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND superseded_by_memory_id IS NULL
+    </update>
+
     <update id="updateEmbedding">
         UPDATE user_memory
         SET embedding = #{embedding}::vector,
             updated_at = NOW()
         WHERE id = CAST(#{id} AS uuid)
+    </update>
+
+    <update id="updateContentAndEmbedding">
+        UPDATE user_memory
+        SET content = #{content},
+            embedding = #{embedding}::vector,
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND user_id = #{userId}
+    </update>
+
+    <update id="updateContentEmbeddingAndExpiration">
+        UPDATE user_memory
+        SET content = #{content},
+            embedding = #{embedding}::vector,
+            expires_at = #{expiresAt,jdbcType=TIMESTAMP},
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND user_id = #{userId}
+          AND superseded_by_memory_id IS NULL
+    </update>
+
+    <update id="updateExpiration">
+        UPDATE user_memory
+        SET expires_at = #{expiresAt,jdbcType=TIMESTAMP},
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+          AND user_id = #{userId}
+          AND superseded_by_memory_id IS NULL
     </update>
 
     <select id="selectByIdAndUserId" resultMap="BaseResultMap">
@@ -71,12 +117,15 @@
             importance,
             evidence_message_id,
             evidence_text,
+            superseded_by_memory_id,
+            expires_at,
             embedding,
             created_at,
             updated_at
         FROM user_memory
         WHERE id = CAST(#{id} AS uuid)
           AND user_id = #{userId}
+          AND superseded_by_memory_id IS NULL
     </select>
 
     <select id="selectByUserId" resultMap="BaseResultMap">
@@ -89,11 +138,36 @@
             importance,
             evidence_message_id,
             evidence_text,
+            superseded_by_memory_id,
+            expires_at,
             embedding,
             created_at,
             updated_at
         FROM user_memory
         WHERE user_id = #{userId}
+          AND superseded_by_memory_id IS NULL
+        ORDER BY updated_at DESC
+    </select>
+
+    <select id="selectActiveByUserId" resultMap="BaseResultMap">
+        SELECT
+            id,
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            superseded_by_memory_id,
+            expires_at,
+            embedding,
+            created_at,
+            updated_at
+        FROM user_memory
+        WHERE user_id = #{userId}
+          AND superseded_by_memory_id IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; NOW())
         ORDER BY updated_at DESC
     </select>
 
@@ -107,12 +181,16 @@
             importance,
             evidence_message_id,
             evidence_text,
+            superseded_by_memory_id,
+            expires_at,
             embedding,
             created_at,
             updated_at
         FROM user_memory
         WHERE user_id = #{userId}
           AND content = #{content}
+          AND superseded_by_memory_id IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; NOW())
         ORDER BY updated_at DESC
         LIMIT 1
     </select>
@@ -127,6 +205,8 @@
             importance,
             evidence_message_id,
             evidence_text,
+            superseded_by_memory_id,
+            expires_at,
             embedding,
             created_at,
             updated_at,
@@ -134,6 +214,8 @@
         FROM user_memory
         WHERE user_id = #{userId}
           AND embedding IS NOT NULL
+          AND superseded_by_memory_id IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; NOW())
         ORDER BY embedding &lt;=&gt; #{vectorLiteral}::vector
         LIMIT #{limit}
     </select>
@@ -141,5 +223,10 @@
     <delete id="deleteById">
         DELETE FROM user_memory
         WHERE id = CAST(#{id} AS uuid)
+    </delete>
+
+    <delete id="deleteByUserId">
+        DELETE FROM user_memory
+        WHERE user_id = #{userId}
     </delete>
 </mapper>

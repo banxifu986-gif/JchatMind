@@ -3,6 +3,8 @@ package com.kama.jchatmind.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.ChatSessionConverter;
+import com.kama.jchatmind.event.ChatSessionDeletedEvent;
+import com.kama.jchatmind.event.listener.ChatSessionExecutionCoordinator;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.ChatSessionMapper;
 import com.kama.jchatmind.model.dto.ChatSessionDTO;
@@ -16,6 +18,7 @@ import com.kama.jchatmind.model.response.GetChatSessionsResponse;
 import com.kama.jchatmind.model.vo.ChatSessionVO;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -29,6 +32,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     private final ChatSessionMapper chatSessionMapper;
     private final ChatSessionConverter chatSessionConverter;
     private final RequestScopeData requestScopeData;
+    private final ChatSessionExecutionCoordinator chatSessionExecutionCoordinator;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public GetChatSessionsResponse getChatSessions() {
@@ -93,11 +98,16 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
 
     @Override
     public void deleteChatSession(String chatSessionId) {
+        chatSessionExecutionCoordinator.execute(chatSessionId, () -> deleteOwnedChatSession(chatSessionId));
+    }
+
+    private void deleteOwnedChatSession(String chatSessionId) {
         requireOwnedSession(chatSessionId);
         int result = chatSessionMapper.deleteById(chatSessionId);
         if (result <= 0) {
             throw new BizException("删除聊天会话失败");
         }
+        eventPublisher.publishEvent(new ChatSessionDeletedEvent(chatSessionId));
     }
 
     @Override

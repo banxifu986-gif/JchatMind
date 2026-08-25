@@ -16,6 +16,8 @@ public class UserMemory {
     private String importance;
     private String evidenceMessageId;
     private String evidenceText;
+    private String supersededByMemoryId;
+    private LocalDateTime expiresAt;
     private float[] embedding;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

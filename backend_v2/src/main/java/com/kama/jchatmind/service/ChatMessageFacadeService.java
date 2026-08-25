@@ -15,6 +15,8 @@ public interface ChatMessageFacadeService {
 
     List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit, String userId);
 
+    int countUserMessagesBySessionId(String sessionId, String userId);
+
     CreateChatMessageResponse createChatMessage(CreateChatMessageRequest request);
 
     CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO);

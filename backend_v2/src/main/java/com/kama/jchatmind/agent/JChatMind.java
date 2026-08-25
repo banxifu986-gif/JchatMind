@@ -67,6 +67,7 @@ public class JChatMind {
     private static final Integer DEFAULT_TOOL_TIMEOUT_SECONDS = 30;
     private static final int COMPRESSION_CHAR_THRESHOLD = 8000;
     private static final int KEEP_RECENT_MESSAGES = 8;
+    private static final int CONVERSATION_SUMMARY_CHAR_LIMIT = 4000;
 
     private ChatOptions chatOptions;
     private SseService sseService;
@@ -334,13 +335,14 @@ public class JChatMind {
                     """.formatted(previousToolCallSignature));
         }
 
-        if (conversationSummary != null) {
+        String boundedConversationSummary = limitConversationSummary(conversationSummary);
+        if (StringUtils.hasText(boundedConversationSummary)) {
             prompt.append("""
 
                     【对话历史摘要】
                     以下是对此前对话内容的摘要，供你参考以保持上下文连贯性：
                     %s
-                    """.formatted(conversationSummary));
+                    """.formatted(boundedConversationSummary));
         }
 
         return prompt.toString();
@@ -370,9 +372,9 @@ public class JChatMind {
             if (!StringUtils.hasText(newSummary)) {
                 return;
             }
-            conversationSummary = (conversationSummary != null)
+            conversationSummary = limitConversationSummary(StringUtils.hasText(conversationSummary)
                     ? conversationSummary + "\n" + newSummary
-                    : newSummary;
+                    : newSummary);
 
             allMessages.subList(1, keepFrom).clear();
             allMessages.add(1, new SystemMessage("【对话历史摘要】\n" + conversationSummary));
@@ -430,8 +432,9 @@ public class JChatMind {
             messagesText.append(content).append("\n");
         }
 
-        String summaryPrompt = conversationSummary != null
-                ? "上一轮总结: " + conversationSummary + "\n\n对话:\n" + messagesText
+        String boundedConversationSummary = limitConversationSummary(conversationSummary);
+        String summaryPrompt = StringUtils.hasText(boundedConversationSummary)
+                ? "上一轮总结: " + boundedConversationSummary + "\n\n对话:\n" + messagesText
                 : "对话:\n" + messagesText;
 
         try {
@@ -445,6 +448,13 @@ public class JChatMind {
             log.warn("Failed to generate summary", e);
             return null;
         }
+    }
+
+    private String limitConversationSummary(String summary) {
+        if (!StringUtils.hasText(summary) || summary.length() <= CONVERSATION_SUMMARY_CHAR_LIMIT) {
+            return summary;
+        }
+        return summary.substring(summary.length() - CONVERSATION_SUMMARY_CHAR_LIMIT);
     }
 
     private String formatKbSummary() {

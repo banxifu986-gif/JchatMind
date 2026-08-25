@@ -16,7 +16,37 @@ public interface UserMemoryMapper {
 
     List<UserMemory> selectByUserId(String userId);
 
+    List<UserMemory> selectActiveByUserId(String userId);
+
     int deleteById(@Param("id") String id);
+
+    int deleteByUserId(@Param("userId") String userId);
+
+    int updateContentAndEmbedding(
+            @Param("id") String id,
+            @Param("userId") String userId,
+            @Param("content") String content,
+            @Param("embedding") float[] embedding
+    );
+
+    int updateContentEmbeddingAndExpiration(
+            @Param("id") String id,
+            @Param("userId") String userId,
+            @Param("content") String content,
+            @Param("embedding") float[] embedding,
+            @Param("expiresAt") java.time.LocalDateTime expiresAt
+    );
+
+    int updateExpiration(
+            @Param("id") String id,
+            @Param("userId") String userId,
+            @Param("expiresAt") java.time.LocalDateTime expiresAt
+    );
+
+    int markSupersededById(
+            @Param("id") String id,
+            @Param("supersededByMemoryId") String supersededByMemoryId
+    );
 
     int updateEmbedding(@Param("id") String id, @Param("embedding") float[] embedding);
 
