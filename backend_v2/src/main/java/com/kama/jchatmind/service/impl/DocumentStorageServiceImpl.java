@@ -7,10 +7,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.UUID;
 
 @Service
@@ -108,5 +111,35 @@ public class DocumentStorageServiceImpl implements DocumentStorageService {
         } catch (IOException cleanupException) {
             log.debug("文件写入失败后的空目录清理跳过", cleanupException);
         }
+    }
+
+    @Override
+    public void deleteKnowledgeBaseDirectory(String kbId) throws IOException {
+        Path baseDirectory = Paths.get(baseStoragePath).toAbsolutePath().normalize();
+        Path knowledgeBaseDirectory = baseDirectory.resolve(kbId).normalize();
+        if (!baseDirectory.equals(knowledgeBaseDirectory.getParent())) {
+            throw new IllegalArgumentException("知识库存储路径非法");
+        }
+        if (!Files.exists(knowledgeBaseDirectory)) {
+            return;
+        }
+
+        Files.walkFileTree(knowledgeBaseDirectory, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path directory, IOException exception) throws IOException {
+                if (exception != null) {
+                    throw exception;
+                }
+                Files.delete(directory);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        log.info("知识库文件目录删除成功: kbId={}", kbId);
     }
 }

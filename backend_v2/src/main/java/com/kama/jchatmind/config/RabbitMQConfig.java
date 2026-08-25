@@ -9,6 +9,8 @@ import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
+import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainerFactoryConfigurer;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -48,6 +50,24 @@ public class RabbitMQConfig {
 
     public static final int INGESTION_MAX_RETRY_COUNT = 3;
     public static final int INGESTION_RETRY_TTL_MILLIS = 30_000;
+    public static final int INGESTION_CONCURRENT_CONSUMERS = 2;
+    public static final int INGESTION_PREFETCH_COUNT = 1;
+
+    public static final String KNOWLEDGE_BASE_DELETION_EXCHANGE = "knowledge-base-deletion.exchange";
+    public static final String KNOWLEDGE_BASE_DELETION_QUEUE = "knowledge-base-deletion.queue";
+    public static final String KNOWLEDGE_BASE_DELETION_ROUTING_KEY = "knowledge-base-deletion.submit";
+
+    public static final String KNOWLEDGE_BASE_DELETION_RETRY_EXCHANGE = "knowledge-base-deletion.retry.exchange";
+    public static final String KNOWLEDGE_BASE_DELETION_RETRY_QUEUE = "knowledge-base-deletion.retry.queue";
+    public static final String KNOWLEDGE_BASE_DELETION_RETRY_ROUTING_KEY = "knowledge-base-deletion.retry";
+
+    public static final String KNOWLEDGE_BASE_DELETION_DLX = "knowledge-base-deletion.dlx";
+    public static final String KNOWLEDGE_BASE_DELETION_DLQ = "knowledge-base-deletion.dlq";
+    public static final String KNOWLEDGE_BASE_DELETION_DLQ_ROUTING_KEY = "knowledge-base-deletion.dlq";
+
+    public static final int KNOWLEDGE_BASE_DELETION_RETRY_TTL_MILLIS = 30_000;
+    public static final int KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS = 1;
+    public static final int KNOWLEDGE_BASE_DELETION_PREFETCH_COUNT = 1;
 
     @Bean
     public DirectExchange emailExchange() {
@@ -171,6 +191,94 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(ingestionDlq())
                 .to(ingestionDlx())
                 .with(INGESTION_DLQ_ROUTING_KEY);
+    }
+
+    @Bean
+    public DirectExchange knowledgeBaseDeletionExchange() {
+        return new DirectExchange(KNOWLEDGE_BASE_DELETION_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange knowledgeBaseDeletionRetryExchange() {
+        return new DirectExchange(KNOWLEDGE_BASE_DELETION_RETRY_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange knowledgeBaseDeletionDlx() {
+        return new DirectExchange(KNOWLEDGE_BASE_DELETION_DLX);
+    }
+
+    @Bean
+    public Queue knowledgeBaseDeletionQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", KNOWLEDGE_BASE_DELETION_DLX);
+        args.put("x-dead-letter-routing-key", KNOWLEDGE_BASE_DELETION_DLQ_ROUTING_KEY);
+        return QueueBuilder.durable(KNOWLEDGE_BASE_DELETION_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue knowledgeBaseDeletionRetryQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", KNOWLEDGE_BASE_DELETION_EXCHANGE);
+        args.put("x-dead-letter-routing-key", KNOWLEDGE_BASE_DELETION_ROUTING_KEY);
+        args.put("x-message-ttl", KNOWLEDGE_BASE_DELETION_RETRY_TTL_MILLIS);
+        return QueueBuilder.durable(KNOWLEDGE_BASE_DELETION_RETRY_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue knowledgeBaseDeletionDlq() {
+        return QueueBuilder.durable(KNOWLEDGE_BASE_DELETION_DLQ).build();
+    }
+
+    @Bean
+    public Binding knowledgeBaseDeletionBinding() {
+        return BindingBuilder.bind(knowledgeBaseDeletionQueue())
+                .to(knowledgeBaseDeletionExchange())
+                .with(KNOWLEDGE_BASE_DELETION_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding knowledgeBaseDeletionRetryBinding() {
+        return BindingBuilder.bind(knowledgeBaseDeletionRetryQueue())
+                .to(knowledgeBaseDeletionRetryExchange())
+                .with(KNOWLEDGE_BASE_DELETION_RETRY_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding knowledgeBaseDeletionDlqBinding() {
+        return BindingBuilder.bind(knowledgeBaseDeletionDlq())
+                .to(knowledgeBaseDeletionDlx())
+                .with(KNOWLEDGE_BASE_DELETION_DLQ_ROUTING_KEY);
+    }
+
+    @Bean
+    public SimpleRabbitListenerContainerFactory ingestionRabbitListenerContainerFactory(
+            SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            ConnectionFactory connectionFactory
+    ) {
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
+        configurer.configure(factory, connectionFactory);
+        factory.setConcurrentConsumers(INGESTION_CONCURRENT_CONSUMERS);
+        factory.setMaxConcurrentConsumers(INGESTION_CONCURRENT_CONSUMERS);
+        factory.setPrefetchCount(INGESTION_PREFETCH_COUNT);
+        return factory;
+    }
+
+    @Bean
+    public SimpleRabbitListenerContainerFactory knowledgeBaseDeletionRabbitListenerContainerFactory(
+            SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            ConnectionFactory connectionFactory
+    ) {
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
+        configurer.configure(factory, connectionFactory);
+        factory.setConcurrentConsumers(KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS);
+        factory.setMaxConcurrentConsumers(KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS);
+        factory.setPrefetchCount(KNOWLEDGE_BASE_DELETION_PREFETCH_COUNT);
+        return factory;
     }
 
     @Bean

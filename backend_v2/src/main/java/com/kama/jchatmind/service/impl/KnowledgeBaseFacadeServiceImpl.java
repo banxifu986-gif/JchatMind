@@ -7,9 +7,12 @@ import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.model.entity.KnowledgeBaseDeletionTask;
 import com.kama.jchatmind.model.request.CreateKnowledgeBaseRequest;
 import com.kama.jchatmind.model.request.UpdateKnowledgeBaseRequest;
 import com.kama.jchatmind.model.response.CreateKnowledgeBaseResponse;
+import com.kama.jchatmind.model.response.DeleteKnowledgeBaseResponse;
+import com.kama.jchatmind.model.response.GetKnowledgeBaseDeletionTaskResponse;
 import com.kama.jchatmind.model.response.GetKnowledgeBasesResponse;
 import com.kama.jchatmind.model.vo.KnowledgeBaseVO;
 import com.kama.jchatmind.service.KnowledgeBaseFacadeService;
@@ -29,6 +32,7 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
     private final KnowledgeBaseConverter knowledgeBaseConverter;
     private final KnowledgeBaseAccessService knowledgeBaseAccessService;
     private final RequestScopeData requestScopeData;
+    private final KnowledgeBaseDeletionTaskServiceImpl deletionTaskService;
 
     @Override
     public GetKnowledgeBasesResponse getKnowledgeBases() {
@@ -79,13 +83,25 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
     }
 
     @Override
-    public void deleteKnowledgeBase(String knowledgeBaseId) {
-        KnowledgeBase knowledgeBase = knowledgeBaseAccessService.requireAccessibleKnowledgeBase(knowledgeBaseId, requireUserId());
-        
-        int result = knowledgeBaseMapper.deleteById(knowledgeBaseId);
-        if (result <= 0) {
-            throw new BizException("删除知识库失败");
-        }
+    public DeleteKnowledgeBaseResponse deleteKnowledgeBase(String knowledgeBaseId) {
+        return DeleteKnowledgeBaseResponse.builder()
+                .deletionTaskId(deletionTaskService.requestDeletion(knowledgeBaseId).getId())
+                .build();
+    }
+
+    @Override
+    public GetKnowledgeBaseDeletionTaskResponse getKnowledgeBaseDeletionTask(String taskId) {
+        KnowledgeBaseDeletionTask task = deletionTaskService.getTask(taskId);
+        return GetKnowledgeBaseDeletionTaskResponse.builder()
+                .deletionTaskId(task.getId())
+                .status(task.getStatus())
+                .progress(task.getProgress())
+                .attemptCount(task.getAttemptCount())
+                .maxAttempts(task.getMaxAttempts())
+                .errorSummary(task.getErrorSummary())
+                .createdAt(task.getCreatedAt())
+                .completedAt(task.getCompletedAt())
+                .build();
     }
 
     @Override

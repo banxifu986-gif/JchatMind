@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.KnowledgeBaseDeletionTaskMapper">
+
+    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.KnowledgeBaseDeletionTask">
+        <id property="id" column="task_id" jdbcType="VARCHAR"/>
+        <result property="ownerId" column="owner_id" jdbcType="BIGINT"/>
+        <result property="knowledgeBaseId" column="knowledge_base_id" jdbcType="VARCHAR"/>
+        <result property="taskType" column="task_type" jdbcType="VARCHAR"/>
+        <result property="idempotencyKey" column="idempotency_key" jdbcType="VARCHAR"/>
+        <result property="inputSnapshot" column="input_snapshot" jdbcType="VARCHAR"/>
+        <result property="skillVersion" column="skill_version" jdbcType="VARCHAR"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
+        <result property="progress" column="progress" jdbcType="INTEGER"/>
+        <result property="attemptCount" column="attempt_count" jdbcType="INTEGER"/>
+        <result property="maxAttempts" column="max_attempts" jdbcType="INTEGER"/>
+        <result property="errorSummary" column="error_summary" jdbcType="VARCHAR"/>
+        <result property="resultRef" column="result_ref" jdbcType="VARCHAR"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+        <result property="startedAt" column="started_at" jdbcType="TIMESTAMP"/>
+        <result property="completedAt" column="completed_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.KnowledgeBaseDeletionTask">
+        INSERT INTO knowledge_base_deletion_task (
+            task_id,
+            owner_id,
+            knowledge_base_id,
+            task_type,
+            idempotency_key,
+            input_snapshot,
+            skill_version,
+            status,
+            progress,
+            attempt_count,
+            max_attempts,
+            error_summary,
+            result_ref,
+            created_at,
+            updated_at
+        ) VALUES (
+            CAST(#{id} AS uuid),
+            #{ownerId},
+            CAST(#{knowledgeBaseId} AS uuid),
+            #{taskType},
+            #{idempotencyKey},
+            CAST(#{inputSnapshot} AS jsonb),
+            #{skillVersion},
+            #{status},
+            #{progress},
+            #{attemptCount},
+            #{maxAttempts},
+            #{errorSummary},
+            #{resultRef},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT
+            task_id,
+            owner_id,
+            knowledge_base_id,
+            task_type,
+            idempotency_key,
+            input_snapshot::text AS input_snapshot,
+            skill_version,
+            status,
+            progress,
+            attempt_count,
+            max_attempts,
+            error_summary,
+            result_ref,
+            created_at,
+            updated_at,
+            started_at,
+            completed_at
+        FROM knowledge_base_deletion_task
+        WHERE task_id = CAST(#{taskId} AS uuid)
+    </select>
+
+    <select id="selectByOwnerIdAndIdempotencyKey" resultMap="BaseResultMap">
+        SELECT
+            task_id,
+            owner_id,
+            knowledge_base_id,
+            task_type,
+            idempotency_key,
+            input_snapshot::text AS input_snapshot,
+            skill_version,
+            status,
+            progress,
+            attempt_count,
+            max_attempts,
+            error_summary,
+            result_ref,
+            created_at,
+            updated_at,
+            started_at,
+            completed_at
+        FROM knowledge_base_deletion_task
+        WHERE owner_id = #{ownerId}
+          AND idempotency_key = #{idempotencyKey}
+    </select>
+
+    <select id="lockOwnerIdempotencyKey" resultType="java.lang.Integer">
+        SELECT 1
+        FROM (
+            SELECT pg_advisory_xact_lock(
+                hashtextextended(CONCAT(#{ownerId}, ':', #{idempotencyKey}), 0)
+            )
+        ) lock_guard
+    </select>
+
+    <update id="updateStatusIfCurrent">
+        UPDATE knowledge_base_deletion_task
+        SET status = #{nextStatus},
+            attempt_count = #{attemptCount},
+            error_summary = #{errorSummary},
+            progress = CASE
+                WHEN #{nextStatus} = 'RUNNING' THEN 50
+                WHEN #{nextStatus} = 'SUCCEEDED' THEN 100
+                ELSE progress
+            END,
+            updated_at = NOW(),
+            started_at = CASE WHEN #{nextStatus} = 'RUNNING' THEN NOW() ELSE started_at END,
+            completed_at = CASE WHEN #{nextStatus} IN ('DEAD_LETTER', 'SUCCEEDED') THEN NOW() ELSE completed_at END
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status = #{currentStatus}
+    </update>
+
+    <insert id="insertAudit" parameterType="com.kama.jchatmind.model.entity.KnowledgeBaseDeletionAuditRecord">
+        INSERT INTO knowledge_base_deletion_audit (
+            audit_id,
+            task_id,
+            owner_id,
+            knowledge_base_id,
+            action,
+            task_status,
+            created_at
+        ) VALUES (
+            CAST(#{id} AS uuid),
+            CAST(#{taskId} AS uuid),
+            #{ownerId},
+            CAST(#{knowledgeBaseId} AS uuid),
+            #{action},
+            #{taskStatus},
+            #{createdAt}
+        )
+    </insert>
+</mapper>

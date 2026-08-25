@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -104,6 +105,33 @@ class DocumentFacadeServiceImplTest {
     }
 
     @Test
+    void shouldUpdateAuthorizedDocumentWithCurrentOwnerInFinalWrite() {
+        DocumentMapper documentMapper = mock(DocumentMapper.class, invocation -> {
+            if ("updateById".equals(invocation.getMethod().getName())
+                    || "updateByIdAndOwnerId".equals(invocation.getMethod().getName())) {
+                return 1;
+            }
+            return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
+        Document document = Document.builder().id("doc-1").kbId("owned-kb").filename("before.md").build();
+        when(documentMapper.selectById("doc-1")).thenReturn(document);
+        DocumentFacadeServiceImpl service = service(
+                documentMapper,
+                mock(ChunkBgeM3Mapper.class),
+                allowingAccessService()
+        );
+        UpdateDocumentRequest request = new UpdateDocumentRequest();
+        request.setFilename("after.md");
+
+        service.updateDocument("doc-1", request);
+
+        assertThat(mockingDetails(documentMapper).getInvocations()).anySatisfy(invocation -> {
+            assertThat(invocation.getMethod().getName()).isEqualTo("updateByIdAndOwnerId");
+            assertThat(invocation.getArguments()[1]).isEqualTo("7");
+        });
+    }
+
+    @Test
     void shouldDeleteChunksBeforeDeletingAuthorizedDocument() {
         DocumentMapper documentMapper = mock(DocumentMapper.class);
         ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
@@ -141,6 +169,8 @@ class DocumentFacadeServiceImplTest {
         });
         when(documentStorageService.saveFile("owned-kb", "doc-1", file))
                 .thenReturn("owned-kb/doc-1/notes.md");
+        when(documentMapper.updateByIdAndOwnerId(any(Document.class), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(1);
         when(ingestionTaskService.submitDocumentIngestion("owned-kb", "doc-1", "upload-key"))
                 .thenReturn(IngestionTask.builder().id("task-1").build());
         Object service = asyncUploadService(
@@ -157,6 +187,39 @@ class DocumentFacadeServiceImplTest {
         assertThat(responseProperty(response, "getTaskId")).isEqualTo("task-1");
         verify(ingestionTaskService).submitDocumentIngestion("owned-kb", "doc-1", "upload-key");
         verifyNoInteractions(chunkBgeM3Mapper);
+    }
+
+    @Test
+    void shouldCompensateUploadedFileWhenOwnerScopedMetadataWriteDoesNotMatch() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        IngestionTaskServiceImpl ingestionTaskService = mock(IngestionTaskServiceImpl.class);
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.isEmpty()).thenReturn(false);
+        when(file.getOriginalFilename()).thenReturn("notes.md");
+        when(file.getSize()).thenReturn(12L);
+        when(documentMapper.insert(any(Document.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, Document.class).setId("doc-1");
+            return 1;
+        });
+        when(documentStorageService.saveFile("owned-kb", "doc-1", file))
+                .thenReturn("owned-kb/doc-1/notes.md");
+        when(ingestionTaskService.submitDocumentIngestion("owned-kb", "doc-1", "upload-key"))
+                .thenReturn(IngestionTask.builder().id("task-1").build());
+        DocumentFacadeServiceImpl service = (DocumentFacadeServiceImpl) asyncUploadService(
+                documentMapper,
+                documentStorageService,
+                mock(ChunkBgeM3Mapper.class),
+                allowingAccessService(),
+                ingestionTaskService
+        );
+
+        assertThatThrownBy(() -> service.uploadDocument("owned-kb", "upload-key", file))
+                .isInstanceOf(BizException.class)
+                .hasMessage("更新文档失败");
+
+        verify(documentStorageService).deleteFile("owned-kb/doc-1/notes.md");
+        verify(ingestionTaskService, never()).submitDocumentIngestion("owned-kb", "doc-1", "upload-key");
     }
 
     @Test

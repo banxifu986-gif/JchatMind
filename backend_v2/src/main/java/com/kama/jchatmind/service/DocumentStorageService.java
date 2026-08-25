@@ -29,6 +29,16 @@ public interface DocumentStorageService {
     void deleteFile(String filePath) throws IOException;
 
     /**
+     * 删除指定知识库的受控存储目录。目录不存在时视为已完成。
+     *
+     * @param kbId 知识库 ID
+     * @throws IOException 目录删除失败
+     */
+    default void deleteKnowledgeBaseDirectory(String kbId) throws IOException {
+        throw new UnsupportedOperationException("当前存储实现不支持知识库目录删除");
+    }
+
+    /**
      * 获取文件的完整路径
      *
      * @param filePath 相对文件路径

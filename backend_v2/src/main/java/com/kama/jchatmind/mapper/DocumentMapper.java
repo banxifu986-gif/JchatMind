@@ -2,6 +2,7 @@ package com.kama.jchatmind.mapper;
 
 import com.kama.jchatmind.model.entity.Document;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -24,4 +25,6 @@ public interface DocumentMapper {
     int deleteById(String id);
 
     int updateById(Document document);
+
+    int updateByIdAndOwnerId(@Param("document") Document document, @Param("ownerId") String ownerId);
 }

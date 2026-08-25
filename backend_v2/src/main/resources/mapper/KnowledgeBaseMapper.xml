@@ -101,6 +101,12 @@
         DELETE FROM knowledge_base WHERE id = CAST(#{id} AS uuid)
     </delete>
 
+    <delete id="deleteByIdAndOwnerId">
+        DELETE FROM knowledge_base
+        WHERE id = CAST(#{id} AS uuid)
+          AND owner_id = CAST(#{ownerId} AS bigint)
+    </delete>
+
     <update id="updateById" parameterType="com.kama.jchatmind.model.entity.KnowledgeBase">
         UPDATE knowledge_base
         <set>
@@ -116,5 +122,6 @@
             updated_at = NOW()
         </set>
         WHERE id = CAST(#{id} AS uuid)
+          AND owner_id = CAST(#{ownerId} AS bigint)
     </update>
 </mapper>

@@ -4,6 +4,8 @@ import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.CreateKnowledgeBaseRequest;
 import com.kama.jchatmind.model.request.UpdateKnowledgeBaseRequest;
 import com.kama.jchatmind.model.response.CreateKnowledgeBaseResponse;
+import com.kama.jchatmind.model.response.DeleteKnowledgeBaseResponse;
+import com.kama.jchatmind.model.response.GetKnowledgeBaseDeletionTaskResponse;
 import com.kama.jchatmind.model.response.GetKnowledgeBasesResponse;
 import com.kama.jchatmind.service.KnowledgeBaseFacadeService;
 import lombok.AllArgsConstructor;
@@ -30,9 +32,13 @@ public class KnowledgeBaseController {
 
     // 删除知识库
     @DeleteMapping("/knowledge-bases/{knowledgeBaseId}")
-    public ApiResponse<Void> deleteKnowledgeBase(@PathVariable String knowledgeBaseId) {
-        knowledgeBaseFacadeService.deleteKnowledgeBase(knowledgeBaseId);
-        return ApiResponse.success();
+    public ApiResponse<DeleteKnowledgeBaseResponse> deleteKnowledgeBase(@PathVariable String knowledgeBaseId) {
+        return ApiResponse.success(knowledgeBaseFacadeService.deleteKnowledgeBase(knowledgeBaseId));
+    }
+
+    @GetMapping("/knowledge-base-deletion-tasks/{taskId}")
+    public ApiResponse<GetKnowledgeBaseDeletionTaskResponse> getKnowledgeBaseDeletionTask(@PathVariable String taskId) {
+        return ApiResponse.success(knowledgeBaseFacadeService.getKnowledgeBaseDeletionTask(taskId));
     }
 
     // 更新知识库

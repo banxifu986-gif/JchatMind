@@ -119,7 +119,8 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     public CreateDocumentResponse uploadDocument(String kbId, String idempotencyKey, MultipartFile file) {
         String filePath = null;
         try {
-            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(kbId, requireUserId());
+            String userId = requireUserId();
+            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(kbId, userId);
             if (!StringUtils.hasText(idempotencyKey)) {
                 throw new BizException("幂等键不能为空");
             }
@@ -177,7 +178,9 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             updatedDocument.setCreatedAt(now);
             updatedDocument.setUpdatedAt(now);
 
-            documentMapper.updateById(updatedDocument);
+            if (documentMapper.updateByIdAndOwnerId(updatedDocument, userId) <= 0) {
+                throw new BizException("更新文档失败");
+            }
 
             log.info("文档上传成功: kbId={}, documentId={}, filename={}", kbId, documentId, originalFilename);
 
@@ -254,12 +257,13 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     @Override
     public void updateDocument(String documentId, UpdateDocumentRequest request) {
         try {
+            String userId = requireUserId();
             // 查询现有的文档
             Document existingDocument = documentMapper.selectById(documentId);
             if (existingDocument == null) {
                 throw new BizException("无权访问文档");
             }
-            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(existingDocument.getKbId(), requireUserId());
+            knowledgeBaseAccessService.requireAccessibleKnowledgeBase(existingDocument.getKbId(), userId);
 
             // 将现有 Document 转换为 DocumentDTO
             DocumentDTO documentDTO = documentConverter.toDTO(existingDocument);
@@ -277,7 +281,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             updatedDocument.setUpdatedAt(LocalDateTime.now());
 
             // 更新数据库
-            int result = documentMapper.updateById(updatedDocument);
+            int result = documentMapper.updateByIdAndOwnerId(updatedDocument, userId);
             if (result <= 0) {
                 throw new BizException("更新文档失败");
             }

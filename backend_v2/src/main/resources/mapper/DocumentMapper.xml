@@ -114,4 +114,30 @@
         </set>
         WHERE id = CAST(#{id} AS uuid)
     </update>
+
+    <update id="updateByIdAndOwnerId">
+        UPDATE document
+        <set>
+            <if test="document.filename != null">
+                filename = #{document.filename},
+            </if>
+            <if test="document.filetype != null">
+                filetype = #{document.filetype},
+            </if>
+            <if test="document.size != null">
+                size = #{document.size},
+            </if>
+            <if test="document.metadata != null">
+                metadata = CAST(#{document.metadata} AS jsonb),
+            </if>
+            updated_at = NOW()
+        </set>
+        WHERE id = CAST(#{document.id} AS uuid)
+          AND EXISTS (
+              SELECT 1
+              FROM knowledge_base
+              WHERE knowledge_base.id = document.kb_id
+                AND knowledge_base.owner_id = CAST(#{ownerId} AS bigint)
+          )
+    </update>
 </mapper>
