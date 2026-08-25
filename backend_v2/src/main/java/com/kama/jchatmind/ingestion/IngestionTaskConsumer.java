@@ -46,7 +46,10 @@ public class IngestionTaskConsumer {
         this.progressService = progressService;
     }
 
-    @RabbitListener(queues = RabbitMQConfig.INGESTION_QUEUE)
+    @RabbitListener(
+            queues = RabbitMQConfig.INGESTION_QUEUE,
+            containerFactory = "ingestionRabbitListenerContainerFactory"
+    )
     public void onMessage(String taskId) {
         taskId = normalizeTaskId(taskId);
         IngestionTask task = ingestionTaskService.claimTask(taskId);
