@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -15,6 +17,9 @@ import java.util.List;
 
 @Service
 public class BgeRerankerService {
+    private static final int TEI_MAX_CLIENT_BATCH_SIZE = 32;
+    private static final int TEI_MAX_CONCURRENT_BATCHES = 1;
+
     private final WebClient webClient;
     private final boolean enabled;
     private final Duration timeout;
@@ -35,14 +40,33 @@ public class BgeRerankerService {
             return List.of();
         }
 
-        List<TeiRerankResult> response = webClient.post()
+        List<List<String>> batches = batches(texts);
+        List<List<Double>> scoresByBatch = Flux.fromIterable(batches)
+                .flatMapSequential(batch -> rerankBatch(query, batch), TEI_MAX_CONCURRENT_BATCHES)
+                .collectList()
+                .block(timeout);
+        if (scoresByBatch == null) {
+            throw new IllegalStateException("TEI rerank response is empty");
+        }
+        return scoresByBatch.stream().flatMap(List::stream).toList();
+    }
+
+    private Mono<List<Double>> rerankBatch(String query, List<String> texts) {
+        return webClient.post()
                 .uri("/rerank")
                 .bodyValue(new TeiRerankRequest(query, texts))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<TeiRerankResult>>() {
                 })
-                .block(timeout);
-        return restoreCandidateOrder(response, texts.size());
+                .map(response -> restoreCandidateOrder(response, texts.size()));
+    }
+
+    private List<List<String>> batches(List<String> texts) {
+        List<List<String>> batches = new ArrayList<>();
+        for (int start = 0; start < texts.size(); start += TEI_MAX_CLIENT_BATCH_SIZE) {
+            batches.add(List.copyOf(texts.subList(start, Math.min(start + TEI_MAX_CLIENT_BATCH_SIZE, texts.size()))));
+        }
+        return List.copyOf(batches);
     }
 
     private List<Double> restoreCandidateOrder(List<TeiRerankResult> response, int candidateCount) {
