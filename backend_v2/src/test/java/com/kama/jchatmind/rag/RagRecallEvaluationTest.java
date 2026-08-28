@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.converter.DocumentConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
+import com.kama.jchatmind.mapper.Bm25TokenDictionaryMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
 import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
@@ -82,6 +83,7 @@ import java.util.stream.Collectors;
 class RagRecallEvaluationTest {
 
     private static final String FIXTURE_KB_NAME = "RAG Recall Fixture KB";
+    private static final String RAG_EVAL_OWNER_ID = "900000000001";
     private static final String MODE_FIXTURE = "fixture";
     private static final String MODE_REAL = "real";
     private static final String MODE_BOTH = "both";
@@ -1439,6 +1441,7 @@ class RagRecallEvaluationTest {
                 .build();
 
         Document document = documentConverter.toEntity(documentDTO);
+        document.setMetadata("{}");
         LocalDateTime now = LocalDateTime.now();
         document.setCreatedAt(now);
         document.setUpdatedAt(now);
@@ -1510,6 +1513,8 @@ class RagRecallEvaluationTest {
                 .description(description)
                 .build();
         KnowledgeBase knowledgeBase = knowledgeBaseConverter.toEntity(dto);
+        knowledgeBase.setMetadata("{}");
+        knowledgeBase.setOwnerId(RAG_EVAL_OWNER_ID);
         LocalDateTime now = LocalDateTime.now();
         knowledgeBase.setCreatedAt(now);
         knowledgeBase.setUpdatedAt(now);
@@ -2146,6 +2151,25 @@ class RagRecallEvaluationTest {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean
+        VchordBm25QueryService vchordBm25QueryService(
+                Bm25TokenDictionaryMapper tokenDictionaryMapper,
+                ChunkBgeM3Mapper chunkBgeM3Mapper,
+                JdbcTemplate jdbcTemplate
+        ) {
+            return new VchordBm25QueryService(tokenDictionaryMapper, chunkBgeM3Mapper, jdbcTemplate);
+        }
+
+        @Bean
+        BgeRerankerService bgeRerankerService(
+                WebClient.Builder webClientBuilder,
+                @Value("${rag.rerank.enabled:false}") boolean enabled,
+                @Value("${rag.rerank.base-url:http://127.0.0.1:8081}") String baseUrl,
+                @Value("${rag.rerank.timeout-ms:3000}") int timeoutMs
+        ) {
+            return new BgeRerankerService(webClientBuilder, enabled, baseUrl, timeoutMs);
         }
     }
 
