@@ -30,10 +30,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -75,13 +77,26 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         for (ChunkBgeM3 existingChunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
             chunkBgeM3Mapper.deleteById(existingChunk.getId());
         }
+        Map<Integer, DocumentAsset> pdfPageAssets = new LinkedHashMap<>();
+        Map<Integer, String> pdfPageContents = pdfDocument ? collectPdfPageContents(sections) : Map.of();
+        Set<Integer> persistedPdfPageNumbers = new HashSet<>();
 
         for (int index = 0; index < sections.size(); index++) {
             MarkdownParserService.MarkdownSection section = sections.get(index);
             if (!StringUtils.hasText(section.getTitle())) {
                 continue;
             }
-            DocumentAsset pdfPageAsset = pdfDocument ? createPdfPageAsset(document, section, now) : null;
+            DocumentAsset pdfPageAsset = pdfDocument
+                    ? pdfPageAssets.computeIfAbsent(
+                            section.getPageNumber(),
+                            pageNumber -> createPdfPageAsset(
+                                    document,
+                                    pageNumber,
+                                    pdfPageContents.get(pageNumber),
+                                    now
+                            )
+                    )
+                    : null;
             String content = section.getContent() == null ? "" : section.getContent();
             List<MarkdownTableAsset> sectionTableAssets = markdownTableAssets.stream()
                     .filter(tableAsset -> content.contains(tableAsset.table().content()))
@@ -110,7 +125,11 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
                 throw new BizException("文档分块写入失败");
             }
             if (pdfPageAsset != null) {
-                persistDocumentAsset(document, pdfPageAsset, chunk);
+                if (persistedPdfPageNumbers.add(pdfPageAsset.getPageNumber())) {
+                    persistDocumentAsset(document, pdfPageAsset, chunk);
+                } else {
+                    persistDocumentAssetRelation(document, pdfPageAsset, chunk);
+                }
             }
             for (MarkdownTableAsset tableAsset : sectionTableAssets) {
                 persistDocumentAsset(document, tableAsset.asset(), chunk);
@@ -120,14 +139,14 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
 
     private DocumentAsset createPdfPageAsset(
             Document document,
-            MarkdownParserService.MarkdownSection section,
+            Integer pageNumber,
+            String pageContent,
             LocalDateTime now
     ) {
-        Integer pageNumber = section.getPageNumber();
         if (pageNumber == null || pageNumber <= 0) {
             throw new BizException("PDF 页码缺失");
         }
-        String content = section.getContent() == null ? "" : section.getContent();
+        String content = pageContent == null ? "" : pageContent;
         return DocumentAsset.builder()
                 .assetId(UUID.randomUUID().toString())
                 .documentId(document.getId())
@@ -143,16 +162,38 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
                 .build();
     }
 
+    private Map<Integer, String> collectPdfPageContents(
+            List<MarkdownParserService.MarkdownSection> sections
+    ) {
+        Map<Integer, String> pageContents = new LinkedHashMap<>();
+        for (MarkdownParserService.MarkdownSection section : sections) {
+            Integer pageNumber = section.getPageNumber();
+            String content = section.getContent() == null ? "" : section.getContent();
+            pageContents.compute(pageNumber, (ignored, existingContent) -> existingContent == null
+                    ? content
+                    : existingContent + "\n" + content);
+        }
+        return pageContents;
+    }
+
     private void persistDocumentAsset(
+            Document document,
+            DocumentAsset asset,
+            ChunkBgeM3 chunk
+    ) {
+        if (documentAssetMapper.insert(asset) <= 0) {
+            throw new BizException("文档资产写入失败");
+        }
+        persistDocumentAssetRelation(document, asset, chunk);
+    }
+
+    private void persistDocumentAssetRelation(
             Document document,
             DocumentAsset asset,
             ChunkBgeM3 chunk
     ) {
         if (!StringUtils.hasText(chunk.getId())) {
             throw new BizException("文档分块标识生成失败");
-        }
-        if (documentAssetMapper.insert(asset) <= 0) {
-            throw new BizException("文档资产写入失败");
         }
         if (documentAssetMapper.insertChunkRelation(
                 asset.getAssetId(),

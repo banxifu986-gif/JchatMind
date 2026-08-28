@@ -34,9 +34,29 @@ class MarkdownParserServiceImplTest {
         assertTrue(sections.get(0).getContent().contains("Page one"));
     }
 
+    @Test
+    void shouldSplitLongPdfPageAndKeepPageMetadata() throws Exception {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String firstParagraph = "first " + "a".repeat(1200) + ".";
+        String secondParagraph = "second " + "b".repeat(1200);
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parsePdf(
+                new ByteArrayInputStream(pdfWithPages(List.of(firstParagraph + secondParagraph)))
+        );
+
+        assertEquals(2, sections.size());
+        assertEquals(1, sections.get(0).getPageNumber());
+        assertEquals(1, sections.get(1).getPageNumber());
+        assertTrue(sections.stream().allMatch(section -> section.getContent().length() <= 2000));
+    }
+
     private byte[] twoPagePdf() throws Exception {
+        return pdfWithPages(List.of("Page one", "Page two"));
+    }
+
+    private byte[] pdfWithPages(List<String> pageContents) throws Exception {
         try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            for (String text : List.of("Page one", "Page two")) {
+            for (String text : pageContents) {
                 PDPage page = new PDPage();
                 document.addPage(page);
                 try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
@@ -164,6 +184,79 @@ class MarkdownParserServiceImplTest {
         assertEquals("项目 > 认证 > 1. 第一个问题？", sections.get(3).getParentContentPath());
         assertEquals("项目 > 认证 > 2. 第二个问题？", sections.get(4).getContentPath());
         assertEquals("项目 > 认证 > 2. 第二个问题？", sections.get(5).getParentContentPath());
+    }
+
+    @Test
+    void shouldKeepMarkdownPreambleAsDedicatedSection() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String markdown = """
+                这是一段没有标题的文档前言。
+
+                # 部署
+                部署正文
+                """;
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parseMarkdown(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(2, sections.size());
+        assertEquals("文档前言", sections.get(0).getTitle());
+        assertEquals("这是一段没有标题的文档前言。", sections.get(0).getContent());
+        assertEquals("部署", sections.get(1).getTitle());
+    }
+
+    @Test
+    void shouldCreateSectionForPlainMarkdownWithoutHeadings() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String markdown = "第一段正文。\n\n第二段正文。";
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parseMarkdown(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(1, sections.size());
+        assertEquals("文档", sections.get(0).getTitle());
+        assertEquals("第一段正文。\n第二段正文。", sections.get(0).getContent());
+    }
+
+    @Test
+    void shouldCleanHtmlWithoutHeadingsIntoTextSection() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String html = """
+                <html><head><style>.hidden { display: none; }</style></head><body>
+                <script>window.noise = true;</script><p>第一段正文。</p><p>第二段正文。</p>
+                </body></html>
+                """;
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parseHtml(
+                new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(1, sections.size());
+        assertEquals("文档", sections.get(0).getTitle());
+        assertEquals("第一段正文。\n第二段正文。", sections.get(0).getContent());
+        assertFalse(sections.get(0).getContent().contains("window.noise"));
+        assertFalse(sections.get(0).getContent().contains("display: none"));
+    }
+
+    @Test
+    void shouldSplitLongSectionAtParagraphBoundaries() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String firstParagraph = "第一段" + "a".repeat(1200);
+        String secondParagraph = "第二段" + "b".repeat(1200);
+        String markdown = "# 部署\n" + firstParagraph + "\n\n" + secondParagraph;
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parseMarkdown(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(2, sections.size());
+        assertEquals("部署", sections.get(0).getContentPath());
+        assertEquals("部署", sections.get(1).getContentPath());
+        assertEquals(firstParagraph, sections.get(0).getContent());
+        assertEquals(secondParagraph, sections.get(1).getContent());
+        assertTrue(sections.stream().allMatch(section -> section.getContent().length() <= 2000));
     }
 
     @Test

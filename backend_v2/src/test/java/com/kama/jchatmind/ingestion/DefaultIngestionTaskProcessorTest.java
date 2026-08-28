@@ -479,6 +479,61 @@ class DefaultIngestionTaskProcessorTest {
     }
 
     @Test
+    void shouldReusePdfPageAssetForMultipleChunksFromSamePage() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        MarkdownParserService markdownParserService = mock(MarkdownParserService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path storedFile = temporaryDirectory.resolve("guide.pdf");
+        Files.write(storedFile, new byte[]{'%', 'P', 'D', 'F'});
+        stubPdfDocument(documentMapper, documentStorageService, storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(markdownParserService.parsePdf(any())).thenReturn(List.of(
+                section("第 1 页", "第一页上半段", 1),
+                section("第 1 页", "第一页下半段", 1)
+        ));
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        AtomicInteger chunkIndex = new AtomicInteger(1);
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId(
+                    "00000000-0000-0000-0000-00000000021" + chunkIndex.getAndIncrement()
+            );
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                markdownParserService,
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper).insert(assetCaptor.capture());
+        assertThat(assetCaptor.getValue())
+                .extracting(
+                        DocumentAsset::getAssetType,
+                        DocumentAsset::getAssetKey,
+                        DocumentAsset::getPageNumber,
+                        DocumentAsset::getContentHash
+                )
+                .containsExactly("PDF_PAGE_TEXT", "page-1", 1, sha256("第一页上半段\n第一页下半段"));
+        verify(documentAssetMapper, org.mockito.Mockito.times(2)).insertChunkRelation(
+                org.mockito.ArgumentMatchers.eq(assetCaptor.getValue().getAssetId()),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq("doc-1"),
+                org.mockito.ArgumentMatchers.eq("doc-1")
+        );
+    }
+
+    @Test
     void shouldFailWhenPdfPageAssetDoesNotPersist() throws Exception {
         DocumentMapper documentMapper = mock(DocumentMapper.class);
         DocumentStorageService documentStorageService = mock(DocumentStorageService.class);

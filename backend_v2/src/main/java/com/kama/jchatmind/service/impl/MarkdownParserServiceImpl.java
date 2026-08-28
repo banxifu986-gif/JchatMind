@@ -27,6 +27,10 @@ import java.util.regex.Pattern;
 @Slf4j
 public class MarkdownParserServiceImpl implements MarkdownParserService {
 
+    private static final int MAX_SECTION_CONTENT_LENGTH = 2000;
+    private static final int MIN_PREFERRED_CHUNK_LENGTH = 1000;
+    private static final String DOCUMENT_TITLE = "文档";
+    private static final String PREAMBLE_TITLE = "文档前言";
     private static final Pattern HTML_HEADING_PATTERN = Pattern.compile(
             "(?is)<h([1-6])\\b[^>]*>(.*?)</h\\1\\s*>"
     );
@@ -47,6 +51,10 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
 
             List<MarkdownSection> sections = new ArrayList<>();
             extractSections(document, sections, markdown);
+            if (sections.isEmpty()) {
+                sections.add(createStandaloneSection(DOCUMENT_TITLE, extractDocumentContent(document, markdown)));
+            }
+            sections = splitOversizedSections(sections);
 
             log.info("解析 Markdown 完成，共提取 {} 个章节", sections.size());
             return sections;
@@ -78,12 +86,21 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             while (matcher.find()) {
                 headings.add(new HtmlHeading(
                         Integer.parseInt(matcher.group(1)),
-                        stripHtml(matcher.group(2)),
+                        stripHtml(matcher.group(2)).replace("\n", " ").trim(),
                         matcher.start(),
                         matcher.end()
                 ));
             }
             List<MarkdownSection> sections = new ArrayList<>();
+            if (headings.isEmpty()) {
+                sections.add(createStandaloneSection(DOCUMENT_TITLE, stripHtml(html)));
+                return splitOversizedSections(sections);
+            }
+
+            String preamble = stripHtml(html.substring(0, headings.get(0).start()));
+            if (!preamble.isBlank()) {
+                sections.add(createStandaloneSection(PREAMBLE_TITLE, preamble));
+            }
             List<String> currentPathTitles = new ArrayList<>();
             List<Integer> currentPathLevels = new ArrayList<>();
             for (int i = 0; i < headings.size(); i++) {
@@ -120,6 +137,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
                 currentPathLevels.add(heading.level());
                 currentPathTitles.add(heading.title());
             }
+            sections = splitOversizedSections(sections);
             log.info("解析 HTML 完成，共提取 {} 个章节", sections.size());
             return sections;
         } catch (Exception e) {
@@ -157,6 +175,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             if (sections.isEmpty()) {
                 throw new IllegalArgumentException("PDF 未提取到文本");
             }
+            sections = splitOversizedSections(sections);
             log.info("解析 PDF 完成，共提取 {} 页文本", sections.size());
             return sections;
         } catch (IOException | RuntimeException e) {
@@ -173,7 +192,10 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             return "";
         }
         return html
-                .replaceAll("(?i)<br\\s*/?>", "\\n")
+                .replaceAll("(?is)<!--.*?-->", " ")
+                .replaceAll("(?is)<(script|style|noscript|template|head)\\b[^>]*>.*?</\\1\\s*>", " ")
+                .replaceAll("(?i)<br\\s*/?>", "\n")
+                .replaceAll("(?i)</?(?:p|div|li|ul|ol|table|tr|h[1-6]|section|article|blockquote)\\b[^>]*>", "\n")
                 .replaceAll("(?s)<[^>]+>", " ")
                 .replace("&nbsp;", " ")
                 .replace("&amp;", "&")
@@ -181,7 +203,9 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
                 .replace("&gt;", ">")
                 .replace("&quot;", "\"")
                 .replace("&#39;", "'")
-                .replaceAll("\\s+", " ")
+                .replaceAll("[\\t\\x0B\\f\\r ]+", " ")
+                .replaceAll(" *\\n *", "\n")
+                .replaceAll("\\n+", "\n")
                 .trim();
     }
 
@@ -202,6 +226,14 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
 
         List<String> currentPathTitles = new ArrayList<>();
         List<Integer> currentPathLevels = new ArrayList<>();
+
+        int firstHeadingIndex = firstHeadingIndex(topLevelNodes);
+        if (firstHeadingIndex > 0) {
+            String preamble = extractDocumentContent(topLevelNodes, 0, firstHeadingIndex, markdown);
+            if (!preamble.isBlank()) {
+                sections.add(createStandaloneSection(PREAMBLE_TITLE, preamble));
+            }
+        }
 
         for (int i = 0; i < topLevelNodes.size(); i++) {
             Node node = topLevelNodes.get(i);
@@ -261,6 +293,115 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             currentPathLevels.add(heading.getLevel());
             currentPathTitles.add(normalizedTitle);
         }
+    }
+
+    private int firstHeadingIndex(List<Node> nodes) {
+        for (int index = 0; index < nodes.size(); index++) {
+            if (nodes.get(index) instanceof Heading) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private String extractDocumentContent(Document document, String markdown) {
+        List<Node> nodes = new ArrayList<>();
+        Node child = document.getFirstChild();
+        while (child != null) {
+            nodes.add(child);
+            child = child.getNext();
+        }
+        return extractDocumentContent(nodes, 0, nodes.size(), markdown);
+    }
+
+    private String extractDocumentContent(List<Node> nodes, int startIndex, int endIndex, String markdown) {
+        StringBuilder content = new StringBuilder();
+        for (int index = startIndex; index < endIndex; index++) {
+            String nodeContent = extractNodeContent(nodes.get(index), markdown);
+            if (nodeContent == null || nodeContent.trim().isEmpty()) {
+                continue;
+            }
+            if (content.length() > 0) {
+                content.append("\n");
+            }
+            content.append(nodeContent);
+        }
+        return content.toString().trim();
+    }
+
+    private MarkdownSection createStandaloneSection(String title, String content) {
+        String normalizedContent = content == null ? "" : content.trim();
+        return new MarkdownSection(
+                title,
+                normalizedContent,
+                title,
+                null,
+                1,
+                false,
+                SectionType.LEAF_CONTENT,
+                1,
+                normalizedContent.length()
+        );
+    }
+
+    private List<MarkdownSection> splitOversizedSections(List<MarkdownSection> sections) {
+        List<MarkdownSection> splitSections = new ArrayList<>();
+        for (MarkdownSection section : sections) {
+            String content = section.getContent();
+            if (content == null || content.length() <= MAX_SECTION_CONTENT_LENGTH) {
+                splitSections.add(section);
+                continue;
+            }
+            for (String chunkContent : splitContent(content)) {
+                splitSections.add(new MarkdownSection(
+                        section.getTitle(),
+                        chunkContent,
+                        section.getContentPath(),
+                        section.getParentContentPath(),
+                        section.getHeadingLevel(),
+                        section.isHasChildren(),
+                        section.getSectionType(),
+                        section.getPathDepth(),
+                        chunkContent.length(),
+                        section.getPageNumber()
+                ));
+            }
+        }
+        return splitSections;
+    }
+
+    private List<String> splitContent(String content) {
+        List<String> chunks = new ArrayList<>();
+        String normalizedContent = content.trim();
+        int start = 0;
+        while (start < normalizedContent.length()) {
+            int end = findChunkEnd(normalizedContent, start);
+            String chunk = normalizedContent.substring(start, end).trim();
+            if (!chunk.isEmpty()) {
+                chunks.add(chunk);
+            }
+            start = end;
+            while (start < normalizedContent.length() && Character.isWhitespace(normalizedContent.charAt(start))) {
+                start++;
+            }
+        }
+        return chunks;
+    }
+
+    private int findChunkEnd(String content, int start) {
+        int limit = Math.min(start + MAX_SECTION_CONTENT_LENGTH, content.length());
+        if (limit == content.length()) {
+            return limit;
+        }
+        int minimumPreferredEnd = Math.min(start + MIN_PREFERRED_CHUNK_LENGTH, limit);
+        for (int index = limit - 1; index >= minimumPreferredEnd; index--) {
+            char character = content.charAt(index);
+            if (character == '\n' || character == '。' || character == '！' || character == '？'
+                    || character == '.' || character == '!' || character == '?' || character == ';' || character == '；') {
+                return index + 1;
+            }
+        }
+        return limit;
     }
 
     private boolean hasChildHeading(List<Node> topLevelNodes, int currentIndex, int currentLevel) {
