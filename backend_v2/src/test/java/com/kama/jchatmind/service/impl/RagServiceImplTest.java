@@ -10,6 +10,7 @@ import com.kama.jchatmind.service.QueryRewriteService;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Hooks;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.IOException;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
@@ -483,7 +485,51 @@ class RagServiceImplTest {
     }
 
     @Test
-    void shouldCountSameChunkOnlyOnceAcrossVectorQueryChannels() throws Exception {
+    void shouldTimeoutEmbeddingWhenOllamaDoesNotRespond() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/embed", exchange -> {
+            try {
+                Thread.sleep(31_000L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            byte[] response = "{\"model\":\"bge-m3:latest\",\"embeddings\":[[0.1,0.2,0.3]]}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        server.start();
+        Hooks.onErrorDropped(ignored -> {
+        });
+
+        try {
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mock(ChunkBgeM3Mapper.class),
+                    mock(QueryRewriteService.class),
+                    mock(VchordBm25QueryService.class),
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    false,
+                    0
+            );
+
+            assertThrows(IllegalStateException.class, () -> service.embed("timeout"));
+        } finally {
+            Hooks.resetOnErrorDropped();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldCountSameChunkOnceInEachOriginalAndExpandedVectorBranch() throws Exception {
         HttpServer server = createEmbeddingServer();
         server.start();
 
@@ -524,7 +570,7 @@ class RagServiceImplTest {
             List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", 1);
 
             assertEquals(1, results.size());
-            assertEquals(1D / 61D, results.get(0).getRrfScore());
+            assertEquals(2D / 61D, results.get(0).getRrfScore(), 0.0000000001D);
         } finally {
             server.stop(0);
         }
@@ -642,12 +688,455 @@ class RagServiceImplTest {
             List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "接口", 1);
 
             assertEquals(
-                    List.of("vector_original", "vector_standalone", "title_exact"),
+                    List.of(
+                            "dense-original:vector:original",
+                            "sparse-original:title-exact:original",
+                            "expanded-query:vector:standalone"
+                    ),
                     results.get(0).getRetrievalProvenance()
             );
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void shouldKeepOriginalQueryOutOfExpandedBranch() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "问题", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("问题")
+                            .retrievalQueries(List.of("问题", "问题补全"))
+                            .retrievalQuerySources(List.of("original", "standalone"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(
+                            List.of(candidate("chunk-dense", 1)),
+                            List.of(candidate("chunk-expanded", 1))
+                    );
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", 2);
+
+            assertEquals(
+                    List.of("dense-original:vector:original"),
+                    results.get(0).getRetrievalProvenance()
+            );
+            assertEquals(
+                    List.of("expanded-query:vector:standalone"),
+                    results.get(1).getRetrievalProvenance()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldRejectUnknownExpandedQuerySource() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "问题", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("问题")
+                            .retrievalQueries(List.of("问题", "不受控扩展"))
+                            .retrievalQuerySources(List.of("original", "legacy"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(
+                            List.of(candidate("chunk-dense", 1)),
+                            List.of(candidate("chunk-legacy", 1))
+                    );
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", 2);
+
+            assertEquals(List.of("chunk-dense"), results.stream().map(RagRetrievalResult::getChunkId).toList());
+            assertEquals(
+                    List.of("dense-original:vector:original"),
+                    results.get(0).getRetrievalProvenance()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldCountSameChunkAtMostOncePerIndependentBranch() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "接口", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("接口")
+                            .titleQuery(true)
+                            .retrievalQueries(List.of("接口", "接口补全"))
+                            .retrievalQuerySources(List.of("original", "standalone"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(List.of(candidate("chunk-1", 1)), List.of(candidate("chunk-1", 1)));
+            when(mapper.searchByTitleExact(List.of("kb-1"), "接口", "[0.1,0.2,0.3]", 20))
+                    .thenReturn(List.of(candidate("chunk-1", 1)));
+            when(mapper.searchByTitleContains(List.of("kb-1"), "接口", "%接口%", 10))
+                    .thenReturn(List.of(candidate("chunk-1", 1)));
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "接口", 1);
+
+            assertEquals(1, results.size());
+            assertEquals(3D / 61D, results.get(0).getRrfScore(), 0.0000000001D);
+            assertEquals(
+                    List.of(
+                            "dense-original:vector:original",
+                            "sparse-original:title-exact:original",
+                            "sparse-original:title-contains:original",
+                            "expanded-query:vector:standalone"
+                    ),
+                    results.get(0).getRetrievalProvenance()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldApplyHardScopeBeforeLimitForEveryIndependentBranch() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            RagRetrievalContext context = RagRetrievalContext.builder()
+                    .kbId("kb-1")
+                    .sourceName("architecture.md")
+                    .sourceType("md")
+                    .contentPath("rag > bm25")
+                    .build();
+            when(rewriteService.rewrite(List.of("kb-1"), "接口", context))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("接口")
+                            .context(context)
+                            .titleQuery(true)
+                            .contextApplyMode(QueryRewriteResult.ContextApplyMode.HARD)
+                            .retrievalQueries(List.of("接口", "完整接口"))
+                            .retrievalQuerySources(List.of("original", "standalone"))
+                            .build());
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            service.retrieve(List.of("kb-1"), "接口", context, 1);
+
+            org.mockito.Mockito.verify(mapper, org.mockito.Mockito.times(2)).similaritySearchDetailedWithContext(
+                    List.of("kb-1"),
+                    "[0.1,0.2,0.3]",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    50
+            );
+            org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never())
+                    .similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50);
+            org.mockito.Mockito.verify(mapper).searchByTitleExactWithContext(
+                    List.of("kb-1"),
+                    "完整接口",
+                    "[0.1,0.2,0.3]",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    20
+            );
+            org.mockito.Mockito.verify(mapper).searchByTitleContainsWithContext(
+                    List.of("kb-1"),
+                    "完整接口",
+                    "%完整接口%",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(mapper).searchByTitleKeywordsWithContext(
+                    List.of("kb-1"),
+                    List.of("完整", "整接", "接口"),
+                    4,
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(mapper).searchByTitleTrigramWithContext(
+                    List.of("kb-1"),
+                    "完整接口",
+                    0.18D,
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(bm25QueryService).searchTitle(
+                    List.of("kb-1"),
+                    "完整接口",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    10
+            );
+            org.mockito.Mockito.verify(bm25QueryService).searchContent(
+                    List.of("kb-1"),
+                    "完整接口",
+                    "architecture.md",
+                    "md",
+                    "rag > bm25",
+                    20
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldKeepThreeBranchProvenanceAndOuterFusionStable() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "问题", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("问题")
+                            .retrievalQueries(List.of("问题", "问题补全"))
+                            .retrievalQuerySources(List.of("original", "standalone"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(
+                            List.of(candidate("chunk-dense", 1), candidate("chunk-shared", 2)),
+                            List.of(candidate("chunk-expanded", 1), candidate("chunk-shared", 2))
+                    );
+            when(bm25QueryService.searchContent(List.of("kb-1"), "问题", null, null, null, 20))
+                    .thenReturn(List.of(candidate("chunk-sparse", 1), candidate("chunk-shared", 2)));
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", 4);
+
+            assertEquals(
+                    List.of("chunk-shared", "chunk-dense", "chunk-expanded", "chunk-sparse"),
+                    results.stream().map(RagRetrievalResult::getChunkId).toList()
+            );
+            assertEquals(3D / 62D, results.get(0).getRrfScore(), 0.0000000001D);
+            assertEquals(
+                    List.of(
+                            "dense-original:vector:original",
+                            "sparse-original:content-bm25:original",
+                            "expanded-query:vector:standalone"
+                    ),
+                    results.get(0).getRetrievalProvenance()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldDeduplicateSameChunkAcrossExpandedQueriesBeforeOuterRrf() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "问题", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("问题")
+                            .retrievalQueries(List.of("问题", "补全A", "补全B"))
+                            .retrievalQuerySources(List.of("original", "standalone", "llm"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(
+                            List.of(),
+                            List.of(candidate("chunk-expanded", 1)),
+                            List.of(candidate("chunk-expanded", 1))
+                    );
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieve(List.of("kb-1"), "问题", 1);
+
+            assertEquals(1, results.size());
+            assertEquals(1D / 61D, results.get(0).getRrfScore(), 0.0000000001D);
+            assertEquals(
+                    List.of(
+                            "expanded-query:vector:standalone",
+                            "expanded-query:vector:llm"
+                    ),
+                    results.get(0).getRetrievalProvenance()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldKeepIndependentBranchEvaluationVariantsSeparated() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), "原问", null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query("原问")
+                            .retrievalQueries(List.of("原问", "standalone 补全问句"))
+                            .retrievalQuerySources(List.of("original", "standalone"))
+                            .build());
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(List.of(candidate("chunk-shared", 1)));
+            when(bm25QueryService.searchContent(List.of("kb-1"), "原问", null, null, null, 20))
+                    .thenReturn(List.of(candidate("chunk-shared", 1)));
+            when(bm25QueryService.searchContent(List.of("kb-1"), "standalone 补全问句", null, null, null, 20))
+                    .thenReturn(List.of(candidate("chunk-shared", 1)));
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> r0 = service.retrieveForIndependentBranchEvaluation(
+                    List.of("kb-1"), "原问", 10, "current-flat"
+            );
+            List<RagRetrievalResult> r1 = service.retrieveForIndependentBranchEvaluation(
+                    List.of("kb-1"), "原问", 10, "two-branch-original"
+            );
+            List<RagRetrievalResult> r2 = service.retrieveForIndependentBranchEvaluation(
+                    List.of("kb-1"), "原问", 10, "three-branch-expanded"
+            );
+
+            assertEquals(
+                    List.of("vector_original", "vector_standalone", "content_bm25"),
+                    r0.get(0).getRetrievalProvenance()
+            );
+            assertEquals(
+                    List.of("dense-original:vector:original", "sparse-original:content-bm25:original"),
+                    r1.get(0).getRetrievalProvenance()
+            );
+            assertTrue(r2.get(0).getRetrievalProvenance().contains("expanded-query:vector:standalone"));
+            assertTrue(r2.get(0).getRetrievalProvenance().contains("expanded-query:content-bm25:standalone"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static RagRetrievalResult candidate(String chunkId, int rank) {
+        RagRetrievalResult candidate = new RagRetrievalResult();
+        candidate.setChunkId(chunkId);
+        candidate.setKbId("kb-1");
+        candidate.setContent(chunkId + " 内容");
+        candidate.setRank(rank);
+        return candidate;
     }
 
     private static HttpServer createEmbeddingServer() throws IOException {

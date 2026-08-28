@@ -19,6 +19,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -50,6 +51,7 @@ public class RagServiceImpl implements RagService {
     private static final int TITLE_CONTAINS_MIN_QUERY_LENGTH = 2;
     private static final int TITLE_KEYWORD_MIN_LENGTH = 2;
     private static final int TITLE_KEYWORD_MAX_COUNT = 6;
+    private static final Duration EMBEDDING_TIMEOUT = Duration.ofSeconds(30);
     private static final Set<String> GENERIC_LEAF_TITLES = Set.of("回答", "原理", "总结", "方案");
 
     private final WebClient webClient;
@@ -124,7 +126,7 @@ public class RagServiceImpl implements RagService {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(EmbeddingResponse.class)
-                .block();
+                .block(EMBEDDING_TIMEOUT);
         Assert.notNull(resp, "Embedding response cannot be null");
         Assert.isTrue(!CollectionUtils.isEmpty(resp.getEmbeddings()), "Embedding response cannot be empty");
         Assert.notNull(resp.getEmbeddings().get(0), "Embedding vector cannot be null");
@@ -171,6 +173,28 @@ public class RagServiceImpl implements RagService {
 
         QueryRewriteResult rewritten = queryRewriteService.rewrite(effectiveKbIds, query, context);
         return retrieveWithPlan(effectiveKbIds, rewritten, limit);
+    }
+
+    List<RagRetrievalResult> retrieveForIndependentBranchEvaluation(
+            List<String> kbIds,
+            String query,
+            int limit,
+            String variant
+    ) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        List<String> effectiveKbIds = sanitizeKbIds(kbIds);
+        if (effectiveKbIds.isEmpty()) {
+            return List.of();
+        }
+        QueryRewriteResult rewritten = queryRewriteService.rewrite(effectiveKbIds, query, null);
+        return switch (variant) {
+            case "current-flat" -> retrieveCurrentFlat(effectiveKbIds, rewritten, limit);
+            case "two-branch-original" -> retrieveWithPlan(effectiveKbIds, rewritten, limit, false);
+            case "three-branch-expanded" -> retrieveWithPlan(effectiveKbIds, rewritten, limit, true);
+            default -> throw new IllegalArgumentException("未知独立三路评测变体: " + variant);
+        };
     }
 
     @Override
@@ -274,6 +298,118 @@ public class RagServiceImpl implements RagService {
     }
 
     private List<RagRetrievalResult> retrieveWithPlan(List<String> kbIds, QueryRewriteResult rewritten, int limit) {
+        return retrieveWithPlan(kbIds, rewritten, limit, true);
+    }
+
+    private List<RagRetrievalResult> retrieveWithPlan(
+            List<String> kbIds,
+            QueryRewriteResult rewritten,
+            int limit,
+            boolean includeExpandedQuery
+    ) {
+        String originalQuery = rewritten.getQuery();
+        String normalizedOriginalQuery = normalize(originalQuery);
+        Map<String, String> embeddingLiteralCache = new LinkedHashMap<>();
+
+        int scopeMultiplier = scopeMultiplier(kbIds.size());
+        int vectorCandidateLimit = scaledCandidateLimit(Math.max(limit, RERANK_CANDIDATE_LIMIT), scopeMultiplier);
+        int titleMatchCandidateLimit = scaledCandidateLimit(TITLE_MATCH_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleContainsCandidateLimit = scaledCandidateLimit(TITLE_CONTAINS_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleKeywordCandidateLimit = scaledCandidateLimit(TITLE_KEYWORD_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleTrigramCandidateLimit = scaledCandidateLimit(TITLE_TRIGRAM_CANDIDATE_LIMIT, scopeMultiplier);
+        int titleFullTextCandidateLimit = scaledCandidateLimit(TITLE_FULL_TEXT_CANDIDATE_LIMIT, scopeMultiplier);
+        int contentFullTextCandidateLimit = scaledCandidateLimit(CONTENT_FULL_TEXT_CANDIDATE_LIMIT, scopeMultiplier);
+        int sparseCandidateBudget = sparseCandidateBudget(
+                rewritten.isTitleQuery(),
+                titleMatchCandidateLimit,
+                titleContainsCandidateLimit,
+                titleKeywordCandidateLimit,
+                titleTrigramCandidateLimit,
+                titleFullTextCandidateLimit,
+                contentFullTextCandidateLimit
+        );
+
+        RetrievalContext normalizedContext = normalizeContext(rewritten.getContext(), rewritten.getContextApplyMode());
+        List<String> candidateKbIds = scopedKbIds(kbIds, normalizedContext);
+        if (candidateKbIds.isEmpty()) {
+            return List.of();
+        }
+        String originalQueryEmbedding = embeddingLiteral(
+                embeddingLiteralCache,
+                StringUtils.hasText(originalQuery) ? originalQuery : normalizedOriginalQuery
+        );
+        List<RagRetrievalResult> denseOriginal = fuseBranch(List.of(
+                retrievalChannel(
+                        "dense-original",
+                        "vector",
+                        "original",
+                        findVectorCandidates(
+                                candidateKbIds,
+                                originalQueryEmbedding,
+                                normalizedContext,
+                                vectorCandidateLimit
+                        ),
+                        true
+                )
+        ), vectorCandidateLimit);
+        List<RagRetrievalResult> sparseOriginal = fuseBranch(sparseChannels(
+                "sparse-original",
+                "original",
+                candidateKbIds,
+                normalizedOriginalQuery,
+                originalQueryEmbedding,
+                rewritten.isTitleQuery(),
+                normalizedContext,
+                titleMatchCandidateLimit,
+                titleContainsCandidateLimit,
+                titleKeywordCandidateLimit,
+                titleTrigramCandidateLimit,
+                titleFullTextCandidateLimit,
+                contentFullTextCandidateLimit
+        ), sparseCandidateBudget);
+        List<RagRetrievalResult> expandedQuery = includeExpandedQuery
+                ? retrieveExpandedQueryBranch(
+                rewritten,
+                originalQuery,
+                normalizedOriginalQuery,
+                candidateKbIds,
+                normalizedContext,
+                embeddingLiteralCache,
+                vectorCandidateLimit,
+                titleMatchCandidateLimit,
+                titleContainsCandidateLimit,
+                titleKeywordCandidateLimit,
+                titleTrigramCandidateLimit,
+                titleFullTextCandidateLimit,
+                contentFullTextCandidateLimit,
+                vectorCandidateLimit
+        )
+                : List.of();
+
+        List<RetrievalChannel> branches = new ArrayList<>();
+        addBranch(branches, "dense-original", denseOriginal);
+        addBranch(branches, "sparse-original", sparseOriginal);
+        addBranch(branches, "expanded-query", expandedQuery);
+        List<RagRetrievalResult> candidates = rrfFuseByRank(branches);
+
+        if (normalizedContext.applyMode() == QueryRewriteResult.ContextApplyMode.HARD) {
+            candidates = filterByContext(candidates, normalizedContext);
+        }
+
+        List<RagRetrievalResult> finalResults = disableRerank
+                ? candidates
+                : rerank(normalizedOriginalQuery, normalizedContext, candidates);
+
+        return finalResults.stream()
+                .limit(limit)
+                .toList();
+    }
+
+    private List<RagRetrievalResult> retrieveCurrentFlat(
+            List<String> kbIds,
+            QueryRewriteResult rewritten,
+            int limit
+    ) {
         String originalQuery = rewritten.getQuery();
         String normalizedOriginalQuery = normalize(originalQuery);
         List<String> retrievalQueries = disableQueryExpansion
@@ -304,10 +440,9 @@ public class RagServiceImpl implements RagService {
         List<RetrievalChannel> channels = new ArrayList<>();
         for (int i = 0; i < retrievalQueries.size(); i++) {
             String retrievalQuery = retrievalQueries.get(i);
-            String querySource = retrievalQuerySources.get(i);
             String queryEmbedding = embeddingLiteral(embeddingLiteralCache, retrievalQuery);
             channels.add(new RetrievalChannel(
-                    "vector_" + querySource,
+                    "vector_" + retrievalQuerySources.get(i),
                     annotateVectorCandidates(findVectorCandidates(
                             candidateKbIds,
                             queryEmbedding,
@@ -320,7 +455,6 @@ public class RagServiceImpl implements RagService {
                 embeddingLiteralCache,
                 StringUtils.hasText(originalQuery) ? originalQuery : normalizedOriginalQuery
         );
-
         List<RagRetrievalResult> titleCandidates = rewritten.isTitleQuery()
                 ? findTitleExactCandidates(
                 candidateKbIds,
@@ -364,35 +498,20 @@ public class RagServiceImpl implements RagService {
                 contentFullTextCandidateLimit
         );
 
-        if (!titleCandidates.isEmpty()) {
-            channels.add(new RetrievalChannel("title_exact", titleCandidates));
-        }
-        if (!titleContainsCandidates.isEmpty()) {
-            channels.add(new RetrievalChannel("title_contains", titleContainsCandidates));
-        }
-        if (!titleKeywordCandidates.isEmpty()) {
-            channels.add(new RetrievalChannel("title_keyword", titleKeywordCandidates));
-        }
-        if (!titleTrigramCandidates.isEmpty()) {
-            channels.add(new RetrievalChannel("title_trigram", titleTrigramCandidates));
-        }
-        if (!titleBm25Candidates.isEmpty()) {
-            channels.add(new RetrievalChannel("title_bm25", titleBm25Candidates));
-        }
-        if (!contentBm25Candidates.isEmpty()) {
-            channels.add(new RetrievalChannel("content_bm25", contentBm25Candidates));
-        }
+        addChannel(channels, new RetrievalChannel("title_exact", titleCandidates));
+        addChannel(channels, new RetrievalChannel("title_contains", titleContainsCandidates));
+        addChannel(channels, new RetrievalChannel("title_keyword", titleKeywordCandidates));
+        addChannel(channels, new RetrievalChannel("title_trigram", titleTrigramCandidates));
+        addChannel(channels, new RetrievalChannel("title_bm25", titleBm25Candidates));
+        addChannel(channels, new RetrievalChannel("content_bm25", contentBm25Candidates));
 
         List<RagRetrievalResult> candidates = rrfFuse(channels);
-
         if (normalizedContext.applyMode() == QueryRewriteResult.ContextApplyMode.HARD) {
             candidates = filterByContext(candidates, normalizedContext);
         }
-
         List<RagRetrievalResult> finalResults = disableRerank
                 ? candidates
                 : rerank(normalizedOriginalQuery, normalizedContext, candidates);
-
         return finalResults.stream()
                 .limit(limit)
                 .toList();
@@ -627,6 +746,17 @@ public class RagServiceImpl implements RagService {
     }
 
     private List<RagRetrievalResult> rrfFuse(List<RetrievalChannel> channels) {
+        return rrfFuse(channels, true);
+    }
+
+    private List<RagRetrievalResult> rrfFuseByRank(List<RetrievalChannel> channels) {
+        return rrfFuse(channels, false);
+    }
+
+    private List<RagRetrievalResult> rrfFuse(
+            List<RetrievalChannel> channels,
+            boolean usePrimaryDistanceTieBreak
+    ) {
         if (channels.isEmpty()) {
             return List.of();
         }
@@ -651,12 +781,15 @@ public class RagServiceImpl implements RagService {
             }
         }
 
+        Comparator<RagRetrievalResult> comparator = Comparator
+                .comparing((RagRetrievalResult result) -> result.getRrfScore(), Comparator.nullsLast(Double::compareTo))
+                .reversed();
+        if (usePrimaryDistanceTieBreak) {
+            comparator = comparator.thenComparing(this::primaryDistance, Comparator.nullsLast(Double::compareTo));
+        }
+        comparator = comparator.thenComparing(result -> result.getChunkId(), Comparator.nullsLast(String::compareTo));
         List<RagRetrievalResult> fused = mergedByChunkId.values().stream()
-                .sorted(Comparator
-                        .comparing((RagRetrievalResult result) -> result.getRrfScore(), Comparator.nullsLast(Double::compareTo))
-                        .reversed()
-                        .thenComparing(this::primaryDistance, Comparator.nullsLast(Double::compareTo))
-                        .thenComparing(result -> result.getChunkId(), Comparator.nullsLast(String::compareTo)))
+                .sorted(comparator)
                 .toList();
 
         for (int i = 0; i < fused.size(); i++) {
@@ -684,7 +817,11 @@ public class RagServiceImpl implements RagService {
                 if (existing == null) {
                     RagRetrievalResult copy = copyResult(incoming);
                     copy.setRank(incomingRank);
-                    existing = new GroupedRetrieval(copy, incomingRank, new LinkedHashSet<>());
+                    existing = new GroupedRetrieval(
+                            copy,
+                            incomingRank,
+                            retrievalProvenance(incoming, channel.name())
+                    );
                     groupResults.put(incoming.getChunkId(), existing);
                 } else {
                     mergeSignals(existing.result(), incoming);
@@ -692,8 +829,8 @@ public class RagServiceImpl implements RagService {
                         existing.result().setRank(incomingRank);
                         existing.setBestRank(incomingRank);
                     }
+                    existing.provenance().addAll(retrievalProvenance(incoming, channel.name()));
                 }
-                existing.provenance().add(channel.name());
             }
         }
         return grouped.entrySet().stream()
@@ -707,6 +844,235 @@ public class RagServiceImpl implements RagService {
                                 .toList()
                 ))
                 .toList();
+    }
+
+    private LinkedHashSet<String> retrievalProvenance(RagRetrievalResult result, String fallback) {
+        LinkedHashSet<String> provenance = new LinkedHashSet<>();
+        if (result.getRetrievalProvenance() != null) {
+            provenance.addAll(result.getRetrievalProvenance());
+        }
+        if (provenance.isEmpty()) {
+            provenance.add(fallback);
+        }
+        return provenance;
+    }
+
+    private List<RagRetrievalResult> retrieveExpandedQueryBranch(
+            QueryRewriteResult rewritten,
+            String originalQuery,
+            String normalizedOriginalQuery,
+            List<String> kbIds,
+            RetrievalContext context,
+            Map<String, String> embeddingLiteralCache,
+            int vectorCandidateLimit,
+            int titleMatchCandidateLimit,
+            int titleContainsCandidateLimit,
+            int titleKeywordCandidateLimit,
+            int titleTrigramCandidateLimit,
+            int titleFullTextCandidateLimit,
+            int contentFullTextCandidateLimit,
+            int branchCandidateBudget
+    ) {
+        List<RetrievalChannel> queryBranches = new ArrayList<>();
+        List<ExpandedQuery> expandedQueries = expandedQueries(rewritten, originalQuery, normalizedOriginalQuery);
+        for (int i = 0; i < expandedQueries.size(); i++) {
+            ExpandedQuery expandedQuery = expandedQueries.get(i);
+            String normalizedQuery = normalize(expandedQuery.query());
+            String queryEmbedding = embeddingLiteral(embeddingLiteralCache, expandedQuery.query());
+            List<RetrievalChannel> queryChannels = new ArrayList<>();
+            addChannel(queryChannels, retrievalChannel(
+                    "expanded-query",
+                    "vector",
+                    expandedQuery.source(),
+                    findVectorCandidates(kbIds, queryEmbedding, context, vectorCandidateLimit),
+                    true
+            ));
+            queryChannels.addAll(sparseChannels(
+                    "expanded-query",
+                    expandedQuery.source(),
+                    kbIds,
+                    normalizedQuery,
+                    queryEmbedding,
+                    rewritten.isTitleQuery(),
+                    context,
+                    titleMatchCandidateLimit,
+                    titleContainsCandidateLimit,
+                    titleKeywordCandidateLimit,
+                    titleTrigramCandidateLimit,
+                    titleFullTextCandidateLimit,
+                    contentFullTextCandidateLimit
+            ));
+            List<RagRetrievalResult> queryResults = fuseBranch(queryChannels);
+            addBranch(queryBranches, "expanded-query-query-" + i, queryResults);
+        }
+        return fuseBranch(queryBranches, branchCandidateBudget);
+    }
+
+    private List<ExpandedQuery> expandedQueries(
+            QueryRewriteResult rewritten,
+            String originalQuery,
+            String normalizedOriginalQuery
+    ) {
+        if (disableQueryExpansion
+                || rewritten.getRetrievalQueries() == null
+                || rewritten.getRetrievalQueries().isEmpty()
+                || rewritten.getRetrievalQuerySources() == null
+                || rewritten.getRetrievalQuerySources().size() != rewritten.getRetrievalQueries().size()) {
+            return List.of();
+        }
+        Map<String, ExpandedQuery> uniqueQueries = new LinkedHashMap<>();
+        for (int i = 0; i < rewritten.getRetrievalQueries().size(); i++) {
+            String query = rewritten.getRetrievalQueries().get(i);
+            String source = rewritten.getRetrievalQuerySources().get(i);
+            String normalizedQuery = normalize(query);
+            if (!StringUtils.hasText(query)
+                    || !isExpandedQuerySource(source)
+                    || normalizedQuery.equals(normalizedOriginalQuery)
+                    || query.equals(originalQuery)) {
+                continue;
+            }
+            uniqueQueries.putIfAbsent(normalizedQuery, new ExpandedQuery(query, source.trim()));
+        }
+        return List.copyOf(uniqueQueries.values());
+    }
+
+    private boolean isExpandedQuerySource(String source) {
+        return StringUtils.hasText(source)
+                && ("standalone".equalsIgnoreCase(source.trim()) || "llm".equalsIgnoreCase(source.trim()));
+    }
+
+    private int sparseCandidateBudget(
+            boolean titleQuery,
+            int titleMatchCandidateLimit,
+            int titleContainsCandidateLimit,
+            int titleKeywordCandidateLimit,
+            int titleTrigramCandidateLimit,
+            int titleFullTextCandidateLimit,
+            int contentFullTextCandidateLimit
+    ) {
+        if (!titleQuery) {
+            return contentFullTextCandidateLimit;
+        }
+        return titleMatchCandidateLimit
+                + titleContainsCandidateLimit
+                + titleKeywordCandidateLimit
+                + titleTrigramCandidateLimit
+                + titleFullTextCandidateLimit
+                + contentFullTextCandidateLimit;
+    }
+
+    private List<RetrievalChannel> sparseChannels(
+            String branch,
+            String querySource,
+            List<String> kbIds,
+            String normalizedQuery,
+            String queryEmbedding,
+            boolean titleQuery,
+            RetrievalContext context,
+            int titleMatchCandidateLimit,
+            int titleContainsCandidateLimit,
+            int titleKeywordCandidateLimit,
+            int titleTrigramCandidateLimit,
+            int titleFullTextCandidateLimit,
+            int contentFullTextCandidateLimit
+    ) {
+        List<RetrievalChannel> channels = new ArrayList<>();
+        if (titleQuery) {
+            addChannel(channels, retrievalChannel(
+                    branch,
+                    "title-exact",
+                    querySource,
+                    findTitleExactCandidates(kbIds, normalizedQuery, queryEmbedding, context, titleMatchCandidateLimit),
+                    false
+            ));
+            addChannel(channels, retrievalChannel(
+                    branch,
+                    "title-contains",
+                    querySource,
+                    findTitleContainsCandidates(kbIds, normalizedQuery, context, titleContainsCandidateLimit),
+                    false
+            ));
+            addChannel(channels, retrievalChannel(
+                    branch,
+                    "title-keyword",
+                    querySource,
+                    findTitleKeywordCandidates(kbIds, normalizedQuery, context, titleKeywordCandidateLimit),
+                    false
+            ));
+            addChannel(channels, retrievalChannel(
+                    branch,
+                    "title-trigram",
+                    querySource,
+                    findTitleTrigramCandidates(kbIds, normalizedQuery, context, titleTrigramCandidateLimit),
+                    false
+            ));
+            addChannel(channels, retrievalChannel(
+                    branch,
+                    "title-bm25",
+                    querySource,
+                    findTitleBm25Candidates(kbIds, normalizedQuery, context, titleFullTextCandidateLimit),
+                    false
+            ));
+        }
+        addChannel(channels, retrievalChannel(
+                branch,
+                "content-bm25",
+                querySource,
+                findContentBm25Candidates(kbIds, normalizedQuery, context, contentFullTextCandidateLimit),
+                false
+        ));
+        return channels;
+    }
+
+    private RetrievalChannel retrievalChannel(
+            String branch,
+            String channel,
+            String querySource,
+            List<RagRetrievalResult> candidates,
+            boolean vectorChannel
+    ) {
+        String provenance = branch + ":" + channel + ":" + querySource;
+        List<RagRetrievalResult> results = candidates == null
+                ? List.of()
+                : candidates.stream()
+                .filter(candidate -> StringUtils.hasText(candidate.getChunkId()))
+                .map(this::copyResult)
+                .peek(candidate -> {
+                    if (vectorChannel) {
+                        candidate.setVectorRank(candidate.getRank());
+                        candidate.setVectorDistance(candidate.getDistance());
+                    }
+                    candidate.setRetrievalProvenance(List.of(provenance));
+                })
+                .toList();
+        return new RetrievalChannel(provenance, results);
+    }
+
+    private void addChannel(List<RetrievalChannel> channels, RetrievalChannel channel) {
+        if (!channel.results().isEmpty()) {
+            channels.add(channel);
+        }
+    }
+
+    private void addBranch(List<RetrievalChannel> branches, String branch, List<RagRetrievalResult> results) {
+        if (!results.isEmpty()) {
+            branches.add(new RetrievalChannel(branch, results));
+        }
+    }
+
+    private List<RagRetrievalResult> fuseBranch(List<RetrievalChannel> channels) {
+        return fuseBranch(channels, Integer.MAX_VALUE);
+    }
+
+    private List<RagRetrievalResult> fuseBranch(List<RetrievalChannel> channels, int candidateBudget) {
+        List<RagRetrievalResult> results = rrfFuseByRank(channels);
+        List<RagRetrievalResult> cappedResults = results.stream()
+                .limit(candidateBudget)
+                .toList();
+        for (RagRetrievalResult result : cappedResults) {
+            result.setRrfScore(null);
+        }
+        return cappedResults;
     }
 
     private String retrievalGroup(String channelName) {
@@ -1374,6 +1740,12 @@ public class RagServiceImpl implements RagService {
     private record RetrievalChannel(
             String name,
             List<RagRetrievalResult> results
+    ) {
+    }
+
+    private record ExpandedQuery(
+            String query,
+            String source
     ) {
     }
 
