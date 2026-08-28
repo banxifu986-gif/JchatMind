@@ -100,6 +100,133 @@ JSONB `allowedKbs` 已从 `agent` 持久化模型移除，不能作为授权或�
 
 两个基准分别出报告并与同一配置下的 G0 fixture、G2 pre-BM25 基线和当前 VectorChord 链路对比；不做跨数据集平均，不以单一 Recall 数值宣称 G2 已完成。mMARCO 主要支撑公开多语言检索能力的横向比较，CRUD-RAG 主要支撑中文 RAG 任务覆盖；二者都不能替代本项目的 owner/Agent/会话授权、拒答、动态更新一致性和引用准确性冻结集。
 
+#### 3.3.2 本机 mMARCO 中文抽样与 BGE rerank 对比计划（2026-08-25）
+
+本轮先在本机执行 `mMARCO-zh-sampled` 诊断评测，目标是验证当前 `BGE-M3 embedding + VectorChord BM25 + RRF` 链路接入 TEI `BAAI/bge-reranker-v2-m3` 后的增益与延迟代价。该数据集不加载全量 mMARCO collection，结果只能用于本项目回归和 rerank 选型，报告不得写成全量 mMARCO 官方分数。全量官方基准仍按本节原有契约在 GPU 评测节点执行。
+
+**2026-08-26 实现与交接状态。** 本轮已完成测试作用域的本地评测工具：`MmarcoZhSampledDatasetFreezer` 直接读取四份 TSV 输入并冻结 query、gold、官方 hard negative 和固定随机干扰；manifest 固定记录 zh 语言、上游 revision `6d039c4638c0ba3e46a9cb7b498b145e7edc6230`、四份输入 SHA-256、预处理和映射版本。首次 `mmarco-zh-sampled-v1` 的 49,691 candidate 导入未产生报告：单条请求触发 30 秒上限，后续批量请求又暴露默认 256 KiB 解码上限，均在 JDBC 写入前失败或停止，不得参与比较。`mmarco-zh-sampled-v2` 保留同一 300 query（development 200、untouched test 100）、全部 316 qrels positive、每 query 1 条官方 verified hard negative 与 20,000 条固定 distractor，共 20,616 candidate；该候选选择不同于 v1，故独立 datasetVersion，不能与 v1 尝试混用。v2 在本机 CPU 上以每批 64 条导入时，候选 embedding 预计耗时约 19 小时，未产生报告。当前执行版本为 `mmarco-zh-sampled-v3-local-diagnostic`：保留同一 revision、四份输入 SHA-256、300 query 划分、316 qrels positive、300 official hard negative、随机种子和 mappingVersion，只将固定 distractor 降为 500，得到 1,116 candidate，并将导入 batch 降为 8。v3 是本机 CPU 受限的可复现 rerank 诊断例外，不满足常规 20,000-50,000 candidate 规模；它只允许在相同 v3 manifest、embedding、BM25/RRF、Top-K、超时和有效 query 分母上比较 A/B/C，不能与 v1/v2、全量 mMARCO 或候选规模不同的报告比较绝对检索难度。`MmarcoZhSampledIsolatedImporter` / `MmarcoZhSampledManifestImporter` 将冻结候选写入 `rag-eval` 隔离库；`MmarcoZhSampledRuntimeReplayRunner`、`MmarcoZhSampledReplayCollector`、`MmarcoZhSampledEvaluator`、`MmarcoZhSampledReportWriter` 与 `MmarcoZhSampledEvaluationRunner` 负责真实检索 replay、指标、`C - B` bootstrap 和逐 query rank 报告。候选导入使用 `MmarcoZhSampledOllamaBatchEmbedder` 保留输入/向量位置一一对应并拒绝不完整响应；它的 300 秒导入专用超时、4 MiB 解码上限与批大小均写入运行 `configSha`，不改变检索或 TEI 超时。`MmarcoZhSampledManifestImporter` 在同一显式 JDBC 事务内逐批 embedding、BM25 投影和写入，任一失败整体回滚。显式开启的 `MmarcoZhSampledRuntimeEvaluationTest` 在同一隔离索引上随机顺序运行 A/B/C 各两次，默认 development split；它在 TEI 调用前校验 50 个唯一候选/分数，并从 `RagServiceImpl` 的回退日志将 C 臂 query 标记为 `invalid_tei_fallback`。该测试默认跳过，避免常规单测访问数据库。它们均不构成生产接口，也不调用 Python `mmarco.py`；后者只是上游 Hugging Face 数据集加载说明，不能作为 Java 评测运行时依赖。
+
+**2026-08-28 50 条 development 运行记录。** v3 的 300 条 query 是冻结池（development 200、untouched test 100），本机每次实际 A/B/C 执行固定只使用其中同一份 50 条 development query，后续不扩样本。三臂使用同一 `querySetSha256`、`candidateManifestSha256`、`configSha256`、Top-K `10` 和候选预算 `50`，各有 50 条有效 replay、无重复 query。A `RRF only` 的 `Recall@1/10`、`MRR@10`、`nDCG@10`、p95 分别为 `0.5400/0.9400`、`0.7267`、`0.7814`、`4,297ms`；B 本地规则 rerank 为 `0.5200/0.9600`、`0.7208`、`0.7809`、`4,767ms`；C TEI BGE 为 `0.8200/1.0000`、`0.9050`、`0.9308`、`285,816ms`。C 的 TEI 成功率为 `1.0` 且无回退，B/C 的 1,000 次 bootstrap 差值为 MRR `+0.18417`（95% CI `[+0.09333,+0.27917]`）和 nDCG `+0.14996`（95% CI `[+0.07927,+0.22318]`）。质量提升明确，但 C 的 p95 远超 B 的 15% 延迟门禁，汇总报告状态为 `inconclusive`；默认 `rag.rerank.enabled` 和 R0 检索结构均保持不变。原始报告为 `backend_v2/target/rag-eval/external/mmarco-zh-sampled-v3-local-diagnostic/tei-serial-batches-v1/mmarco-zh-sampled-v3-local-diagnostic-retrieval-ab.json`，只代表本机 CPU 受限的 v3 诊断，不代表全量 mMARCO 分数。
+
+##### v3 本机 50 条诊断：完整过程、条数含义与留档（2026-08-28）
+
+本记录解释各处“条数”的对象，避免把 query 数、候选 passage 数和 rerank 输入数混在一起。这里的 `passage` 是 mMARCO collection 的一条原始检索文本；为保持 qrels 对齐，它在本评测中一对一成为一个 document/chunk，不做 Markdown/PDF 式的数据清洗或二次切块。
+
+| 名称 | 固定数量 | 本次含义 |
+| --- | ---: | --- |
+| 上游输入 | 4 个 TSV | 中文 collection、queries、qrels、官方 BM25 run；固定 revision 为 `6d039c4638c0ba3e46a9cb7b498b145e7edc6230`，四份 SHA-256 已写入 manifest。 |
+| 冻结 query 池 | 300 条 query | 这是题目池，不是一次运行的样本数；development 200 条、untouched test 100 条，ID 不重叠。 |
+| 本次 A/B/C 样本 | 50 条 development query | “50 条评测”指 50 个问题。三臂复用同一 `querySetSha256`，后续本机运行不得扩样本；untouched test 尚未运行。 |
+| 冻结候选库 | 1,116 条 passage/chunk | `316` 条 qrels 正例 + `300` 条官方 hard negative + `500` 条固定随机干扰，合并去重后得到。每个 query 均在同一已导入索引中检索这些候选。 |
+| B/C rerank 输入 | 每个 query 前 50 条候选 | 向量/BM25/RRF 先在 1,116 条候选库中检索；全局 RRF 前 50 才交给本地规则或 TEI，不是“50 条 query”。A 不执行 rerank。 |
+| 指标输出 | 每个 query 前 10 条 | `Recall@1/3/5/10`、`MRR@10`、`nDCG@10` 和 ID-based Context Precision/Recall 都基于最终 Top-10。 |
+| TEI C 臂请求 | 100 次 rerank | 50 条 query 的 C 臂独立运行两次，故为 `50 x 2`；A、B、C 均各保留两次运行产物，执行顺序文件记录随机顺序。 |
+
+实际执行顺序如下：
+
+1. 先修复冻结器输入哈希校验和 `RagEvalTestConfig` 中缺少 `VchordBm25QueryService` 的基线问题；未通过前不导入候选库、不写质量结论。
+2. 物化四个 Git LFS 输入，核对上游 revision、LFS OID、文件 SHA-256、语言 `zh` 和官方 run；LFS pointer、缺失文件或哈希不符都会在冻结前以 `blocked_input_integrity` 停止。
+3. 以固定随机种子冻结 300 个带 qrels 的 query，并按上表规则产生 v3 的 1,116 条唯一 passage。每条 passage 的逻辑 ID 固定为 `mmarco:zh:<passageId>`，runtime UUID 为该逻辑 ID UTF-8 字节的 `UUID.nameUUIDFromBytes(...)`；metadata 保存 dataset、manifest、映射、passage 和来源类型。
+4. 仅向 `127.0.0.1:55432/jchatmind_rag_eval` 的隔离评测命名空间导入；导入器在显式 JDBC 事务内按批 embedding、写入和建立 BM25 投影，任何批次失败整体回滚，不写入业务库或生产索引。
+5. 在 C 臂前执行 TEI `/rerank` 健康检查，要求 50 个输入候选得到 50 个唯一索引和非空分数。运行中任何 TEI 超时、HTTP/解析错误、重复/缺失索引或本地回退都会将整条 C replay 标为 `invalid_tei_fallback`，并使 C 臂无效。
+6. 对同一 50 个 development query 随机顺序运行 A `RRF only`、B 本地规则 rerank、C TEI `BAAI/bge-reranker-v2-m3` rerank，各独立两次；query expansion 关闭，embedding、BM25/RRF、Top-K、候选预算和超时一致。六份逐 query replay 与执行顺序文件保留在 `tei-serial-batches-v1`；汇总报告按 runner 固定规则使用第 2 次执行，首轮产物仍保留用于审计。
+7. 仅在相同有效 query 分母上计算检索指标、ID-based Context Precision/Recall、p50/p95 和逐 query 排名变化；B/C 使用 1,000 次逐 query `C - B` bootstrap 计算 `MRR@10` 与 `nDCG@10` 的 95% CI。本轮没有生成回答或调用 LLM judge，故没有把 ID-based 指标冒充为 Faithfulness、Response Relevancy 或 Answer Correctness。
+
+| 实验臂 | 有效 query | Recall@1/3/5/10 | MRR@10 | nDCG@10 | ID-based CP/CR | p50 / p95 |
+| --- | ---: | --- | ---: | ---: | --- | --- |
+| A：RRF only | 50 | `.54/.90/.94/.94` | `.7267` | `.7814` | `.7250/.94` | `3,857 / 4,297ms` |
+| B：本地规则 rerank | 50 | `.52/.92/.94/.96` | `.7208` | `.7809` | `.7175/.96` | `4,156 / 4,767ms` |
+| C：TEI BGE rerank | 50 | `.82/.98/1.00/1.00` | `.9050` | `.9308` | `.9067/1.00` | `237,387 / 285,816ms` |
+
+C 臂 `teiSuccessRate=1.0`、无 fallback；相对 B 的 bootstrap 差值为 MRR `+0.18417`（95% CI `[+0.09333,+0.27917]`）和 nDCG `+0.14996`（95% CI `[+0.07927,+0.22318]`）。这说明 BGE rerank 的排序质量增益为正，但 p95 约为 B 的 60 倍，远超 15% 延迟门禁；结论严格为 `inconclusive`，不得默认开启 TEI。B 对 A 只有 Recall@10 的小幅提升，MRR/nDCG 略低，也不足以支持默认开启本地规则 rerank。
+
+本次证据链由 v3 manifest、六份 replay、执行顺序文件、汇总报告和定向单测组成；报告的 `sampleSize=50`、`candidateBudget=50`、`topK=10`、`querySetSha256`、`candidateManifestSha256`、`sourceSha256`、`configSha256` 与 mappingVersion 必须同时一致才可比较。它只证明本机 CPU 上该固定 v3 子集的诊断结果，不代表全量 mMARCO、未运行的 untouched test，或生产默认开关。
+
+每个 passage 的逻辑 ID 固定为 `mmarco:zh:<passageId>`，运行时 chunk ID 固定为该逻辑 ID 的 UTF-8 `UUID.nameUUIDFromBytes(...)` 结果。导入器显式写入该 UUID，因为现有 `ChunkBgeM3Mapper.insert` 不会保留调用方设置的 `id`；一条原始 passage 仍只导入一个 document/chunk，不二次切块。candidate metadata 必须包含 `datasetVersion`、`candidateManifestSha256`、`mappingVersion`、`logicalChunkId`、`passageId` 和 `candidateSourceType`。
+
+本机上游 clone 位于 `datasets/mmarco`，其 `HEAD` 已核对为固定 revision `6d039c4638c0ba3e46a9cb7b498b145e7edc6230`。中文 collection、queries、qrels 与 BM25 run 在该 revision 中均为 Git LFS 对象；只有 LFS 对象已完整物化、内容 SHA-256 与 LFS OID 对应、并写入 manifest 后，才视为可用输入。LFS 指针、未完成传输、无 source SHA-256 manifest 或认证失败均为前置门禁失败，不得导入、运行 A/B/C 或写质量结论。不得将 Token、代理地址、认证 URL 或任何凭据写入 Git 配置、报告、文档或命令日志。固定 revision 的 README 声明 Apache-2.0，而仓库 `LICENSE` 文件为 CC-BY-4.0；开始任何再分发前必须连同 mMARCO/MS MARCO 上游条款复核这一差异。
+
+**v1/v2 历史交接记录（不再作为当前执行指令）。** 以下四项说明 v1/v2 为什么没有形成报告；受本机 CPU 约束，当前不再执行 v2 的 20,616 候选导入或扩大 query 样本。当前可审计执行基线是上文的 v3、50 条 development query 和 1,116 条候选库。
+
+1. 完成四个 LFS 对象的本地物化，并验证对象 OID、文件大小和 SHA-256；不得以 LFS 指针作为 TSV 输入。
+2. 将已验证的四份原始输入复制到独立评测输入目录；原 clone 工作树状态异常时，不重置、覆盖或依赖该工作树 checkout，应从已验证的本地 LFS 对象物化副本。
+3. 运行冻结器生成当前 `mMARCO-zh-sampled-v2` manifest，核验 300 条 query、development/untouched test 不重叠、全部 gold、每 query 至少一条官方 hard negative 与 20,000 条固定随机干扰。
+4. 仅连接 `127.0.0.1:55432/jchatmind_rag_eval` 导入候选；完成 50 候选 TEI 健康检查后，按同一冻结输入运行 A/B/C。mMARCO 自然 query 不得用于 TC-G2-10 的 R2 结论，三路结构消融仍须使用项目内含非原问 replay 的冻结 follow-up 集。
+
+执行前置条件：先修复冻结 corpus 校验和 RAG 评测 TestConfig 中缺少 `VchordBm25QueryService` 的既有失败；下载前记录 zh 语言 collection、query、qrels 和可用官方 run 输入的精确 SHA-256；TEI `/rerank` 健康检查必须返回与输入候选等长、索引完整且分数非空的结果。任一前置条件不满足时只记录阻塞原因，不输出质量结论。
+
+实际 v3 运行只连接 `127.0.0.1:55432/jchatmind_rag_eval`，以 `rag.eval.mmarco.enabled=true` 显式启动 `MmarcoZhSampledRuntimeEvaluationTest`；该测试先冻结/导入，再生成六份 replay、执行顺序文件和 `mmarco-zh-sampled-v3-local-diagnostic-retrieval-ab.json`。本轮只运行 development 的固定 50 条 query；untouched test 未运行，且不得把未运行的 test split 推断为质量结论。
+
+数据与索引按以下规则冻结：
+
+1. 从已登记版本的 zh 语言评测 split 中，以公开写入 manifest 的随机种子抽取 300 条带 qrels 的查询；development 与 untouched test 使用不同种子和不重叠 query ID。若上游只提供一个可用 split，必须在报告中声明这是固定本地切分，不能标称官方 dev/test。
+2. 候选语料包含每条查询的全部 qrels 正例、每条最多 100 条来自已校验官方 run 或可复现 BM25 run 的 hard negative，以及 20,000 条固定随机干扰 passage。去重后目标规模为 20,000 至 50,000 passage；run 输入不可获得时不得以未记录来源的启发式候选替代 hard negative。
+3. 每个 passage 映射为一个隔离的评测 document/chunk，逻辑 ID 固定为 `mmarco:zh:<passageId>`，不执行会改变 qrels 对齐关系的二次分块。candidate manifest 必须记录 query ID、passage ID、来源类别、语言、选择规则、随机种子和所有输入/输出 SHA-256。
+4. 导入一次后复用同一独立 PostgreSQL/VectorChord 库、同一 `bge-m3` embedding、同一 BM25 词典和同一 RRF 参数；任何导入、embedding、索引或映射差异均需建立新数据集版本，不能与旧报告直接比较。
+
+实验固定执行三个臂，顺序随机化且每臂至少独立运行两次：
+
+| 实验臂 | 固定配置 | 目的 |
+| --- | --- | --- |
+| A：RRF only | `rag.eval.disable-rerank=true`、`rag.rerank.enabled=false` | 量化任何 rerank 的总体价值。 |
+| B：本地规则 rerank | `rag.eval.disable-rerank=false`、`rag.rerank.enabled=false` | 当前 TEI 不启用时的生产回退排序基线。 |
+| C：TEI BGE rerank | `rag.eval.disable-rerank=false`、`rag.rerank.enabled=true`，TEI 使用 `BAAI/bge-reranker-v2-m3` | 主对比臂，验证模型对 RRF 前 50 个候选的重排效果。 |
+
+三臂使用相同 query、KB 范围、Top-K、超时、embedding、BM25/RRF 参数和 query rewrite 设置；主对比默认关闭 query expansion，消除模型改写随机性。需要代表完整链路时，另建确认性运行并冻结每条查询的改写结果，不能将不同改写输出混入 rerank 对比。TEI 超时、HTTP 异常、返回数量/索引不完整或回退到本地规则时，该查询在 C 臂标记 `invalid_tei_fallback`，整臂不得宣称 BGE 优于 B；修复服务后必须完整重跑 C 臂。
+
+每臂必须分别报告 `Recall@1/3/5/10`、`MRR@10`、`nDCG@10`、RAGAS `IDBasedContextPrecision` / `IDBasedContextRecall`、p50/p95 单查询延迟、TEI 调用成功率及每条 query 的 rank 变化。以 B 与 C 的逐查询差值做 1,000 次 bootstrap 置信区间；只有 `nDCG@10` 与 `MRR@10` 的点估计均不下降、p95 增幅不超过现有 15% 上限、且 TEI 无回退时，才允许提出“可进入后续全量验证”的结论。A、B、C 结果均为抽样诊断，不自动改变默认 `rag.rerank.enabled`。
+
+端到端 RAGAS 另从 untouched test 抽取 100 条固定样本，使用同一回答模型、temperature=0、相同检索上下文和独立的 judge 配置计算 Faithfulness 与 Response Relevancy。mMARCO qrels 不提供答案正确性 gold，因此这两项只能说明回答对上下文和问题的支持程度，不能替代人工 Answer Correctness。检索报告与 judge 报告分开落盘到 `backend_v2/target/rag-eval/external/mmarco-zh-sampled-<version>-retrieval-ab.json` 与 `backend_v2/target/rag-eval/external/mmarco-zh-sampled-<version>-ragas-ab.json`；每份报告都要包含数据版本、输入 SHA-256、模型/服务版本、配置哈希、样本数、有效/无效样本和失效原因。
+
+#### 3.3.3 独立三路召回实施与结构消融记录（G2-3b）
+
+本轮把“Dense 向量、Sparse 词法/BM25、Multi-Query”从平铺通道重构为三个独立分支，而不是把每个改写 query 当作额外 RRF 票。第一阶段不新增依赖、数据库 schema、索引 provider 或高扇出 query 生成器，复用当前 VectorChord-bm25、pgvector、受控 standalone/LLM rewrite、权限范围和 rerank 预算。设计细节以架构文档 `4.4.1` 为准。
+
+已执行的 G2-3b 落地顺序如下：
+
+1. 先恢复冻结 corpus 校验和 RAG TestConfig 的既有失败；未 GREEN 前不修改检索策略，也不生成新的质量结论。
+2. 在 development split 先完成分支内 rank 融合、chunk 去重、分支 provenance、`HARD` 谓词下推及总候选预算；外层 RRF 只消费三个分支的排名。此阶段关闭 rerank，避免排序器掩盖召回结构差异。
+3. 使用冻结的 query rewrite replay 做结构消融；规则或 LLM 不得在每次运行时重新生成扩展 query。原问始终保留，第三路只使用 replay 中 `source != original` 的 query。
+4. 仅在结构消融选出候选后，才对同一获选链路执行 `3.3.2` 的 A/B/C rerank 诊断；不把 rerank 收益写成三路召回收益。
+
+| 变体 | 分支结构 | query 使用边界 | 目的 |
+| --- | --- | --- | --- |
+| R0：`current-flat` | 当前 `vector_*`、`title_*`、`content_bm25` 分组和 RRF | 使用冻结 replay，保持当前“扩展 query 仅进入向量”的语义 | 可回退基线。 |
+| R1：`two-branch-original` | Dense-original + Sparse-original，外层 RRF | 仅原问；扩展 query 不参与 | 量化原问双路检索的净收益。 |
+| R2：`three-branch-expanded` | Dense-original + Sparse-original + Expanded-query，外层 RRF | 第三路只处理非原问的 standalone/LLM query，分支内可同时检索 dense/sparse | 验证独立 Multi-Query 分支是否有增益。 |
+
+**2026-08-28 真实运行结果。** G2 冻结集使用 9 个 case（7 个可回答、2 个拒答）和 7 个 fixture chunk，在隔离库的真实 MyBatis/VectorChord/BM25/Ollama embedding 链路中运行 R0/R1/R2；rerank 关闭，mMARCO 自然 query 没有混入本结构结论。R0 `current-flat` 的 `Recall@1/10`、`MRR@10`、`nDCG@10`、p95 为 `1.0000/1.0000`、`1.0000`、`1.0000`、`7,487ms`；R1 `two-branch-original` 为 `.7143/1.0000`、`.8571`、`.8946`、`3,873ms`；R2 `three-branch-expanded` 为 `.7143/1.0000`、`.8571`、`.8946`、`7,582ms`。三臂均有 2 个拒答违规、无权限违规；R2 的 MRR/nDCG 低于 R0，且拒答门禁不为零，故结构结论为 `inconclusive`，R0 保持默认。当前 `RagIndependentBranchEvaluator` 还会在生成结果前拒绝三臂输入指纹、gold、拒答标签、Top-K、候选预算或 ranked chunk 去重不一致的比较，避免将 rerank、不同分母或重复 chunk 计分混入三路结论。
+
+R0/R1/R2 必须使用相同的 KB 范围、gold、Top-K、embedding、VectorChord 版本、BM25 词典、`RRF_K`、超时、候选总预算与有效 query 分母。每次报告都记录每个分支的候选数、去重数、命中 gold 的分支、外层 RRF 前后 rank、p50/p95，以及 `Recall@1/3/5/10`、`MRR@10`、`nDCG@10`、无答案误召回和越权结果数。评测输入、replay、配置和报告分别计算 SHA-256。
+
+项目内冻结集必须补足带授权会话上下文的 follow-up、topic switch、标题/正文精确术语、中文/代码、无答案和越权 case；只有非原问扩展 query 占比非零时，R2 才有资格作为三路实验。`mMARCO-zh-sampled` 的自然 query 通常不含会话上下文，若 frozen replay 没有扩展 query，它只能验证 Dense/Sparse/RRF 与 rerank，不能作为第三路收益证据。
+
+通过门槛沿用本计划与 Spec 的性能、安全边界：三个变体的授权和拒答断言必须全绿；R2 必须与 R0 使用同一有效 query 集，且不低于 R0 的 `Recall@5`、`MRR@10`、`nDCG@10`，p95 增幅不超过 15%。development 允许参数选择；untouched test 只允许一次冻结运行。任一门槛失败时保留 R0，并把 R2 报告为 `inconclusive` 或 `rejected`，不得默认启用。
+
+#### 3.3.4 LongMemEval 30 题记忆系统诊断计划（G3，待实施）
+
+LongMemEval 用于诊断用户长期记忆设计，不替代研发知识库的 RAG 冻结集，也不得把 30 题结果表述为完整公开基准成绩。当前主链路是“候选提取 -> 用户确认 -> 长期记忆 -> 语义召回 -> Agent 注入”；因此实验必须区分候选/确认门控与提取、检索、回答能力，不能只报告最终准确率。
+
+执行前从 LongMemEval 官方发布仓库 `https://github.com/xiaowu0162/LongMemEval` 获取数据与官方评测器，并在下载后记录来源 URL、仓库 revision、许可证证据、数据文件 SHA-256 和评测器版本。所有数据只能进入独立的 `longmemeval-eval` 数据库、上传目录和报告目录，禁止导入真实业务库、复用真实用户 ID 或将基准会话写入线上审计日志。
+
+30 个 case 由官方 test split 分层、一次性冻结：信息提取 6 题（单会话 3、跨会话 3）、多会话推理 6 题、知识更新 6 题、时间推理 6 题、拒答 6 题。抽样使用公开固定随机种子，`longmemeval-30-v1` manifest 必须包含 `caseId`、官方类别、源版本、会话/消息 ID、标准答案、支撑证据会话/消息、抽样种子和不可变输入哈希。选题完成后不得根据运行结果换题；数据、prompt、回答或参考答案均不得反向参与提取、召回和参数调优。
+
+每个 case 在独立的虚拟用户与清空的评测命名空间中，按原始时间顺序回放目标问题之前的会话及其 session 边界；目标问题只在长期记忆召回完成后执行。评测 runner 必须复用实际的候选提取、确认、长期记忆读取和 Agent 注入服务，禁止把 gold fact、reference answer 或人工整理后的记忆直接写入 `user_memory`。若原始会话时间不能透过现有测试链路保留，时间推理题仍照常执行，但报告必须标记为“现行时态 provenance 能力诊断”，不能把失败归咎于 Top-K 或 embedding 参数。
+
+每题执行以下三个配对实验臂，generation、提取和 embedding 模型版本及其可配置采样参数保持一致；模型或外部服务失败只记录为无效样本，不得静默替换模型或回填答案：
+
+| 实验臂 | 记忆策略 | 回答的问题 |
+| --- | --- | --- |
+| M0：无长期记忆 | 禁止长期记忆读取与注入，保留同一会话窗口和回答模型。 | 长期记忆没有参与时的基线。 |
+| M1：机械确认研究模式 | 对实际产生的全部 `PENDING` 候选执行确认；该模式不代表生产用户体验。 | 候选提取、持久化、检索和利用记忆的端到端上限。 |
+| M2：人工盲审确认 | 审核员仅查看候选与其 evidence 消息，确认或丢弃，不得查看目标问题、标准答案或 judge 结果。 | 当前候选确认门控在产品语义下的净收益和审核负担。 |
+
+官方答案评测器是主判分来源；其输入仅限问题、参考答案和系统回答，不得包含候选、已召回记忆或模型内部提示。每条运行还必须记录候选的类型/重要度/evidence/状态、确认后的记忆、召回排名和距离、实际注入文本、最终回答、判分、耗时、token/调用次数、代码 commit、模型/服务版本和配置哈希。失败按 `未提取`、`未确认`、`未召回`、`召回错误`、`已召回未利用`、`更新未覆盖旧事实`、`时态信息缺失`、`错误拒答` 分类，避免把所有问题归为“模型回答错误”。
+
+报告至少分别提供总体和五类的 Answer Accuracy、拒答类正确拒答率、Memory Recall@K、Candidate Precision、知识更新正确率、时态题正确率、p50/p95 延迟及单题成本；M0/M1/M2 必须列出逐题配对差异。30 题的总体比例步长为 3.3%，类别仅 6 题，故结果只支持方向性设计决策，不报告为统计显著或总体领先结论。建议继续投入的初步门槛是 M2 相对 M0 至少净增 4 个正确 case、拒答类最多新增 1 个幻觉错误、无跨虚拟用户泄露，并且失败分类能指向明确改造项；否则保持现有设计，不以个别成功样例推动默认策略变更。
+
+本项交付依次为：冻结 manifest 与数据来源登记；只写隔离环境的 replay/报告 runner；M0/M1/M2 三臂运行产物；人工盲审记录；逐题差异与失败归因报告。报告写入 `backend_v2/target/memory-eval/longmemeval-30-v1/`，历史结果归档；只有持续有效的结论才回填本计划、当前架构或 Spec。首次报告应重点判定当前“每 3 条新用户消息提取、最近 8 条消息窗口、`更新：` 冲突标记、365 天到期治理”在上述五类中的具体瓶颈，不在报告前预设需要改写哪一项。
+
 ## 4. 能力规格与依赖关系
 
 ### 4.1 异步任务中心与队列
@@ -289,6 +416,8 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-24 G2-3 导航判定局部收口记录。** 初始 RED 证明 `/api/v1/agents` 因任意 slash 被错误归为 `NAVIGATION`；最小 GREEN 将章节导航缩为 `>`，`.md`/`.markdown` 文档定位保持导航。首轮独立审查发现 P1：显式 context 下 API/代码路径仍可能被低信息 follow-up 升为 `HARD`，且 LLM 可能改写。后续将“可导航章节”与“结构化路径形态”拆分：`>` 仅控制导航与标题路径候选，`>`、`/`、`\\` 均禁止低信息 follow-up 和 LLM 改写。API 与 Windows 代码路径在 active context 下均固定为 `FACTOID/SOFT`、保留原问、不调用 LLM；API 路径也断言零 title/path Mapper 扫描，Markdown 文档定位仍为 `NAVIGATION`。`QueryRewriteServiceImplTest` 21/21、`RagServiceImplTest` 8/8、`KnowledgeToolsScopeTest` 15/15，共 44/44 通过；P1 修复复审无 P0/P1/P2。它只排除 slash/backslash 误触发，合法导航仍使用现有标题路径候选读取，尚未在冻结集或真实 PostgreSQL 度量其范围、Recall 和 p95。
 
+**2026-08-25 G2-3b 独立三路召回重启决策（待实施）。** 下一轮不把 Multi-Query 当作与向量、BM25 平级的新索引，而是以原问 Dense、原问 Sparse 和仅含非原问扩展 query 的 Expanded-query 三个分支产出独立排名，再做外层 RRF。Dense/Sparse/Expanded 各自按 chunk 去重并只贡献一次；第三路为空时不回填原问。所有叶子查询继续复用 owner/Agent 范围、`HARD` 谓词下推、VectorChord-bm25 与现有总 rerank 预算。实现前先完成 `TC-G2-09/10` 的 RED，用冻结 replay 将 R0/R1/R2 与 rerank A/B/C 分开评测；在项目内 follow-up 集和非空扩展 query replay 未就绪前，不对 mMARCO 自然 query 宣称第三路收益。
+
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
 1. `findTitleBm25Candidates` 与 `findContentBm25Candidates` 通过 Mapper 把授权 KB 的候选 chunk 拉回 JVM，再由应用计算 BM25。数据量随 KB 增长线性放大，且数据库无法利用原生倒排索引、按范围先过滤再取 Top-N。
@@ -334,6 +463,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | G2-2 | 将唯一 provider 接入 Mapper，令 `HARD` 过滤先于每个词法通道的 Top-N；保留标题精确/Trigram 的独立行为，BM25 只替换应用内 BM25。 | 上下文外的全局高分 chunk 不能挤掉范围内 gold；owner/Agent/会话收窄语义不变；删除或重索引无 stale hit。 |
 | G2-3 | 先冻结 KB 范围语义：推荐“未传 `kbIds` 搜索全部 Agent 已授权 KB，会话 context 只作排序偏置”；若产品需要 sticky scope，必须由显式会话/用户参数收窄，不能隐式沿用上一条 Top-1。随后把改写计划拆为原问、受控 standalone 补全和通道 provenance；原问始终保留，最多一个补充查询，只有明确 follow-up 标记与上下文证据同时成立时才进入正文/向量通道。 | 跨 KB topic switch 可在默认范围内召回；短新标题、代码标识符和 API 路径不会误关标题通道或触发导航扫描；改写失败、超时或越界时退回原问。 |
 | G2-3a | 将同源标题通道与多 query 向量通道先做组内去重/校准，再参与跨组 RRF；RRF 后明确截断可 rerank 的候选数，rank penalty 改为有界函数或移除。保存 session context 前要求相关性阈值和 Top-1/Top-2 gap；无答案、拒答或低置信结果不更新。 | RRF 第 35 名的精确命中在候选预算内仍可被 rerank 提升；重复通道不会无限叠加投票；错误 Top-1 不污染下一轮。 |
+| G2-3b | 拆分 Dense-original、Sparse-original 与 Expanded-query 三个独立分支；第三路只消费非原问扩展 query，分支内去重后才进入外层 RRF。 | R0/R1/R2 使用同一冻结范围、gold、query replay 和候选预算可复跑；每个 chunk 在每支路最多一票，R2 不退化且无权限/拒答回归。 |
 | G2-4 | 将 Router 接入受控检索入口，完成 evidence threshold、拒答、外部许可和引用输出；再按资产契约扩展 OCR、表格和图像。 | Router 相对固定链路有可复现收益；权限、无答案和外部许可全通过；每个非文本引用可定位到文档、页码/坐标与关联文本。 |
 
 ## 6. 验收指标与门禁
@@ -544,3 +674,4 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 
 | 2026-08-19 | G1 advisory lock 与文件补偿强化验收 | `G1AdvisoryLockRuntimeL2Test` 在独立 PostgreSQL 以真实 MyBatis/事务连接观察同一 owner+key 的 advisory waiter；提交后两请求只保留一个任务，跨资源复用键拒绝；触发器回滚后任务/幂等无残留且同键可继续。`G1FileCompensationRuntimeL2Test` 让真实上传文件先落盘、再由任务插入触发器失败，确认统一内部错误响应不泄露路径，目录与文档/任务/chunk 均清空；移除触发器后同键重试成功且重放不误删文件。两项 GREEN Surefire 均为失败/错误 `0`，隔离容器、临时目录和 fixture 已删除。 |
 | 2026-08-19 | G1 文件中途写入补偿强化验收 | `G1FileCompensationRuntimeL2Test` 以真实 PostgreSQL、Spring 事务和 `DocumentStorageServiceImpl` 构造输入流首段已写入、随后 `IOException` 的稳定 RED：数据库事务回滚，但临时目录遗留一个物理文件。最小 GREEN 仅在 `Files.copy` 异常分支删除该次目标文件，并在为空时删除本次文档目录和 KB 目录；同一真实测试 2 项均通过（失败/错误 `0`）。它补齐复制中断的物理补偿，不等同于消费者/RabbitMQ/embedding 的端到端恢复。 |
+| 2026-08-25 | LongMemEval 先执行 30 题诊断性记忆评测 | 采用 M0 无长期记忆、M1 机械确认和 M2 人工盲审确认的配对实验，分离候选门控与提取/召回/回答能力；30 题按五类分层冻结，只作为 G3 的定向设计证据，不表述为完整公开基准成绩。 |

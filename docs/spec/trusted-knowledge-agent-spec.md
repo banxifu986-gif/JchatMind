@@ -20,7 +20,7 @@
 | --- | --- | --- | --- |
 | G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 2026-08-18 已完成全部 G0 必需证据；当时 G1 尚未开始。 |
 | G1 | owner-only KB 硬权限、Agent 默认范围关系表、任务状态机、异步摄入、幂等、重试和任务轮询均必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-10` | 已完成隔离 L2 的 HTTP/JWT、真实队列重试/死信、MCP 主体授权、advisory lock、文件补偿、Rabbit 消费数据库失败恢复、Markdown/HTML/PDF 结构化提取与真实 embedding、PDF 成功/损坏 golden case、外部 embedding 短暂不可用后的 TTL/DLX 自动恢复、已认证任务 SSE HTTP 多连接、单实例事件回放与终态内存清理、真实模型 Agent 工具调用和生产 `STREAMABLE` MCP 协议；Edge L3 已覆盖登录、上传、轮询、隔离和失败提示。模型驱动会话范围收窄已通过；图片/OCR、多实例 SSE 与持久化恢复仍待对应验收。 |
-| G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答。 | `TC-G2-01` 至 `TC-G2-06` | `RagRouterTest` 已固定确定性 schema、授权/无证据/外部许可拒答和多模态 route；`KnowledgeTools`/MCP 已在授权范围内执行 Router 计划，`MULTIMODAL_RAG` 已接入 Markdown `TABLE` 与 PDF 页文本资产候选。模型 Router、受控外部工具、真实运行时和冻结集证据仍待实现。 |
+| G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答；普通文本检索必须以可评测的独立分支融合，不能把 query 改写伪装为额外索引票。 | `TC-G2-01` 至 `TC-G2-10` | `RagRouterTest` 已固定确定性 schema、授权/无证据/外部许可拒答和多模态 route；`KnowledgeTools`/MCP 已在授权范围内执行 Router 计划，`MULTIMODAL_RAG` 已接入 Markdown `TABLE` 与 PDF 页文本资产候选。模型 Router、受控外部工具、独立三路、真实运行时和冻结集证据仍待实现。 |
 | G3 | Skill 与记忆必须有可验证 schema、所有权和失败不阻断主链路的约束。 | `TC-G3-01` 至 `TC-G3-04` | 候选记忆确认、忽略、编辑、单条删除和本人长期记忆清空已局部实现：确认/忽略只作用于自己的 `PENDING` 候选，编辑只更新自己的正文与 matching embedding，清空只删除自己的长期记忆且不触碰候选；摘要上限、按会话提取节流、确认时语义去重、冲突关系持久化和查询时过期治理也已固定。`technical-decision-comparison` 已完成 L0 注册/校验与本地 L1 受控 `KnowledgeTool` 执行；HTTP/队列入口、模型总结、运行时预算与 Playwright 旅程仍待实现。 |
 | G4 | 工作流验证与 Webhook 必须对证据、权限、超时、签名、重试和死信作出确定响应。 | `TC-G4-01` 至 `TC-G4-04` | `WorkflowPlanVerifier` 已完成 L0 计划预算、工具白名单、证据和矛盾校验；`WorkflowPlanExecutor` 已完成本地 L1 顺序执行、Harness 放行/拒绝与失败停止。Planner、可中断超时、fallback、持久化审计、Webhook 与投递 schema 仍待实现。 |
 | G5 | 并发、缓存和多实例 SSE 必须满足顺序、隔离、背压和恢复语义。 | `TC-G5-01` 至 `TC-G5-04` | `TC-G5-01` 已完成单实例 L0/L1 会话互斥：同会话不重叠、不同会话并行，锁覆盖 Agent 与候选记忆提取；跨 `@Async` 提交顺序、真实负载、多实例、缓存和 SSE 恢复仍待对应契约。 |
@@ -167,6 +167,12 @@
 
 **G2-4d Markdown `TABLE` 资产摄入与候选契约。** 默认摄入处理器对 Markdown 文档执行旧资产替换。Flexmark `TableBlock` 保留原始表格 Markdown 与稳定 `startLine`/`endLine`；每张合法表格在同一事务中创建 `TABLE`/`table-{ordinal}`/`READY`/`markdown-table-v1` 资产，保存行号 locator 和原始表格的 UTF-8 小写 SHA-256，并关联到包含该原始表格的同文档 chunk。表格资产和 chunk 使用同一个处理批次时间戳。chunk metadata 保留第一个关联表格以兼容普通检索；`similaritySearchMarkdownTableAssets` 必须通过资产关系只查询 `TABLE + READY`，并以 `jsonb_set` 用当前候选的 `asset.id`、`asset.type` 与 `asset.locator` 覆盖输出 metadata，避免多表格关联同一 chunk 时引用到摄入 metadata 的首个资产。`RagService.retrieveMarkdownTableAssets(kbIds, query, context, limit)` 复用改写、embedding 缓存、RRF、授权 KB 与 `HARD` 范围，其 provenance 为 `asset_table_<source>`。`MULTIMODAL_RAG` 的 Agent/MCP 入口按表格、PDF 页文本、普通检索顺序合并并按 chunk ID 去重；表格查询运行时失败只清空表格候选，普通私有检索、授权、拒答和 MCP 审计保持不变。`MarkdownParserServiceImplTest`、`DefaultIngestionTaskProcessorTest`、`RagServiceImplTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest` 与 `ChunkBgeM3MapperMarkdownTableAssetCandidateContractTest` 均先 RED 后 GREEN。该项不实现表格单元格级 embedding/关系、图片/OCR、公式、坐标回跳、真实数据库多模态召回或任何冻结集/基准评测。
 
+**G2-3b 独立三路召回契约（待实施）。** 普通文本 RAG 必须从当前平铺通道收敛为 `dense-original`、`sparse-original`、`expanded-query` 三个分支。第一支路只对原问作向量检索；第二支路只对原问作标题词法、标题 BM25 和正文 BM25 的分支内 rank 融合；第三支路只处理 `retrievalQuerySources != original` 的 standalone/LLM query，并在每个扩展 query 内、再在整个第三支路内按 chunk 去重。当前最多一个受控扩展 query，不能借本改造新增不受评测约束的高扇出 query 生成器。
+
+分支输出必须是 chunk 唯一、rank 连续、带 branch/channel/query-source provenance 的候选 list。外层 RRF 只接收三份分支 list，同一 chunk 在同一分支只能贡献一次，在不同分支最多三次；第三支路为空时不得重新执行原问。所有叶子查询必须在数据库 `LIMIT` 前执行已授权 KB、`HARD` 来源/类型/路径过滤。普通文本三路与 `MULTIMODAL_RAG` 的表格/PDF 资产候选继续分开：资产优先级和 chunk 去重沿用已有入口契约，不计入三路 outer RRF。三路共享总候选与前 50 条 rerank 预算，禁止用每支路独立 50 条 rerank 造成总预算膨胀。
+
+先写的 L0 RED 用例固定为：`RagServiceImplTest.shouldKeepOriginalQueryOutOfExpandedBranch`、`RagServiceImplTest.shouldCountSameChunkAtMostOncePerIndependentBranch`、`RagServiceImplTest.shouldApplyHardScopeBeforeLimitForEveryIndependentBranch`，以及 `RagIndependentBranchEvaluatorTest.shouldRejectNonComparableVariants`。当前实现应因没有独立分支边界或缺少评测器而失败；最小 GREEN 只补分支编排、provenance、可比性校验和报告，不改授权入口、数据库 schema、VectorChord provider 或默认 rerank 开关。定向回归命令为 `mvn.cmd "-Dtest=RagServiceImplTest,QueryRewriteServiceImplTest,RagIndependentBranchEvaluatorTest" test`；真实数据库 L2 与冻结 replay 另由 `TC-G2-10` 显式启用，不能以 mock 单测替代。
+
 **发布边界。** 当前仓库没有自动 schema migrator；该 SQL 是版本化、一次性发布工件，提交不代表任何生产业务库已升级。发布前必须确认 `document_asset`、`document_asset_chunk`、所有命名约束与两个索引均不存在；随后在维护窗口以脚本原有事务一次执行，并通过 PostgreSQL catalog 核验表、检查约束、外键和索引，再将迁移文件名、提交 SHA、执行时间和 catalog 核验结果登记到发布记录。若 preflight 发现任一对象已存在或部分漂移，必须停止并人工比对修复，禁止以 `IF NOT EXISTS` 或重复执行掩盖状态。
 
 | TC-ID | 先写的失败测试 | GREEN 与边界 |
@@ -178,8 +184,10 @@
 | TC-G2-06 | PDF 页文本或 Markdown `TABLE` 资产候选绕过 KB 或 `HARD` 会话范围，或图片、表格、公式只能产生无位置的文本。 | PDF 页文本和 Markdown `TABLE` 已分别通过 `READY` 资产关系、向量候选、范围谓词、入口优先合并与稳定资产引用的 L0/L1 契约；表格当前定位为 Markdown 行号，不提供单元格关系或坐标回跳。图片/OCR、公式和未启用资产类型仍待独立验收。 |
 | TC-G2-07 | 默认多 KB 搜索被上次 context 隐式收窄，短新标题/代码标识符被误判 follow-up，或 `/api/...` 被误判导航。 | 默认范围符合冻结产品语义；仅显式 scope 可缩窄；标题通道和导航上下文只在对应信号满足时启用。 |
 | TC-G2-08 | RRF 第 35 名的精确候选因线性 penalty 无法升序，重复通道被重复投票，或低相关 Top-1 污染下一轮。 | rerank 截断/有界 penalty 可验证；同源通道组内校准；低置信和无答案不更新 retrieval context。 |
+| TC-G2-09 | 原问进入 expanded-query 分支、同一 chunk 在同一支路重复投票、`HARD` 谓词在任一叶子查询的 `LIMIT` 后过滤，或普通三路误吸收资产候选。 | 三个分支均输出唯一且连续的 rank；outer RRF 最多接收三个分支贡献；原问不进入第三路；授权/HARD 约束在每条叶子查询前生效；普通文本与资产候选边界保持不变。 |
+| TC-G2-10 | R0/R1/R2 使用不同 gold、scope、query replay、候选预算或有效分母仍生成可比较结论，或报告缺少支路诊断、延迟和输入哈希。 | 评测器拒绝不可比运行；同一冻结输入下输出结构消融报告、每支路候选/去重/gold 命中、外层 rank 与 p50/p95；R2 只有在授权/拒答全绿且指标、延迟门槛满足时才能进入 rerank A/B/C。 |
 
-**G2 阶段门禁。** 在冻结集的标题、正文精确匹配、中文/代码术语、multi-turn follow-up、topic switch、无答案、越权及 PDF 页码 case 上，现有主要召回指标不得退化；新增正文 BM25/standalone query/Router 必须报告分组收益、p95、token 成本、数据和索引版本。只有当所有授权/拒答测试通过且收益可复现时，才能切换唯一 provider；否则保留现有已签收链路并记录失败原因，不把 PoC 标记为上线。
+**G2 阶段门禁。** 在冻结集的标题、正文精确匹配、中文/代码术语、multi-turn follow-up、topic switch、无答案、越权及 PDF 页码 case 上，现有主要召回指标不得退化；新增正文 BM25/standalone query/Router/独立三路必须报告分组收益、p95、token 成本、数据和索引版本。只有当所有授权/拒答测试通过且收益可复现时，才能切换唯一 provider 或默认检索结构；否则保留现有已签收链路并记录失败原因，不把 PoC 标记为上线。
 
 ### 3.2 G3 候选记忆确认与忽略契约
 
@@ -458,7 +466,49 @@ rag:
 4. mMARCO 按语言分别聚合，不跨语言平均原始分数；CRUD-RAG 按官方任务和 split 分组聚合，不把问答、摘要、续写和事实修改混为未经定义的单一 Recall。两个数据集不计算未经定义的综合分数。
 5. 报告同时包含 `datasetVersion`、`license`、`sourceSha256`、`preprocessVersion`、`mappingVersion`、`indexVersion`、`embeddingModel`、`configSha256`、`sampleSize`、`evaluated/skipped`、`skipReasons` 和延迟统计。
 
-建议报告路径：`backend_v2/target/rag-eval/external/mmarco-<version>-report.json` 与 `backend_v2/target/rag-eval/external/crud-rag-<version>-report.json`。外部基准通过只表示对应数据集和配置下的可复现结果；G2 阶段仍须另外通过 `TC-G2-02` 至 `TC-G2-08` 的权限、Router、拒答、引用和冻结集验收。
+建议报告路径：`backend_v2/target/rag-eval/external/mmarco-<version>-report.json` 与 `backend_v2/target/rag-eval/external/crud-rag-<version>-report.json`。外部基准通过只表示对应数据集和配置下的可复现结果；G2 阶段仍须另外通过 `TC-G2-02` 至 `TC-G2-10` 的权限、Router、拒答、引用、独立三路和冻结集验收。
+
+#### 4.7.3.2 `mMARCO-zh-sampled` 的 TEI BGE rerank 评测契约
+
+本契约定义一次可在本机运行的受控诊断，不取代上一节全量 mMARCO 评测。评测库只能包含冻结后的 zh passage 子集，且只能写入 `rag-eval` 隔离 PostgreSQL/VectorChord 库与独立上传目录；不得读取、写入或关联业务数据库、真实 KB、用户会话或生产索引。
+
+**实现边界与交接门禁（2026-08-26）。** 实现使用 Java 测试作用域的 `MmarcoZhSampledDatasetFreezer`、`MmarcoZhSampledManifestImporter`、`MmarcoZhSampledIsolatedImporter`、`MmarcoZhSampledOllamaBatchEmbedder`、`MmarcoZhSampledRuntimeReplayRunner`、`MmarcoZhSampledRuntimeEvaluationTest`、`MmarcoZhSampledEvaluationRunner`、`MmarcoZhSampledEvaluator` 与 `MmarcoZhSampledReportWriter`；不引入 Python 运行时、`datasets` 依赖或生产公共接口。候选 embedding 的响应数量/顺序必须与输入严格一致；300 秒导入专用超时、4 MiB 解码上限和实际批大小进入运行 `configSha`，不改变检索或 TEI 超时。v2 使用每批 64 条；当前 `mmarco-zh-sampled-v3-local-diagnostic` 使用每批 8 条，以避免本机 CPU 上单批超过导入超时。`MmarcoZhSampledManifestImporter` 在同一显式 JDBC 事务内逐批 embedding、BM25 投影和写入，任一失败整体回滚。冻结器只接受本地物化的 collection、queries、qrels 和官方 run，先记录四份文件 SHA-256、zh 语言、固定上游 revision `6d039c4638c0ba3e46a9cb7b498b145e7edc6230`、预处理版本和映射版本，再生成 manifest。上游 Git LFS pointer、未完成下载、对象 OID/文件大小不匹配、revision/language/mappingVersion 不匹配或缺少 source SHA-256 时，运行必须在冻结前停止并标记 `blocked_input_integrity`，不能创建候选库或输出任何检索指标。
+
+**映射实现。** 每个原始 passage 保持一对一 document/chunk，逻辑 ID 为 `mmarco:zh:<passageId>`；runtime chunk UUID 为逻辑 ID UTF-8 字节的 `UUID.nameUUIDFromBytes(...)`。导入器必须显式写入该 UUID，不能依赖会随机生成 ID 的既有 mapper；metadata 至少保存 `datasetVersion`、`candidateManifestSha256`、`mappingVersion`、`logicalChunkId`、`passageId` 和 `candidateSourceType`。只要任一映射或导入版本变化，就必须生成新数据集版本，不得与既有报告比较。
+
+**数据冻结。** 固定 300 条带 qrels 的查询，development 与 untouched test 的 query ID 必须不重叠。候选集合由全部 qrels 正例、每条最多 100 条已校验来源的 hard negative 和 20,000 条固定随机干扰 passage 组成，最终去重规模为 20,000 至 50,000 条。每个原始 passage 必须一对一写为 document/chunk，稳定逻辑 ID 为 `mmarco:zh:<passageId>`；manifest、query 清单、候选映射和检索 replay 都必须记录随机种子、输入 SHA-256、上游 revision 与生成脚本版本。没有官方或可复现的 BM25 run 时，hard negative 来源为空即构成阻塞，不能伪造或无声降级。
+
+**当前冻结版本。** `mmarco-zh-sampled-v1` 的 49,691 candidate 导入未产生检索报告：旧单条调用遭遇 30 秒 embedding 超时，初次批量调用又遭遇 WebClient 256 KiB 解码上限，均未完成 JDBC 导入。当前 `mmarco-zh-sampled-v2` 使用相同四份已验证输入、随机种子、300 query 划分、qrels、embedding 模型和 mappingVersion；只将官方 hard negative 上限固定为每 query 1 条，得到 20,616 candidate（316 qrels positive、300 official hard negative、20,000 random distractor）。这是独立 datasetVersion，任何 v1 尝试、映射或报告均不得与 v2 比较；该选择仍满足本节的 20,000-50,000 candidate 和“每条最多 100 条 hard negative”约束。
+
+**本机 CPU 例外版本。** `mmarco-zh-sampled-v3-local-diagnostic` 使用与 v2 完全相同的上游 revision、四份 source SHA-256、300 query 划分、316 qrels positive、300 official hard negative、随机种子、embedding 模型和 mappingVersion；只将固定 random distractor 降为 500，故冻结为 1,116 candidate，并把导入 batch 固定为 8。该变化独立形成 v3 manifest 与 `configSha`。它是因本机 CPU 对 v2 的 20,616 candidate 导入预估约 19 小时而采用的受控诊断子样本，不满足本节 20,000-50,000 条的一般候选规模；v3 只可用于相同 v3 候选库、相同 300 query、相同有效分母与相同检索配置下的 A/B/C rerank 比较，不得与 v1/v2、全量 mMARCO 或不同候选规模报告比较绝对分数，亦不得据此宣称全量 mMARCO 质量。所有 qrels positive、官方 hard negative 和 deterministic passage/chunk UUID 映射仍完整保留。
+
+**前置门禁。** 冻结数据集加载器和 RAG TestConfig 的既有失败必须先恢复为 GREEN。开始 C 臂前，TEI `/rerank` 健康检查必须证明：50 个候选获得 50 个唯一索引和非空分数；否则不启动对比。运行过程中出现 TEI 超时、HTTP/解析异常、重复/缺失索引或 `RagServiceImpl` 日志中的本地回退时，该 query 记录 `invalid_tei_fallback`，C 臂整体为 `invalid`，不得将回退结果记作 BGE rerank 成绩。
+
+**实验矩阵。** 每臂在同一已导入索引上独立执行两次，随机化执行顺序；固定 KB 范围、Top-K、embedding、BM25 词典、RRF 参数、超时和 query 清单。主对比设 `rag.eval.disable-query-expansion=true`，避免改写结果影响排序；完整链路确认性运行只能使用同一份预先冻结的 query rewrite replay。
+
+| ID | `rag.eval.disable-rerank` | `rag.rerank.enabled` | 预期行为 |
+| --- | --- | --- | --- |
+| A | `true` | `false` | RRF 融合后直接截断，不执行任何 rerank。 |
+| B | `false` | `false` | 对 RRF 前 50 条执行本地规则 rerank。 |
+| C | `false` | `true` | 对相同 50 条候选调用 TEI `BAAI/bge-reranker-v2-m3` 并按返回分数重排。 |
+
+**指标与报告。** 每臂对相同有效 query 集报告 `Recall@1/3/5/10`、`MRR@10`、`nDCG@10`、RAGAS `IDBasedContextPrecision`、`IDBasedContextRecall`、p50/p95 检索延迟、TEI 成功率及逐 query rank 变化。主结论比较 B 与 C，并使用 1,000 次逐 query `C - B` bootstrap 输出 `MRR@10`、`nDCG@10` 差值的 95% 置信区间；A 只用于判断任意 rerank 的作用。检索报告路径为 `backend_v2/target/rag-eval/external/mmarco-zh-sampled-<version>-retrieval-ab.json`，字段至少包含 `runId`、`datasetVersion`、`sourceSha256`、`candidateManifestSha256`、`mappingVersion`、`indexVersion`、`embeddingModel`、`rerankerModel`、`configSha256`、`variant`、`sampleSize`、`validCount`、`invalidCount`、`invalidReasons`、指标和延迟分位数，以及各臂的 `queryReplays`（gold、ranked chunk、延迟和 TEI 回退标记）。
+
+**端到端 RAGAS。** 从 untouched test 固定抽取 100 条，用同一回答模型、`temperature=0` 和相同检索上下文生成回答，再用独立记录版本与提示词哈希的 judge 计算 Faithfulness、Response Relevancy、`evaluated/skipped` 和 skip reason。mMARCO 只提供 passage relevance qrels，不提供可用于 Answer Correctness 的参考答案；因此端到端报告不得解释为回答事实正确性。judge 结果单独输出到 `backend_v2/target/rag-eval/external/mmarco-zh-sampled-<version>-ragas-ab.json`，并标明回答模型、judge 模型、延迟和成本（如可得）。
+
+**通过判定。** 只有 C 臂无 TEI 回退、B 与 C 使用完全相同的有效 query 集、`MRR@10` 和 `nDCG@10` 均未低于 B、p95 增幅不超过 15%，且报告哈希/样本分母完整时，才可以标记为 `eligible_for_full_validation`。这不是默认启用条件，也不是全量 mMARCO 分数；任何门禁失败均标记 `invalid` 或 `inconclusive`，保留原始报告和原因。
+
+**本机执行上限与已运行结论（2026-08-28）。** v3 的 300 条 query 仅表示冻结池；受本机 CPU 约束，每次 A/B/C 只允许使用同一份 50 条 development query，后续不得扩样本。已完成的 50 条运行中，A/B/C 的输入、候选、配置、Top-K 和有效分母完全一致，TEI C 臂 `teiSuccessRate=1.0` 且无回退；C 相对 B 的 `MRR@10` 与 `nDCG@10` bootstrap 95% CI 均为正，但 p95 为 `285,816ms`，超过 B `4,767ms` 的 15% 上限。因此该报告为 `inconclusive`，不得默认开启 TEI rerank，也不得表述为全量 mMARCO 结论。完整指标、hash、逐 query replay 与 bootstrap 结果以 v3 retrieval A/B 报告为准。
+
+**术语与审计边界。** 本机“50 条评测”是同一份 50 个 development query，不是 50 条候选文本；300 条是冻结 query 池（development 200、untouched test 100），而 1,116 条是固定检索候选库（316 qrels 正例、300 官方 hard negative、500 固定随机干扰）。每个 query 从该 1,116 条 passage/chunk 库中检索，B/C 仅把全局 RRF Top-50 送入 rerank，最终以 Top-10 计分；C 两次独立执行代表 100 次 TEI rerank 请求。每个 mMARCO passage 保持一对一 chunk，不能按通用文档摄入规则再切块。评测全过程、六份 replay 的留档、随机执行、ID-based RAGAS 与未执行的 LLM judge 边界，以及 R0/R1/R2 不混入 A/B/C 的实际运行记录，统一见路线图 `3.3.2` 和 `3.3.3`。
+
+#### 4.7.3.3 独立三路结构消融契约（G2-3b）
+
+本评测在 rerank A/B/C 之前执行，只检验召回结构。固定 query rewrite replay、`rag.eval.disable-rerank=true`、相同授权 KB 范围、gold、Top-K、embedding、BM25 词典、`RRF_K`、超时、总候选预算和有效 query 集，分别运行 `current-flat`、`two-branch-original` 与 `three-branch-expanded`。评测配置或输入哈希任一不同即拒绝比较，不允许用手工筛选 query 或不同分母制造收益。
+
+`three-branch-expanded` 的第三路只能使用非原问 replay；每个 query 的报告必须记录 original/expanded query ID、三个分支的候选总数和 chunk 去重数、每个 gold 的命中分支、outer RRF 前后 rank、`Recall@1/3/5/10`、`MRR@10`、`nDCG@10`、无答案误召回、越权数和 p50/p95。报告额外记录 `variant`、`branchConfigSha256`、`queryReplaySha256`、`candidateBudget`、`validCount`、`skippedCount` 与 `skipReasons`，建议路径为 `backend_v2/target/rag-eval/three-branch/<datasetVersion>-<variant>.json`。
+
+项目内冻结集至少有一组具备授权会话上下文且 replay 包含非原问扩展 query 的 follow-up case；否则 R2 只能标为 `not_exercised`，不得解释为 Multi-Query 分支无收益。mMARCO-zh-sampled 若不具备此类 replay，继续只用于 Dense/Sparse/RRF 与 `4.7.3.2` 的 rerank 诊断。只有 `TC-G2-09` 和 `TC-G2-10` 全绿、R2 对相同有效 query 集不低于 R0 的 `Recall@5`、`MRR@10`、`nDCG@10`、p95 增幅不超过 15%，且授权/拒答无回归时，R2 才可进入同一链路上的 A/B/C rerank 对比；否则保持 R0 为默认并保存失败报告。
 
 #### 4.7.4 与总计划一致的通过判定
 
