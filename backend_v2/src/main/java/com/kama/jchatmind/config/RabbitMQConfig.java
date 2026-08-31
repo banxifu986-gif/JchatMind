@@ -14,6 +14,7 @@ import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainer
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.lang.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -257,11 +258,14 @@ public class RabbitMQConfig {
 
     @Bean
     public SimpleRabbitListenerContainerFactory ingestionRabbitListenerContainerFactory(
-            SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            @Nullable SimpleRabbitListenerContainerFactoryConfigurer configurer,
             ConnectionFactory connectionFactory
     ) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
-        configurer.configure(factory, connectionFactory);
+        factory.setConnectionFactory(connectionFactory);
+        if (configurer != null) {
+            configurer.configure(factory, connectionFactory);
+        }
         factory.setConcurrentConsumers(INGESTION_CONCURRENT_CONSUMERS);
         factory.setMaxConcurrentConsumers(INGESTION_CONCURRENT_CONSUMERS);
         factory.setPrefetchCount(INGESTION_PREFETCH_COUNT);
@@ -270,11 +274,14 @@ public class RabbitMQConfig {
 
     @Bean
     public SimpleRabbitListenerContainerFactory knowledgeBaseDeletionRabbitListenerContainerFactory(
-            SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            @Nullable SimpleRabbitListenerContainerFactoryConfigurer configurer,
             ConnectionFactory connectionFactory
     ) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
-        configurer.configure(factory, connectionFactory);
+        factory.setConnectionFactory(connectionFactory);
+        if (configurer != null) {
+            configurer.configure(factory, connectionFactory);
+        }
         factory.setConcurrentConsumers(KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS);
         factory.setMaxConcurrentConsumers(KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS);
         factory.setPrefetchCount(KNOWLEDGE_BASE_DELETION_PREFETCH_COUNT);
