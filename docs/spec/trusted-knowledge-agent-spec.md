@@ -2,7 +2,7 @@
 
 > 状态：当前唯一实施 Spec
 > 对应计划：[可信研发知识协作 Agent 升级总计划](../plans/active/trusted-knowledge-agent-roadmap.md)
-> 当前实施阶段：G1 owner-only 知识库硬权限、任务中心与异步摄入已完成 L0/L1 契约；隔离 PostgreSQL/RabbitMQ 已完成 HTTP/JWT、重试/死信、advisory lock、文件补偿、Rabbit 消费失败恢复、Markdown/HTML/PDF 结构化提取、真实 embedding、PDF 成功/损坏 golden case、外部 embedding 短暂不可用后的 RabbitMQ 自动恢复、任务 SSE HTTP 多连接、单实例事件序号/有限回放及终态内存清理、本机 Edge Playwright L3 旅程。受控 KB 删除任务已完成 L0/L1 契约，真实 Rabbit/PostgreSQL、跨账号和 Playwright 验收仍待；生产业务库已完成既有任务/MCP 迁移，真实模型 Agent 工具调用、模型驱动会话临时范围收窄和 MCP `STREAMABLE` 协议调用已通过；G2 已完成 Router 入口计划执行、PDF 页文本与 Markdown `TABLE` 资产候选的 L0/L1 接线，G3 已完成摘要上限、提取节流、确认时语义去重、冲突关系持久化和记忆过期治理，G5 已完成单实例会话执行互斥的 L0/L1 契约；图片/OCR、公式、多实例 SSE、持久化恢复及 G2 真实运行时/冻结集验收仍待独立完成。
+> 当前实施阶段：G0 已结项。G1 核心权限、任务摄入、真实队列/数据库、单实例任务 SSE、MCP 主体与真实模型工具调用已签收，受控 KB 删除任务隔离 L2 和 Edge Playwright L3 已通过，生产迁移入口仍待完成。G2 已完成 VectorChord BM25、Router/资产入口、独立三路实现与真实结构消融；R2 低于 R0且拒答门禁失败，TEI 也未通过延迟门禁，因此默认结构和 rerank 开关保持不变，当前转入 Bad Case、release-v1、引用/拒答和 Router 消融收口。G3、G4、G5 均为部分实现，LongMemEval、真实集成、负载、持久化和多实例验收尚未完成。`TC-REL-02` 的迁移执行器 L0/L1 和真实隔离 PostgreSQL 生命周期 L2 已通过，完整发布 catalog 对账和生产发布入口仍待完成。
 
 ## 1. 文档定位与范围
 
@@ -19,9 +19,9 @@
 | 阶段 | 实现级契约 | 必需测试入口 | 当前状态 |
 | --- | --- | --- | --- |
 | G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 2026-08-18 已完成全部 G0 必需证据；当时 G1 尚未开始。 |
-| G1 | owner-only KB 硬权限、Agent 默认范围关系表、任务状态机、异步摄入、幂等、重试和任务轮询均必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-10` | 已完成隔离 L2 的 HTTP/JWT、真实队列重试/死信、MCP 主体授权、advisory lock、文件补偿、Rabbit 消费数据库失败恢复、Markdown/HTML/PDF 结构化提取与真实 embedding、PDF 成功/损坏 golden case、外部 embedding 短暂不可用后的 TTL/DLX 自动恢复、已认证任务 SSE HTTP 多连接、单实例事件回放与终态内存清理、真实模型 Agent 工具调用和生产 `STREAMABLE` MCP 协议；Edge L3 已覆盖登录、上传、轮询、隔离和失败提示。模型驱动会话范围收窄已通过；图片/OCR、多实例 SSE 与持久化恢复仍待对应验收。 |
-| G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答；普通文本检索必须以可评测的独立分支融合，不能把 query 改写伪装为额外索引票。 | `TC-G2-01` 至 `TC-G2-10` | `RagRouterTest` 已固定确定性 schema、授权/无证据/外部许可拒答和多模态 route；`KnowledgeTools`/MCP 已在授权范围内执行 Router 计划，`MULTIMODAL_RAG` 已接入 Markdown `TABLE` 与 PDF 页文本资产候选。模型 Router、受控外部工具、独立三路、真实运行时和冻结集证据仍待实现。 |
-| G3 | Skill 与记忆必须有可验证 schema、所有权和失败不阻断主链路的约束。 | `TC-G3-01` 至 `TC-G3-04` | 候选记忆确认、忽略、编辑、单条删除和本人长期记忆清空已局部实现：确认/忽略只作用于自己的 `PENDING` 候选，编辑只更新自己的正文与 matching embedding，清空只删除自己的长期记忆且不触碰候选；摘要上限、按会话提取节流、确认时语义去重、冲突关系持久化和查询时过期治理也已固定。`technical-decision-comparison` 已完成 L0 注册/校验与本地 L1 受控 `KnowledgeTool` 执行；HTTP/队列入口、模型总结、运行时预算与 Playwright 旅程仍待实现。 |
+| G1 | owner-only KB 硬权限、Agent 默认范围关系表、任务状态机、异步摄入、幂等、重试、删除任务和任务进度均必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-11`，含 `TC-G1-04a/04b/04c` | 已完成隔离 L2 的 HTTP/JWT、真实队列重试/死信、MCP 主体授权、advisory lock、文件补偿、摄入恢复、Markdown/HTML/PDF 与真实 embedding、任务 SSE、多实例连接、真实模型工具调用和生产 `STREAMABLE` MCP 协议；Edge L3 已覆盖摄入和删除旅程。受控 KB 删除任务已通过真实 PostgreSQL/RabbitMQ、第二账号隔离 L2；仅生产迁移入口仍待完成。 |
+| G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答；普通文本检索必须以可评测的独立分支融合，不能把 query 改写伪装为额外索引票。 | `TC-G2-01` 至 `TC-G2-10` | 确定性 Router、生产入口计划、VectorChord BM25、PDF/Markdown 表格资产和独立三路均已实现；`TC-G2-09/10` 已产出真实结构消融，R2 未通过质量/拒答门禁，保持 R0。仍待 Bad Case 全绿、release-v1、组合授权 L2、Router 消融、引用/答案质量和真实多模态验收。 |
+| G3 | Skill 与记忆必须有可验证 schema、所有权和失败不阻断主链路的约束。 | `TC-G3-01` 至 `TC-G3-05` | 候选确认/忽略/编辑/删除、节流、语义去重、冲突、365 天过期治理与首个内置 Skill 已完成 L0/L1；LongMemEval 30 题尚未下载/冻结，记忆 L2/L3、Skill HTTP/队列、模型总结和运行时预算仍待实现。 |
 | G4 | 工作流验证与 Webhook 必须对证据、权限、超时、签名、重试和死信作出确定响应。 | `TC-G4-01` 至 `TC-G4-04` | `WorkflowPlanVerifier` 已完成 L0 计划预算、工具白名单、证据和矛盾校验；`WorkflowPlanExecutor` 已完成本地 L1 顺序执行、Harness 放行/拒绝与失败停止。Planner、可中断超时、fallback、持久化审计、Webhook 与投递 schema 仍待实现。 |
 | G5 | 并发、缓存和多实例 SSE 必须满足顺序、隔离、背压和恢复语义。 | `TC-G5-01` 至 `TC-G5-04` | `TC-G5-01` 已完成单实例 L0/L1 会话互斥：同会话不重叠、不同会话并行，锁覆盖 Agent 与候选记忆提取；跨 `@Async` 提交顺序、真实负载、多实例、缓存和 SSE 恢复仍待对应契约。 |
 
@@ -77,6 +77,12 @@
 **MCP 身份映射（代码已实现，生产迁移已执行）。** [2026-08-18-create-mcp-principal-access.sql](../../sql/mcp/2026-08-18-create-mcp-principal-access.sql) 定义四张表：`mcp_principal`（稳定外部主体与启停状态）、`mcp_principal_credential`（主体、凭据指纹/版本、有效期和撤销状态，明文只留在受控密钥系统）、`mcp_principal_user_grant`（V1 每个主体至多一条未撤销的内部 `user_id` grant，含审批者、授予/撤销时间和原因）和 `mcp_access_audit`（追加记录主体、解析出的用户、动作、目标 KB、决定、关联 ID、时间和脱敏请求元数据）。`McpApiKeyFilter` 仅以 `X-API-Key` 的 SHA-256 指纹解析启用主体和有效 grant，并传播主体与关联 ID；`McpKnowledgeTool` 以该 `user_id` 走 owner 校验。认证和知识检索的允许/拒绝均追加审计，审计不存原始凭据或查询正文。当前无 tenant 模型，V1 不伪造 tenant 字段；审计查询/保留，以及未来 tenant/共享 ACL 的独立 grant 迁移仍不在本次范围。
 
 **2026-08-25 受控 KB 删除任务契约（TC-G1-04c，L0/L1）。** `DELETE /api/knowledge-bases/{knowledgeBaseId}` 先由 `KnowledgeBaseDeletionTaskServiceImpl` 以当前 user ID 和 `KNOWLEDGE_BASE_DELETION:<kbId>` advisory lock 查询同 owner 历史任务；存在则直接返回原 `deletionTaskId`，即使 KB 已被删除。否则必须先通过 `KnowledgeBaseAccessService` owner 校验，再在一个事务内写入 `knowledge_base_deletion_task`、追加 `DELETE_REQUESTED` 审计并以 `id + owner_id` 删除 KB；既有外键在该事务中级联清理绑定、文档、chunk 和摄入任务。任务不对 KB 建立外键，保存输入 JSON、结果引用、状态、进度、重试和错误信息，进度固定为 `QUEUED=0`、`RUNNING=50`、`SUCCEEDED=100`，避免数据库级联丢失文件清理状态。提交后才投递独立 `knowledge-base-deletion` Rabbit queue；单消费者只认领 `QUEUED` 或重试任务，调用受限 `DocumentStorageService.deleteKnowledgeBaseDirectory(kbId)`，缺失目录成功，越出基目录拒绝，失败最多三次后 `DEAD_LETTER`。`GET /api/knowledge-base-deletion-tasks/{taskId}` 只向 owner 返回 ID、状态、进度、尝试次数、错误摘要和时间。RED 覆盖任务模型/迁移、请求 API、生命周期、消费者和存储目录边界；GREEN 为 `cd backend_v2 && .\mvnw.cmd -q "-Dtest=KnowledgeBaseDeletionHttpContractTest,KnowledgeBaseFacadeServiceImplTest,KnowledgeBaseDeletionTaskContractTest,KnowledgeBaseDeletionTaskServiceImplTest,KnowledgeBaseDeletionTaskConsumerContractTest,KnowledgeBaseDeletionTaskConsumerTest,DocumentStorageServiceDeletionContractTest,DocumentStorageServiceImplTest" test`。本项未执行迁移，也未启动真实 Rabbit/PostgreSQL；第二隔离账号 L2 和 Edge Playwright L3 仍是后续门禁。
+
+**2026-08-30 受控 KB 删除任务隔离 L2 验收（TC-G1-04c）。** `G1KnowledgeBaseDeletionRuntimeL2Test` 使用随机命名的 PostgreSQL `16` 与 RabbitMQ `3-management-alpine` 临时容器、随机高位端口和临时上传目录；测试在隔离数据库内应用 `2026-08-25-create-knowledge-base-deletion-task.sql`，创建双 owner 及 KB/文档/chunk/摄入任务/物理文件 fixture。真实运行结果为 `3 tests, 0 failures, 0 errors, 0 skipped`：非 owner 删除在建任务前统一拒绝且无任务/文件副作用；owner 请求经真实 Rabbit 消费后删除任务为 `SUCCEEDED`、进度 `100`，审计保留一条，KB/文档/chunk/摄入任务级联为零且物理目录删除；第二 owner 无法读取该删除任务。测试结束已删除临时容器、目录和数据，未读取或修改业务库。生产迁移入口和 Edge Playwright L3 仍未验收。 |
+
+**2026-08-30 删除 UI/L3 旅程准备。** `useKnowledgeBases` 新增删除任务终态轮询，`KnowledgeBaseTabContent` 提供二次确认删除按钮，删除成功后刷新列表并反馈完成状态；`ui/tests/g1-runtime.spec.ts` 新增“创建 KB -> 删除确认 -> 等待完成 -> 列表移除”Edge 旅程，静态契约、TypeScript、ESLint 和 Vite 构建均通过。由于本轮未启动隔离后端和 Vite 服务，该浏览器旅程尚未执行，不计入 L3 通过证据。 |
+
+**2026-08-31 删除 Edge Playwright L3 验收。** 在动态端口隔离 PostgreSQL/RabbitMQ/Redis、后端和 Vite 环境中，`g1-runtime.spec.ts --grep "deletion completion"` 完成注册、登录、创建知识库、二次确认删除、异步任务完成和列表移除，结果为 `1 passed`。临时容器、数据库、后端/Vite 进程和存储目录均已清理，生产迁移入口仍待验收。
 
 | TC-ID | 先写的失败测试 | 已观察的 RED | GREEN 入口与覆盖 |
 | --- | --- | --- | --- |
@@ -167,11 +173,11 @@
 
 **G2-4d Markdown `TABLE` 资产摄入与候选契约。** 默认摄入处理器对 Markdown 文档执行旧资产替换。Flexmark `TableBlock` 保留原始表格 Markdown 与稳定 `startLine`/`endLine`；每张合法表格在同一事务中创建 `TABLE`/`table-{ordinal}`/`READY`/`markdown-table-v1` 资产，保存行号 locator 和原始表格的 UTF-8 小写 SHA-256，并关联到包含该原始表格的同文档 chunk。表格资产和 chunk 使用同一个处理批次时间戳。chunk metadata 保留第一个关联表格以兼容普通检索；`similaritySearchMarkdownTableAssets` 必须通过资产关系只查询 `TABLE + READY`，并以 `jsonb_set` 用当前候选的 `asset.id`、`asset.type` 与 `asset.locator` 覆盖输出 metadata，避免多表格关联同一 chunk 时引用到摄入 metadata 的首个资产。`RagService.retrieveMarkdownTableAssets(kbIds, query, context, limit)` 复用改写、embedding 缓存、RRF、授权 KB 与 `HARD` 范围，其 provenance 为 `asset_table_<source>`。`MULTIMODAL_RAG` 的 Agent/MCP 入口按表格、PDF 页文本、普通检索顺序合并并按 chunk ID 去重；表格查询运行时失败只清空表格候选，普通私有检索、授权、拒答和 MCP 审计保持不变。`MarkdownParserServiceImplTest`、`DefaultIngestionTaskProcessorTest`、`RagServiceImplTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest` 与 `ChunkBgeM3MapperMarkdownTableAssetCandidateContractTest` 均先 RED 后 GREEN。该项不实现表格单元格级 embedding/关系、图片/OCR、公式、坐标回跳、真实数据库多模态召回或任何冻结集/基准评测。
 
-**G2-3b 独立三路召回契约（待实施）。** 普通文本 RAG 必须从当前平铺通道收敛为 `dense-original`、`sparse-original`、`expanded-query` 三个分支。第一支路只对原问作向量检索；第二支路只对原问作标题词法、标题 BM25 和正文 BM25 的分支内 rank 融合；第三支路只处理 `retrievalQuerySources != original` 的 standalone/LLM query，并在每个扩展 query 内、再在整个第三支路内按 chunk 去重。当前最多一个受控扩展 query，不能借本改造新增不受评测约束的高扇出 query 生成器。
+**G2-3b 独立三路召回契约（已实施，默认切换被拒绝）。** 普通文本 RAG 已实现 `dense-original`、`sparse-original`、`expanded-query` 三个分支。第一支路只对原问作向量检索；第二支路只对原问作标题词法、标题 BM25 和正文 BM25 的分支内 rank 融合；第三支路只处理 `retrievalQuerySources != original` 的 standalone/LLM query，并在每个扩展 query 内、再在整个第三支路内按 chunk 去重。当前最多一个受控扩展 query，不能借本改造新增不受评测约束的高扇出 query 生成器。
 
 分支输出必须是 chunk 唯一、rank 连续、带 branch/channel/query-source provenance 的候选 list。外层 RRF 只接收三份分支 list，同一 chunk 在同一分支只能贡献一次，在不同分支最多三次；第三支路为空时不得重新执行原问。所有叶子查询必须在数据库 `LIMIT` 前执行已授权 KB、`HARD` 来源/类型/路径过滤。普通文本三路与 `MULTIMODAL_RAG` 的表格/PDF 资产候选继续分开：资产优先级和 chunk 去重沿用已有入口契约，不计入三路 outer RRF。三路共享总候选与前 50 条 rerank 预算，禁止用每支路独立 50 条 rerank 造成总预算膨胀。
 
-先写的 L0 RED 用例固定为：`RagServiceImplTest.shouldKeepOriginalQueryOutOfExpandedBranch`、`RagServiceImplTest.shouldCountSameChunkAtMostOncePerIndependentBranch`、`RagServiceImplTest.shouldApplyHardScopeBeforeLimitForEveryIndependentBranch`，以及 `RagIndependentBranchEvaluatorTest.shouldRejectNonComparableVariants`。当前实现应因没有独立分支边界或缺少评测器而失败；最小 GREEN 只补分支编排、provenance、可比性校验和报告，不改授权入口、数据库 schema、VectorChord provider 或默认 rerank 开关。定向回归命令为 `mvn.cmd "-Dtest=RagServiceImplTest,QueryRewriteServiceImplTest,RagIndependentBranchEvaluatorTest" test`；真实数据库 L2 与冻结 replay 另由 `TC-G2-10` 显式启用，不能以 mock 单测替代。
+L0 RED/GREEN 已由 `RagServiceImplTest.shouldKeepOriginalQueryOutOfExpandedBranch`、`RagServiceImplTest.shouldCountSameChunkAtMostOncePerIndependentBranch`、`RagServiceImplTest.shouldApplyHardScopeBeforeLimitForEveryIndependentBranch` 和 `RagIndependentBranchEvaluatorTest.shouldRejectNonComparableVariants` 固定。最小 GREEN 只补分支编排、provenance、可比性校验和报告，没有改变授权入口、数据库 schema、VectorChord provider 或默认 rerank 开关。定向回归入口为 `mvn.cmd "-Dtest=RagServiceImplTest,QueryRewriteServiceImplTest,RagIndependentBranchEvaluatorTest" test`；真实数据库 L2 与冻结 replay 由 `TC-G2-10` 显式启用，不能以 mock 单测替代。2026-08-28 的首次真实运行显示 R2 指标低于 R0 且三臂均有 2 个拒答违规；2026-08-30 复用同一隔离库和输入、先执行生产 Router 后重跑，拒答/权限违规均为 `0`，Recall@5 保持 `1.0`，但 R2 的 MRR/nDCG 仍低于 R0，因此默认切换门禁仍失败，R0 保持默认。
 
 **发布边界。** 当前仓库没有自动 schema migrator；该 SQL 是版本化、一次性发布工件，提交不代表任何生产业务库已升级。发布前必须确认 `document_asset`、`document_asset_chunk`、所有命名约束与两个索引均不存在；随后在维护窗口以脚本原有事务一次执行，并通过 PostgreSQL catalog 核验表、检查约束、外键和索引，再将迁移文件名、提交 SHA、执行时间和 catalog 核验结果登记到发布记录。若 preflight 发现任一对象已存在或部分漂移，必须停止并人工比对修复，禁止以 `IF NOT EXISTS` 或重复执行掩盖状态。
 
@@ -188,6 +194,12 @@
 | TC-G2-10 | R0/R1/R2 使用不同 gold、scope、query replay、候选预算或有效分母仍生成可比较结论，或报告缺少支路诊断、延迟和输入哈希。 | 评测器拒绝不可比运行；同一冻结输入下输出结构消融报告、每支路候选/去重/gold 命中、外层 rank 与 p50/p95；R2 只有在授权/拒答全绿且指标、延迟门槛满足时才能进入 rerank A/B/C。 |
 
 **G2 阶段门禁。** 在冻结集的标题、正文精确匹配、中文/代码术语、multi-turn follow-up、topic switch、无答案、越权及 PDF 页码 case 上，现有主要召回指标不得退化；新增正文 BM25/standalone query/Router/独立三路必须报告分组收益、p95、token 成本、数据和索引版本。只有当所有授权/拒答测试通过且收益可复现时，才能切换唯一 provider 或默认检索结构；否则保留现有已签收链路并记录失败原因，不把 PoC 标记为上线。
+
+**G2 Bad Case 数据契约。** Bad Case 按 `inbox -> reviewed -> development-regression -> next-release-test` 演进。`inbox` 不具备 gold，不进入门禁；`reviewed` 必须固定 query、会话上下文、授权 KB 范围、预期 route、gold facts/chunks、拒答标记、预期引用、失败阶段/类型和输入 SHA-256；修复时先以相同输入复现 RED，再验证 GREEN。任何用于修复或调参的 case 都不能回填当前 untouched test 并宣称同版本收益，只能进入下一冻结版本。真实用户内容必须脱敏，原始对话、凭据和私有文档不得进入 Git。
+
+首版 `rag-badcase-v1` 至少包含跨 KB topic switch、短 follow-up、API/Windows 路径、精确术语、旧版本/重复 chunk、全局高分越权干扰、无答案/冲突/部分证据、错误引用、外部依赖回退和文档内 prompt injection。三路结构消融的两个拒答违规已由 `RagBadCaseManifestTest` 校验并冻结为 `backend_v2/src/test/resources/rag-eval/badcase/rag-badcase-v1.json` 的 reviewed case；Router 修复与同一隔离库三路复跑后，两个 case 均为 `fixed`，拒答/权限违规为 `0`，但 R2 的 MRR/nDCG 仍低于 R0，整体报告保持 `inconclusive`。Bad Case 分别绑定 `TC-G2-04/05/06/07/08`，不单独制造一套指标；G2 退出时 reviewed P0/P1 必须全部 GREEN，且既有正向冻结集不得退化。
+
+同一复跑还将 `g2-pre-bm25-v1-002` 的实际 gold rank `R0=1/R1=2/R2=2` 冻结为 P1 `retrieval_rank_regression`，将 `g2-pre-bm25-v1-009` 的 PDF 第 2 页 gold rank `R0=1/R1=2/R2=2` 与预期 `chunkId/pageNumber` 冻结为 P1 `citation_rank_regression`。两条均为 `development-regression`，尚未修复；它们解释 R2 的 MRR/nDCG 退化，不能因拒答 case fixed 而提前放行 R2。
 
 ### 3.2 G3 候选记忆确认与忽略契约
 
@@ -242,7 +254,21 @@
 | TC-G3-04a | 同一 `(userId, sessionId)` 连续失败两次时，记录丢失、次数未累计或泄露原始异常 message。 | 注册表只保存稳定异常类型、次数和最后失败时间，原子累计并可在进程内查询；不持久化诊断。 |
 | TC-G3-04b | 记忆提取异常使聊天处理抛错/中断，或未留下诊断；随后的 `EXTRACTED` 没有清除旧失败；`SKIPPED` 错误清除。 | 聊天 Agent 主链路保持完成，失败被诊断；同会话实际提取成功才清除，跳过仍保留失败，下一事件重试由既有未推进节流状态保证。 |
 
-### 3.2.2 G3 内置 Skill 契约
+### 3.2.2 G3 LongMemEval 30 题诊断契约
+
+LongMemEval 数据与官方评测器只能来自官方仓库 `https://github.com/xiaowu0162/LongMemEval`。“30 题”是本项目从官方 test split 分层冻结的诊断子集，不是官方固定版本，也不能表述为完整公开基准成绩。2026-08-30 本地尚未下载数据或生成 manifest；缺少仓库 revision、许可证证据、源文件 SHA-256、官方类别或评测器版本时，preflight 必须返回 `blocked_input_integrity`，不得创建评测用户、写入数据库或输出分数。
+
+`longmemeval-30-v1` 固定抽取信息提取 6 题（单会话 3、跨会话 3）、多会话推理 6 题、知识更新 6 题、时间推理 6 题和拒答 6 题。manifest 必须保存 `caseId`、官方类别、源 revision、会话/消息 ID、reference answer、支撑证据会话/消息、抽样种子和输入 SHA-256；一经冻结不得根据运行结果换题。每题使用独立虚拟用户和清空的 `longmemeval-eval` 命名空间，按原始时间和 session 边界回放目标问题之前的会话；runner 必须调用真实候选提取、确认、长期记忆读取与 Agent 注入服务，禁止把 gold fact、reference answer 或人工整理记忆直接写入 `user_memory`。
+
+每题固定 M0 无长期记忆、M1 全部机械确认、M2 人工盲审确认三个配对实验臂。模型、prompt、embedding、采样参数、上下文窗口和超时在三臂之间保持一致；审核员在 M2 只能查看候选及 evidence，不能查看目标问题、reference answer 或 judge 结果。报告记录候选、确认记忆、召回排名/距离、实际注入、最终回答、官方判分、耗时、token/调用次数、代码/模型/配置版本，并把失败归类为未提取、未确认、未召回、召回错误、已召回未利用、更新未覆盖、时态缺失或错误拒答。
+
+| TC-ID | 先写的失败测试 | GREEN 与边界 |
+| --- | --- | --- |
+| TC-G3-05 | manifest 缺来源或哈希仍启动；30 题类别/数量错误；M0 仍读取记忆；M1 未处理全部实际候选；M2 审核看到目标问题或答案；虚拟用户间泄露；runner 直接写入 gold 记忆。 | preflight fail-closed；30 题和五类分布固定；三臂输入可比；每题独立 owner/namespace；只通过生产记忆链路形成候选和长期记忆；报告可反查来源、证据、失败阶段、成本和延迟。 |
+
+诊断通过不以单一总准确率判断。必须分别报告总体/分类 Answer Accuracy、拒答正确率、Memory Recall@K、Candidate Precision、知识更新正确率、时态正确率、p50/p95 和单题成本；M2 相对 M0 至少净增 4 个正确 case、拒答最多新增 1 个幻觉错误、无跨用户泄露，才允许提出继续投入建议。30 题只支持方向性决策，不报告统计显著或总体领先。
+
+### 3.2.3 G3 内置 Skill 契约
 
 `BuiltinSkillRegistry` 只登记服务端代码固定的内置模板，不接受用户上传脚本、动态工具列表或持久化自定义 Skill。首个模板为 `technical-decision-comparison@v1`，输入是必填非空 `question` 和可选 `kbIds` 字符串数组；调用方未传 `kbIds` 时使用其全部已授权 KB，传入时只能继续收窄该范围。输入中的 `tools` 或其他未登记字段一律拒绝，避免调用方绕过模板工具边界。
 
@@ -250,7 +276,7 @@
 
 模板的非拒答输出必须有非空 `conclusion`，并提供至少一条 `evidence` 对象；每条证据同时含 `chunkId` 和位于本次授权 KB 范围内的 `kbId`。若 `abstained=true`，则必须提供非空 `reason`，此时可不提供证据。`BuiltinSkillRegistryTest` 先 RED 验证注册表缺失，再 GREEN 固定合法范围收窄、动态工具拒绝、越权 KB 拒绝，以及无证据且无拒答原因的输出拒绝；`BuiltinSkillExecutorTest` 固定执行器只能消费准备后的 KB 子集，并将无证据或 Harness 阻断收束为拒答；`HarnessedSkillKnowledgeToolExecutorTest` 固定代理接线、成功审计和熔断时不触发检索。这是 `TC-G3-01` 的 L0/L1 本地契约，不替代 HTTP/队列、真实模型、独立预算调度或 L2 集成验收。
 
-### 3.2.3 G4 受限工作流验证契约
+### 3.2.4 G4 受限工作流验证契约
 
 `WorkflowPlanVerifier` 接收尚未执行的 `WorkflowPlan`，其字段为 `maxSteps`、`timeoutSeconds` 与 `steps`。每个 `WorkflowStep` 必须有唯一 `id`、`toolName`、`factKey`、`claim` 和非空 `evidence`；每条 `WorkflowEvidence` 必须含非空 `chunkId`、与步骤相同的 `factKey` 和非空 `statement`。验证器使用与当前 `JChatMind` 相同的单次执行上限：`maxSteps` 为 1 至 20、`timeoutSeconds` 为 1 至 30，实际步骤数不得超过声明预算。
 
@@ -258,7 +284,7 @@
 
 `WorkflowPlanVerifierTest` 先 RED 证明验证器缺失，随后覆盖通过的授权计划、缺证据、未授权工具、同事实矛盾、超过 20 步/30 秒，以及实际步骤数超过声明预算。`WorkflowPlanExecutorTest` 先 RED 证明执行器缺失，再 GREEN 固定合法步骤的声明顺序和 Harness 成功审计、无效计划不创建 Harness 调用、首尾空白工具名不创建 Harness 调用、熔断或审批过期不进入业务执行器并分别记录 `CIRCUIT_OPEN`/`EXPIRED`、已放行步骤异常记录 `ERROR` 并停止后续步骤。这签收 `TC-G4-01` 的本地 L0/L1 验证与执行接线；`TC-G4-02` 的实际角色超时、fallback 和协作执行仍待。
 
-### 3.2.4 G4 入站 Webhook L0 安全契约
+### 3.2.5 G4 入站 Webhook L0 安全契约
 
 `InboundWebhookVerifier` 只在请求尚未映射到任务中心前作纯本地判定。入站事件字段为 `sourceId`、`eventId`、`timestamp`、`signature` 和原始 `payload`；`timestamp` 必须是 Unix 秒级整秒值。签名原文固定为版本字节 `1`、`sourceId` 的 4 字节大端有符号 UTF-8 字节长度与内容、`eventId` 的 4 字节大端有符号 UTF-8 字节长度与内容、8 字节大端有符号 Unix 秒值、以及 `payload` 的 4 字节大端有符号 UTF-8 字节长度与内容，全部作为 HMAC-SHA256 的输入并编码为小写十六进制值。长度前缀保证正文和事件 ID 含 `.` 或其他文本边界字符时不会重解释为不同事件。固定互操作向量使用来源 `build-system`、事件 `event-vector`、时间 `2026-08-25T09:00:00Z`、正文 `payload` 与测试密钥 `contract-test-signing-key`，其签名为 `9bf26f4f93cf781ba3cba92464aa546d7dd676047530a788a69d58b8943de62c`。验证器不读取配置文件或密钥系统，调用方仅以内存参数提供预先匹配的来源和签名密钥；实现不记录原始密钥或正文。
 
@@ -266,7 +292,7 @@
 
 该 L0 组件不提供 Controller、来源白名单存储、任务创建、出站 HTTP、重试、投递日志或 DLQ；进程重启后的跨实例幂等和“业务持久化与事件占用”原子性，必须在后续任务中心/持久化接线中补齐。`InboundWebhookVerifierTest` 先 RED 验证类缺失，随后再 RED 复现分隔符重解释和同秒纳秒篡改，再 GREEN 固定有效签名通过、来源或签名拒绝、重复事件拒绝、无效签名不占用 ID、非整秒时间戳拒绝，以及超过正负 5 分钟时间窗拒绝。该项只补充 `TC-G4-03` 的本地安全门禁，不将其表述为 Webhook 端到端验收。
 
-### 3.2.5 G5 单实例会话执行互斥契约
+### 3.2.6 G5 单实例会话执行互斥契约
 
 `ChatEventListener` 的异步处理必须先按 `sessionId` 进入 `ChatSessionExecutionCoordinator`，锁覆盖 `JChatMindFactory.create(...)/JChatMind.run()` 和 finally 中的候选记忆提取；同一会话在当前进程内不得并发运行这两个步骤，不同会话不应被全局锁阻塞。协调器必须在等待锁前登记会话引用，并仅在最后一个执行或等待任务退出后移除该会话锁，避免清理竞争导致同会话重新并发。
 
@@ -510,6 +536,10 @@ rag:
 
 项目内冻结集至少有一组具备授权会话上下文且 replay 包含非原问扩展 query 的 follow-up case；否则 R2 只能标为 `not_exercised`，不得解释为 Multi-Query 分支无收益。mMARCO-zh-sampled 若不具备此类 replay，继续只用于 Dense/Sparse/RRF 与 `4.7.3.2` 的 rerank 诊断。只有 `TC-G2-09` 和 `TC-G2-10` 全绿、R2 对相同有效 query 集不低于 R0 的 `Recall@5`、`MRR@10`、`nDCG@10`、p95 增幅不超过 15%，且授权/拒答无回归时，R2 才可进入同一链路上的 A/B/C rerank 对比；否则保持 R0 为默认并保存失败报告。
 
+**已运行结论（2026-08-30 复跑）。** `g2-pre-bm25-v1` 使用 9 个 case（7 个可回答、2 个拒答）和 7 个 fixture chunk，在真实 MyBatis/VectorChord/BM25/Ollama 链路运行 R0/R1/R2。输入哈希、scope、gold、query replay、候选预算和有效分母可比；复跑前将生产 Router 的确定性拒答纳入 replay，三臂拒答/权限违规均为 `0`，Recall@5 均为 `1.0`。R2 的 MRR/nDCG 仍低于 R0，因此质量门禁失败，R0 保持默认，R2 不进入默认链路；两个拒答 Bad Case 已标记 `fixed`，不能通过改换分母或将 case 用于同版本调参来重写质量结论。
+
+同一报告中的 `g2-pre-bm25-v1-002` 与 `g2-pre-bm25-v1-009` 已冻结为 P1 development Bad Case：R0 的多通道平铺 RRF 将 vector、title BM25、content BM25 分别计票，而 R1/R2 按 `outer_rrf_one_vote_per_branch` 把词法通道先归并为 Sparse 分支，外层不允许以同一分支的多个通道重复投票。该差异是本次结构消融的受控变量，不是可通过专用权重掩盖的生产缺陷；两条 Case 的处置固定为 `keep_r0_default_not_fixed`，待新的独立结构假设和同分母评测验证后再决定是否变更。
+
 #### 4.7.4 与总计划一致的通过判定
 
 - 任何指标或报告字段变更都必须同时满足本节验收和总计划 `TC-G0-03` / `TC-G2-03` 的证据记录要求。
@@ -562,3 +592,19 @@ rag:
 有效 RED 先确认外部 embedding 始终不可用时任务不会误成功；之后以读取前的路径/文件断言定位隔离装配差异。GREEN 的真实队列运行中，首次处理后任务为 `RETRYING(1)`、retry queue 有消息、chunk 为 0、物理文件为 1 份；测试不手工再次投递，由 RabbitMQ TTL/DLX 自动回投。回投后任务为 `SUCCEEDED(1)`，两个 chunk 均持久化非空 1024 维 embedding，物理文件仍为 1 份，Surefire 退出码为 `0`。临时容器、数据库、vhost、用户与目录在 `finally` 中删除。
 
 该验收只覆盖外部 embedding 短暂不可用后的自动恢复；其他外部依赖、图片/OCR、SSE 多实例分发和持久化事件恢复仍需独立用例。
+
+## 5. 项目级 release-v1 就绪契约
+
+本节是跨 G1-G5 的发布门禁，不新增功能阶段，也不否定已完成的阶段证据。任一项未通过时可以继续本地开发和诊断，但不得将仓库标记为 `release-v1 ready`。实现迁移工具、扫描器或观测组件若需要新增依赖，仍须先经 Ban 确认；在此之前可使用仓库现有 Maven、npm、PowerShell、Docker 和 SQL 能力完成最小契约。
+
+| TC-ID | RED / 当前缺口 | GREEN 与证据 |
+| --- | --- | --- |
+| TC-REL-01 默认构建 | 默认后端命令当前已达到 `0 failures/0 errors`；前端 lint/build 已可执行，但静态契约、L2/RAG/Playwright 的统一入口与 executed/skipped/reason 报告仍未收口。 | 一条文档化入口完成默认后端零 failure/zero error；一条前端入口完成静态契约、lint、build；L2/RAG/Playwright 使用显式 profile/任务并在报告中列出 executed/skipped/reason。 |
+| TC-REL-02 数据库生命周期 | 根 README 只列两个 auth SQL，无法从 16 个增量 SQL/说明文件推导唯一 clean install/upgrade 顺序；此前没有可执行 schema migrator。 | 已提供 [`sql/migrations/manifest.json`](../../sql/migrations/manifest.json)，并由 `SchemaMigrationExecutor`/`JdbcMigrationStore` 固定 schemaVersion、16 份脚本的顺序/依赖/事务属性/SHA-256、批准基线、ledger 状态与 catalog fail-closed 校验；真实 VectorChord PostgreSQL 隔离 clean install、前缀 upgrade、重放和失败恢复已通过 `MigrationLifecycleRuntimeL2Test`（`3 tests, 0 failures, 0 errors, 0 skipped`），完整生产对象 catalog 对账和发布入口仍待实现。 |
+| TC-REL-03 数据与 Git 边界 | 本地 `datasets/` 未被根忽略规则覆盖，存在误提交公开基准或大文件风险；报告位于 target 但来源 manifest 尚不统一。 | 原始公开数据、真实用户内容、凭据和生成报告被忽略；只提交来源 registry、不可变 manifest、预处理/评测代码和小型脱敏 fixture；测试验证关键目录 ignore 规则及 manifest 必填字段。 |
+| TC-REL-04 安全与隐私 | 现有 owner/Harness/MCP 边界较完整，但缺统一的 prompt injection、SSRF/外部 URL、恶意/超限上传、日志脱敏和数据保留负向矩阵。 | 对 REST/SSE/MCP/Webhook/摄入/记忆建立威胁到 TC 的映射；高风险输入在副作用前拒绝；日志不含凭据、用户正文或内部路径；审计、消息、任务、记忆和文件有保留/删除规则。 |
+| TC-REL-05 负载与可观测 | G5 只规定局部线程池和相对 p95 增幅，没有固定并发、KB/chunk 数、文件大小、队列积压或观测阈值。 | 固定 release 负载 profile；报告首 token/完整响应 p50/p95/p99、错误率、队列积压、线程池拒绝、SSE 重连、模型/embedding 调用和存储增长；traceId 可贯通 HTTP、任务、Rabbit、Worker、RAG/模型与 SSE。 |
+| TC-REL-06 备份恢复 | 只有局部索引/表恢复证据，没有 PostgreSQL 业务数据、上传文件和必要队列状态的整体 RPO/RTO。 | 定义 RPO/RTO；在隔离环境完成一次备份、破坏后恢复和一致性核对；向量/BM25 索引能够从业务事实重建，报告记录耗时、丢失窗口和人工步骤。 |
+| TC-REL-07 API 与产品旅程 | REST/SSE/MCP 有局部契约但无统一版本/弃用规则；阶段指标主要是技术指标。 | 发布记录固定 REST/SSE/MCP schema 版本与兼容边界；Onboarding、故障排查、技术决策追溯分别有冻结旅程，报告完成率、引用正确性、人工修正率和响应时间。 |
+
+`TC-REL-*` 的证据不得只引用设计文档；必须包含可执行命令或测试、输入版本、报告路径、执行日期、执行人和结论。首次补齐时先把当前缺口稳定复现为 RED，再做最小 GREEN，不借发布治理重构无关业务代码。
