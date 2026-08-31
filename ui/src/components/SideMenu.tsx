@@ -7,7 +7,7 @@ import {
   UserOutlined,
   LogoutOutlined,
 } from "@ant-design/icons";
-import { Tabs, type TabsProps, Button, Dropdown, Space } from "antd";
+import { Tabs, type TabsProps, Button, Dropdown, Space, message } from "antd";
 import { useNavigate, useLocation } from "react-router-dom";
 import AgentTabContent from "./tabs/AgentTabContent.tsx";
 import AddAgentModal from "./modals/AddAgentModal.tsx";
@@ -46,7 +46,23 @@ const SideMenu: React.FC = () => {
 
   const { agents, createAgentHandle, deleteAgentHandle, updateAgentHandle } =
     useAgents();
-  const { knowledgeBases, createKnowledgeBaseHandle } = useKnowledgeBases();
+  const {
+    knowledgeBases,
+    createKnowledgeBaseHandle,
+    deleteKnowledgeBaseHandle,
+  } = useKnowledgeBases();
+
+  const handleDeleteKnowledgeBase = async (knowledgeBaseId: string) => {
+    try {
+      await deleteKnowledgeBaseHandle(knowledgeBaseId);
+      if (location.pathname === `/knowledge-base/${knowledgeBaseId}`) {
+        navigate("/knowledge-base");
+      }
+      message.success("知识库删除完成");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "知识库删除失败");
+    }
+  };
 
   const [activeKey, setActiveKey] = useState(() => {
     if (location.pathname.startsWith("/knowledge-base")) return "knowledgeBase";
@@ -126,6 +142,7 @@ const SideMenu: React.FC = () => {
           onSelectKnowledgeBase={(knowledgeBaseId) => {
             navigate(`/knowledge-base/${knowledgeBaseId}`);
           }}
+          onDeleteKnowledgeBase={handleDeleteKnowledgeBase}
         />
       ),
     },

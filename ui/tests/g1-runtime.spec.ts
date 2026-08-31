@@ -252,3 +252,21 @@ test("G1 browser journey receives retry progress published after its SSE starts"
     { timeout: 15_000 },
   ).toContain("RUNNING");
 });
+
+test("G1 browser journey observes knowledge-base deletion completion", async ({ page, request }) => {
+  const accountF = `g1delete${runId}`.slice(0, 32);
+  const kbName = `G1 Browser Delete ${runId}`;
+  await register(request, accountF, "g1-user-delete");
+  await page.goto("/knowledge-base");
+  await login(page, accountF);
+  await page.getByRole("tab", { name: "知识库" }).click();
+  await createKnowledgeBase(page, kbName);
+
+  await page.getByRole("tab", { name: "知识库" }).click();
+  await page.getByRole("button", { name: `删除知识库 ${kbName}` }).click();
+  await expect(page.getByText("确定要删除这个知识库吗？")).toBeVisible();
+  await page.getByRole("button", { name: /确\s*定/ }).last().click();
+
+  await expect(page.getByText("知识库删除完成")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(kbName, { exact: true })).toHaveCount(0);
+});

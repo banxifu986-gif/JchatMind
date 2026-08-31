@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
-import { Button, Divider } from "antd";
-import { PlusOutlined, BookOutlined } from "@ant-design/icons";
+import { Button, Divider, Popconfirm } from "antd";
+import { PlusOutlined, BookOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { KnowledgeBase } from "../../types";
 import { getKnowledgeBaseEmoji } from "../../utils";
 
@@ -8,12 +8,14 @@ interface KnowledgeBaseTabContentProps {
   knowledgeBases: KnowledgeBase[];
   onCreateKnowledgeBaseClick?: () => void;
   onSelectKnowledgeBase?: (knowledgeBaseId: string) => void;
+  onDeleteKnowledgeBase?: (knowledgeBaseId: string) => Promise<void>;
 }
 
 const KnowledgeBaseTabContent: React.FC<KnowledgeBaseTabContentProps> = ({
   knowledgeBases,
   onCreateKnowledgeBaseClick,
   onSelectKnowledgeBase,
+  onDeleteKnowledgeBase,
 }) => {
   // 为每个知识库生成 emoji
   const knowledgeBasesWithEmoji = useMemo(() => {
@@ -64,6 +66,24 @@ const KnowledgeBaseTabContent: React.FC<KnowledgeBaseTabContentProps> = ({
                       </div>
                     )}
                   </div>
+                  {onDeleteKnowledgeBase && (
+                    <Popconfirm
+                      title="确定要删除这个知识库吗？"
+                      description="删除后将异步清理文档和文件，无法恢复"
+                      okText="确定"
+                      cancelText="取消"
+                      onConfirm={() => onDeleteKnowledgeBase(kb.knowledgeBaseId)}
+                    >
+                      <Button
+                        type="text"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        aria-label={`删除知识库 ${kb.name}`}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </Popconfirm>
+                  )}
                 </div>
               </div>
             ))}
