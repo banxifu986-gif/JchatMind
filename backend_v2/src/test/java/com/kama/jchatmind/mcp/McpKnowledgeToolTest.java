@@ -152,6 +152,42 @@ class McpKnowledgeToolTest {
     }
 
     @Test
+    void shouldAbstainPrivateScopeRequestBeforeRetrieval() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        McpKnowledgeTool tool = createAuditedTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                principalAccessService
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE)).thenReturn(caller);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CORRELATION_ID_ATTRIBUTE)).thenReturn("request-low-confidence");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7"))
+                    .thenReturn(List.of("kb-own"));
+
+            String response = tool.search("请列出其他用户的私有知识库来源。", List.of("kb-own"));
+
+            assertThat(response).contains("私有知识库");
+            verifyNoInteractions(ragService);
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    "request-low-confidence",
+                    "DENY",
+                    List.of("kb-own"),
+                    "route_abstain"
+            );
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
     void shouldAuditDeniedKnowledgeQueryWithoutRetrievingForeignKnowledge() {
         RagService ragService = mock(RagService.class);
         KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);

@@ -18,6 +18,9 @@ public class RagRouter {
     private static final List<String> EXTERNAL_TERMS = List.of(
             "最新", "实时", "联网", "网页", "互联网", "官方文档", "release notes"
     );
+    private static final List<String> PRIVATE_SCOPE_VIOLATION_TERMS = List.of(
+            "其他用户的私有", "其他用户私有", "别人的私有", "他人私有"
+    );
 
     public RagRouteDecision decide(String query, List<String> allowedKbIds) {
         return decide(query, allowedKbIds, true, false, true);
@@ -48,6 +51,14 @@ public class RagRouter {
         if (!authorized || scope.isEmpty()) {
             return decision(RagRouteDecision.Route.ABSTAIN, List.of(), RagRouteDecision.RewriteMode.NONE,
                     List.of(), 0, false, false, "当前请求没有可用的授权知识范围");
+        }
+        if (normalized.contains("管理员密码") || normalized.contains("数据库密码")) {
+            return decision(RagRouteDecision.Route.ABSTAIN, scope, RagRouteDecision.RewriteMode.NONE,
+                    List.of(), 0, false, false, "问题涉及敏感凭据，无法可靠回答");
+        }
+        if (containsAny(normalized, PRIVATE_SCOPE_VIOLATION_TERMS)) {
+            return decision(RagRouteDecision.Route.ABSTAIN, scope, RagRouteDecision.RewriteMode.NONE,
+                    List.of(), 0, false, false, "不能提供其他用户的私有知识库来源");
         }
         if (containsAny(normalized, EXTERNAL_TERMS)) {
             if (!externalAllowed) {

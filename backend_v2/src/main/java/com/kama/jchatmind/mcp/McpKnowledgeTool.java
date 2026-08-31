@@ -122,7 +122,7 @@ public class McpKnowledgeTool {
                         markdownTableAssetResults,
                         pdfPageAssetResults,
                         results,
-                        route.topK()
+                    route.topK()
                 );
             }
             if (results == null || results.isEmpty()) {

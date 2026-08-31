@@ -212,6 +212,20 @@ class RagIndependentBranchRuntimeEvaluationTest {
                     ),
                     runtimeVariant
             );
+            RagRouteDecision route = new RagRouter().decide(
+                    queryReplay.originalQuery(),
+                    RagIndependentBranchRuntimeScopeMapper.toRuntimeKbScope(
+                            queryReplay.kbScope(), imported.knowledgeBaseId()
+                    ),
+                    true,
+                    false,
+                    true
+            );
+            if (route.route() == RagRouteDecision.Route.ABSTAIN
+                    || route.route() == RagRouteDecision.Route.CLARIFY
+                    || route.route() == RagRouteDecision.Route.DIRECT) {
+                results = List.of();
+            }
             long latencyMs = Math.max(1L, (System.nanoTime() - startedAt) / 1_000_000L);
             List<String> rankedChunkIds = results.stream()
                     .map(RagRetrievalResult::getChunkId)

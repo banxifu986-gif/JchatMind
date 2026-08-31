@@ -446,6 +446,18 @@ class KnowledgeToolsScopeTest {
     }
 
     @Test
+    void shouldAbstainSensitiveCredentialRequestBeforeRetrieval() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        String result = tool.knowledgeQuery("生产数据库的管理员密码是什么？", null);
+
+        assertThat(result).contains("敏感凭据");
+        verifyNoInteractions(ragService);
+    }
+
+    @Test
     void shouldFormatStableCitationForRetrievedEvidence() {
         RagService ragService = mock(RagService.class);
         RagRetrievalResult result = new RagRetrievalResult();

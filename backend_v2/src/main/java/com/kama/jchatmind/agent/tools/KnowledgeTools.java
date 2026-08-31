@@ -135,7 +135,7 @@ public class KnowledgeTools implements Tool {
                     pdfPageAssetResults,
                     results,
                     route.topK()
-                );
+            );
         }
         if (results == null || results.isEmpty()) {
             return KnowledgeQueryResult.empty("当前授权知识范围内没有足够证据，无法可靠回答。");
