@@ -39,12 +39,9 @@ javamind_agents
 docker compose up -d
 ```
 
-2. 执行建表 SQL：
+2. 按 [`sql/migrations/manifest.json`](sql/migrations/manifest.json) 的唯一顺序执行迁移，并在执行前核对每份 SQL 的 SHA-256。Manifest 明确要求先提供不包含在本仓库内的、经批准的原始基线 schema；缺少基线或发现未知/部分状态时必须 fail-closed，不能把增量 SQL 当作 clean install，也不能用 `IF NOT EXISTS` 掩盖漂移。
 
-```bash
-docker exec -i jchatmind-postgres psql -U postgres -d jchatmind < sql/auth/2026-05-26-create-user-table.sql
-docker exec -i jchatmind-postgres psql -U postgres -d jchatmind < sql/auth/2026-05-26-create-email-failure-table.sql
-```
+后端的 `SchemaMigrationExecutor` + `JdbcMigrationStore` 提供显式的 ledger/事务执行能力，但默认不随应用启动自动运行；生产执行仍须由发布流程传入批准基线文件、SHA-256 和人工前置批准项。
 
 3. 在 `backend_v2` 中补全运行配置（`.env` 文件）
 4. 启动后端
