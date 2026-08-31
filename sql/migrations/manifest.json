@@ -1,0 +1,144 @@
+{
+  "manifestVersion": "1",
+  "schemaVersion": "2026-08-30",
+  "baseline": {
+    "required": true,
+    "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",
+    "failClosedOnUnknownState": true
+  },
+  "execution": {
+    "cleanInstall": "Verify the approved baseline snapshot, then apply every migration in ascending order after verifying its SHA-256.",
+    "upgrade": "Read the recorded schema version and apply only the next manifest entries in ascending order after verifying predecessor state and SHA-256.",
+    "unknownState": "Fail closed on a missing, partial, unknown, or hash-mismatched baseline or migration ledger; never hide drift with IF NOT EXISTS."
+  },
+  "migrations": [
+    {
+      "order": 10,
+      "id": "auth.create-user-table",
+      "path": "sql/auth/2026-05-26-create-user-table.sql",
+      "sha256": "b82f050023e0e9cfdb0d01ca3e10bdc97c83843cc2d9bb95991a8ec5767f84a4",
+      "transactional": true,
+      "requires": ["baseline.application-schema"]
+    },
+    {
+      "order": 20,
+      "id": "auth.create-email-failure-table",
+      "path": "sql/auth/2026-05-26-create-email-failure-table.sql",
+      "sha256": "25d4995b16328a76c229d0d386b963f1cf2eb4e5ad687f1094d97aa3aa5a1c34",
+      "transactional": true,
+      "requires": ["auth.create-user-table"]
+    },
+    {
+      "order": 30,
+      "id": "user-memory.add-columns",
+      "path": "sql/user-memory/2026-05-25-add-user-memory-columns.sql",
+      "sha256": "f69b4b2f2bf7c388b37c30d8a549deab3817b0c8bc3bcdd819d141571d054800",
+      "transactional": true,
+      "requires": ["baseline.user-memory"]
+    },
+    {
+      "order": 40,
+      "id": "user-memory.add-embedding",
+      "path": "sql/user-memory/2026-05-25-add-embedding-column.sql",
+      "sha256": "cdca38fe6835d7c1e2db89341355564166338b48b0cb69fb1a85cfe06b515fcc",
+      "transactional": true,
+      "requires": ["user-memory.add-columns"]
+    },
+    {
+      "order": 50,
+      "id": "user-memory.add-candidate-status",
+      "path": "sql/user-memory/2026-05-25-add-user-memory-candidate-status.sql",
+      "sha256": "0d29aadfb62bad666673e33f7a805018e1de4a1322c97bb7117422461c5de839",
+      "transactional": true,
+      "requires": ["baseline.user-memory-candidate"]
+    },
+    {
+      "order": 60,
+      "id": "user-memory.add-expires-at",
+      "path": "sql/user-memory/2026-08-25-add-user-memory-expires-at.sql",
+      "sha256": "e57f298f04bcbae4f41538dd39ad3cd7514667b5288e866544439475110a83b1",
+      "transactional": true,
+      "requires": ["user-memory.add-columns"]
+    },
+    {
+      "order": 70,
+      "id": "user-memory.add-superseded-by",
+      "path": "sql/user-memory/2026-08-25-add-user-memory-superseded-by.sql",
+      "sha256": "b028b0a39b624064747d0353c52d0204359ddad7be10c2fa76bcf06a9e472a9a",
+      "transactional": true,
+      "requires": ["user-memory.add-expires-at"]
+    },
+    {
+      "order": 80,
+      "id": "user-memory.create-cosine-index",
+      "path": "sql/user-memory/cosine_index.sql",
+      "sha256": "2a6b2404bf44d6b0f15bb836b6517826f058bce92769265d06952812c80fc809",
+      "transactional": false,
+      "requires": ["user-memory.add-embedding", "baseline.chunk-bge-m3"]
+    },
+    {
+      "order": 90,
+      "id": "knowledge-base.add-owner",
+      "path": "sql/knowledge-base/2026-08-18-add-knowledge-base-owner.sql",
+      "sha256": "6407dd08dde03d3fe3e3f998294618aae2a4300cd191aae5eef8848a8c107a38",
+      "transactional": true,
+      "requires": ["auth.create-user-table", "baseline.knowledge-base"]
+    },
+    {
+      "order": 100,
+      "id": "knowledge-base.migrate-agent-bindings",
+      "path": "sql/knowledge-base/2026-08-18-migrate-agent-knowledge-base.sql",
+      "sha256": "47874834f41d888ab9d920b751d82615508acca091f7f87ee752f7eebe56f0a6",
+      "transactional": true,
+      "requires": ["knowledge-base.add-owner", "baseline.agent"]
+    },
+    {
+      "order": 110,
+      "id": "knowledge-base.enforce-owner-not-null",
+      "path": "sql/knowledge-base/2026-08-18-enforce-knowledge-base-owner-not-null.sql",
+      "sha256": "f0eb4519871ffded2128abd0736dfe2af1a44835a7d560126947927b612de499",
+      "transactional": true,
+      "requires": ["knowledge-base.add-owner", "manual.owner-review"]
+    },
+    {
+      "order": 120,
+      "id": "ingestion.create-task",
+      "path": "sql/ingestion/2026-08-18-create-ingestion-task.sql",
+      "sha256": "901802f870fb6e435922796bfe9e699d317fbc1a9dc0d03b5b28670dbe82a7fd",
+      "transactional": true,
+      "requires": ["auth.create-user-table", "baseline.knowledge-base", "baseline.document"]
+    },
+    {
+      "order": 130,
+      "id": "ingestion.create-document-asset",
+      "path": "sql/ingestion/2026-08-22-create-document-asset.sql",
+      "sha256": "fdb4766a6aeaf910777cf088b4d21c582d650d6641a67fb0e4b66031389da4da",
+      "transactional": true,
+      "requires": ["ingestion.create-task", "baseline.chunk-bge-m3"]
+    },
+    {
+      "order": 140,
+      "id": "knowledge-base.create-vchord-bm25-index",
+      "path": "sql/knowledge-base/2026-08-22-add-vchord-bm25-index.sql",
+      "sha256": "b2d633e1e25d6f4a922d42d5402f8d25feb41dd01165bed0dbe036b863c21d53",
+      "transactional": true,
+      "requires": ["ingestion.create-document-asset", "baseline.chunk-bge-m3"]
+    },
+    {
+      "order": 150,
+      "id": "mcp.create-principal-access",
+      "path": "sql/mcp/2026-08-18-create-mcp-principal-access.sql",
+      "sha256": "8b7d67bd1a691c2fe871abb3bf2054653c53de6efec4b6fc5ac7619ae73d8fd3",
+      "transactional": true,
+      "requires": ["auth.create-user-table"]
+    },
+    {
+      "order": 160,
+      "id": "knowledge-base.create-deletion-task",
+      "path": "sql/knowledge-base/2026-08-25-create-knowledge-base-deletion-task.sql",
+      "sha256": "dc6565590d0999efd7400275a0f00e009a38bea95c1059bf8395bd2fe4202072",
+      "transactional": true,
+      "requires": ["auth.create-user-table", "ingestion.create-task"]
+    }
+  ]
+}
