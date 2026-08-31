@@ -33,6 +33,7 @@ import com.kama.jchatmind.util.RagChunkSupport;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,6 +81,7 @@ import java.util.stream.Collectors;
         }
 )
 @ActiveProfiles("rag-eval")
+@EnabledIfSystemProperty(named = "rag.eval.runtime.enabled", matches = "true")
 class RagRecallEvaluationTest {
 
     private static final String FIXTURE_KB_NAME = "RAG Recall Fixture KB";

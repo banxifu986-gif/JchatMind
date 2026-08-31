@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,6 +54,7 @@ import java.util.stream.Collectors;
 
 @SpringBootTest(classes = MultiCprEvaluationTest.MultiCprTestConfig.class)
 @ActiveProfiles("multi-cpr")
+@EnabledIfSystemProperty(named = "rag.eval.multi-cpr.enabled", matches = "true")
 class MultiCprEvaluationTest {
 
     private static final String KB_NAME_PREFIX = "Multi-CPR";

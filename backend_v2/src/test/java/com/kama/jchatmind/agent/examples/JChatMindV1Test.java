@@ -1,6 +1,7 @@
 package com.kama.jchatmind.agent.examples;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -14,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 测试基础聊天功能
  */
 @SpringBootTest
+@EnabledIfSystemProperty(named = "agent.examples.enabled", matches = "true")
 public class JChatMindV1Test {
 
     @Autowired

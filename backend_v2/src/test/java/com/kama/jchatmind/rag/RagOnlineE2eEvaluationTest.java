@@ -11,6 +11,7 @@ import com.kama.jchatmind.service.impl.RagServiceImpl;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.mybatis.spring.annotation.MapperScan;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 
 @SpringBootTest(classes = RagOnlineE2eEvaluationTest.RagOnlineE2eTestConfig.class)
 @ActiveProfiles("rag-eval")
+@EnabledIfSystemProperty(named = "rag.eval.runtime.enabled", matches = "true")
 class RagOnlineE2eEvaluationTest {
 
     private static final int ONLINE_TOP_K = 3;

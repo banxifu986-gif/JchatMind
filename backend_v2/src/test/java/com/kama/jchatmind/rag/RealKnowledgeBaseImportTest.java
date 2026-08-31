@@ -23,6 +23,7 @@ import com.kama.jchatmind.service.impl.RetrievableTitleLexicalizer;
 import com.kama.jchatmind.util.RagChunkSupport;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.mybatis.spring.annotation.MapperScan;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,6 +58,7 @@ import java.util.Map;
 
 @SpringBootTest(classes = RealKnowledgeBaseImportTest.ImportTestConfig.class)
 @ActiveProfiles("rag-eval")
+@EnabledIfSystemProperty(named = "rag.eval.runtime.enabled", matches = "true")
 class RealKnowledgeBaseImportTest {
 
     @Autowired
