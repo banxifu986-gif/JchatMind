@@ -1,30 +1,30 @@
 # 可信研发知识协作 Agent 升级总计划
 
-> 状态：G0 已结项；G1 核心链路已完成，受控 KB 删除任务已通过隔离 L2 与 Edge Playwright L3，生产迁移入口仍待完成；G2 已完成原生 BM25、Router/资产候选接线、独立三路实现及诊断评测，但三路与 TEI 结果均未通过默认切换门禁，R0 与本地 rerank 默认保持不变；G3、G4、G5 均为部分实现，尚未达到阶段退出条件。
+> 状态：G0 已结项；G1 核心链路已完成，受控 KB 删除任务已通过隔离 L2 与 Edge Playwright L3，显式生产迁移入口和托管 catalog 对账已实现并通过隔离 L2，真实生产执行仍须发布窗口；G2 已完成原生 BM25、Router/资产候选接线、独立三路实现及诊断评测，当前 Bad Case 回放已全绿但 release-v1、Router/固定链路消融和默认切换门禁仍未完成，R0 与本地 rerank 默认保持不变；G3、G4、G5 均为部分实现，尚未达到阶段退出条件。
 > 创建日期：2026-08-14  
 > 产品定位：面向个人开发者和小型研发团队的可信知识协作 Agent。  
 > 本文是当前唯一维护的跨模块计划，负责需求、设计、实施和验收的主索引。历史专项方案已归档；当前实施范围和验收以本文与现有 Spec 为准。
 
 ---
 
-## 0. 当前状态与推进结论（2026-08-31）
+## 0. 当前状态与推进结论（2026-09-01）
 
 本节是本文唯一的当前状态视图。后文按时间保留的 RED/GREEN、实验和决策记录只用于追溯；若与本节冲突，以本节及第 6.3 节验收矩阵的最新状态为准。
 
 | 阶段 | 当前状态 | 已签收边界 | 未完成退出项 |
 | --- | --- | --- | --- |
 | G0 | 已完成 | 聊天、RAG 回归哨兵、SSE、Harness、前端关键旅程 | 无；后续仅做回归维护 |
-| G1 | 部分完成，核心主链路可用 | owner-only 权限、任务摄入、真实队列/数据库、PDF/HTML/Markdown、单实例任务 SSE、MCP 主体与真实模型工具调用、KB 删除任务隔离 L2/L3 | KB 删除任务生产迁移 |
-| G2 | 部分完成，默认结构不切换 | VectorChord BM25、范围谓词下推、Router 入口、PDF/Markdown 表格资产、独立三路实现与真实结构消融、mMARCO 本机诊断 | RAG Bad Case 闭环、release-v1 未调参集、Router 相对固定链路消融、组合授权 L2、引用/拒答/答案质量门禁、真实多模态验收 |
+| G1 | 部分完成，核心主链路可用 | owner-only 权限、任务摄入、真实队列/数据库、PDF/HTML/Markdown、单实例任务 SSE、MCP 主体与真实模型工具调用、KB 删除任务隔离 L2/L3、显式迁移发布入口与 catalog 对账 | 真实生产发布窗口执行与记录；多实例 SSE/持久化恢复 |
+| G2 | 部分完成，默认结构不切换 | VectorChord BM25、范围谓词下推、Router 入口、PDF/Markdown 表格资产、独立三路实现与真实结构消融、mMARCO 本机诊断、当前 reviewed Bad Case 回放 | release-v1 未调参集、Router 相对固定链路消融、组合授权 L2、引用/拒答/答案质量门禁、真实多模态验收 |
 | G3 | 部分完成 | 内置 Skill L0/L1、候选确认/忽略/编辑/删除、节流、去重、冲突和过期治理 | LongMemEval 30 题、记忆 L2/L3、Skill HTTP/队列/模型总结和运行时预算 |
 | G4 | 部分完成，暂不扩面 | 工作流验证/顺序执行 L0/L1、入站 Webhook 本地验签 | Planner、实际超时/fallback、持久化审计、Webhook 任务映射/投递/重试/DLQ；须先证明质量收益 |
 | G5 | 部分完成 | 单实例会话互斥、Agent 专用有界执行池 | 明确负载模型、工具/索引/Webhook 线程池、背压、缓存隔离、多实例 SSE 与恢复 |
 
 当前按以下顺序推进，不再并行扩大能力面：
 
-1. 恢复工程基线：同步三份真源、默认后端测试零失败/零错误、前端 lint/build/静态契约统一门禁、数据库迁移顺序和 clean install 可复现。
-2. 完成 G1 KB 删除任务 L2/L3，证明数据库级删除、文件清理、重试/死信、跨账号隔离和浏览器状态一致。
-3. 收口 G2：先治理 Bad Case、拒答和引用，再建立未参与调参的 `release-v1`，完成固定链路/Router 的质量、p95 与成本消融；门禁通过前保持 R0 和本地 rerank 默认值。
+1. 已完成工程基线收口：三份真源已同步，默认后端测试零失败/零错误，前端 lint/build/静态契约通过，数据库迁移顺序、clean install、release entry 和隔离 catalog 对账可复现；真实生产迁移仍由发布窗口单独执行。
+2. 已完成 G1 KB 删除任务 L2/L3，证明数据库级删除、文件清理、重试/死信、跨账号隔离和浏览器状态一致。
+3. 当前下一步收口 G2：Bad Case 的当前 reviewed 集已完成修复回放，继续建立未参与调参的 `release-v1`，完成固定链路/Router 的质量、p95 与成本消融；门禁通过前保持 R0 和本地 rerank 默认值。
 4. 执行 G3 LongMemEval 30 题及记忆 L2/L3；若 M2 相对 M0 无明确净收益，不扩展反思和更多记忆类型。
 5. 完成最小 G5 负载、背压、观测和恢复能力后，再决定是否投入 G4 Planner、Webhook 和多 Agent。
 
@@ -267,9 +267,11 @@ Bad Case 分四层管理：
 
 2026-08-30 已在 `RagRouter` 增加敏感凭据和他人私有知识库的确定性 `ABSTAIN`，`KnowledgeTools` 与 `McpKnowledgeTool` 在检索前复用该决定；对应 `RagRouterTest`、`KnowledgeToolsScopeTest` 与 `McpKnowledgeToolTest` 已 GREEN。随后复跑直接检索结构的 `g2-pre-bm25-v1` 三路真实报告，拒答/权限违规均为 `0`，两个 reviewed case 更新为 `fixed`；整体报告仍因 R2 的 MRR/nDCG 低于 R0 为 `inconclusive`，R0 保持默认。
 
-同一复跑报告还确认 R1/R2 将 code identifier case `g2-pre-bm25-v1-002` 的 gold 从第 1 名降为第 2 名，并将 PDF 第 2 页引用 case `g2-pre-bm25-v1-009` 的第 2 页 gold 排在第 1 页之后。两项已作为 P1 `retrieval_rank_regression` 与 `citation_rank_regression` reviewed case 写入 `rag-badcase-v1`，当前为 `development-regression`，是后续 R2 质量修复的最小输入；不能因拒答归零而将它们标记 fixed。
+同一复跑报告还确认 R1/R2 将 code identifier case `g2-pre-bm25-v1-002` 的 gold 从第 1 名降为第 2 名，并将 PDF 第 2 页引用 case `g2-pre-bm25-v1-009` 的第 2 页 gold 排在第 1 页之后。两项已作为 P1 `retrieval_rank_regression` 与 `citation_rank_regression` reviewed case 写入 `rag-badcase-v1`，在修复前处于 `development-regression`，是后续 R2 质量修复的最小输入；不能因拒答归零而将它们标记 fixed。
 
-复核确认这两条回归不是实现错误：R0 平铺融合让 vector、title BM25、content BM25 分别参与 RRF；R1/R2 则遵循 `TC-G2-09` 的 `outer_rrf_one_vote_per_branch`，先将两个词法通道归并为 Sparse 分支，外层每分支最多一票。因此不通过为该两例恢复多票、增加专用权重或调整阈值来篡改实验结构。BadCase 的 `disposition` 固定为 `keep_r0_default_not_fixed`，R0 保持默认；后续只有提出新的、独立冻结的结构假设并以同一有效分母重跑，才可改变这一结论。
+复核确认这两条回归不是实现错误：R0 平铺融合让 vector、title BM25、content BM25 分别参与 RRF；R1/R2 则遵循 `TC-G2-09` 的 `outer_rrf_one_vote_per_branch`，先将两个词法通道归并为 Sparse 分支，外层每分支最多一票。因此不通过为该两例恢复多票、增加专用权重或调整阈值来篡改实验结构。修复前 BadCase 的 `disposition` 为 `keep_r0_default_not_fixed`，R0 保持默认；后续只有提出新的、独立冻结的结构假设并以同一有效分母重跑，才可改变这一结论。
+
+**2026-09-01 G2 Bad Case 修复回放。** 针对上述两条 P1，新增独立的 `query-anchor-tiebreak-v1` 评测变体规则：仅在同一组分支、相邻 outer RRF 分数差不超过一名的可比候选之间，优先保留查询中明确出现的代码标识符或 PDF 来源/页码锚点；不增加分支投票、不引入专用权重，不改变普通生产 `retrieve` 默认路径。先以 `RagServiceImplTest` 固定 code identifier/PDF page 两个 RED/GREEN 单测，再由 `RagIndependentBranchRuntimeEvaluationTest` 在同一 `g2-pre-bm25-v1` 隔离库和有效分母上复跑。最新报告 `backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json` 中 R0/R1/R2 的 Recall@1/3/5/10、MRR@10、nDCG@10 均为 `1.0`，拒答/权限违规均为 `0`，R1/R2 两个 gold 均为第 `1` 名，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`（下降约 `10.5%`），评测 gate 为 `eligible_for_rerank_ab`。两个 case 更新为 `fixed`，处置为 `fixed_in_evaluation_keep_r0_default`；由于修复使用了当前 development 输入，尚不能回填 untouched test 或宣称 release-v1 同版本收益，R0 仍保持默认。
 
 Bad Case 不新增平行评分体系，分别绑定 `TC-G2-04/05/06/07/08`：改写与 topic switch 归 `TC-G2-04/07`，Router/拒答/权限归 `TC-G2-05`，资产引用归 `TC-G2-06`，融合、rerank 与 context 污染归 `TC-G2-08`。G2 退出时，reviewed 的 P0/P1 case 必须全部 GREEN，权限违规和拒答违规均为 `0`；修复不能降低既有正向冻结集指标或破坏报告可比性。
 
@@ -462,7 +464,7 @@ G0 是其余阶段前置条件。G1-G3 为项目的核心简历主线；G4-G5 �
 
 **2026-08-24 G2-3 导航判定局部收口记录。** 初始 RED 证明 `/api/v1/agents` 因任意 slash 被错误归为 `NAVIGATION`；最小 GREEN 将章节导航缩为 `>`，`.md`/`.markdown` 文档定位保持导航。首轮独立审查发现 P1：显式 context 下 API/代码路径仍可能被低信息 follow-up 升为 `HARD`，且 LLM 可能改写。后续将“可导航章节”与“结构化路径形态”拆分：`>` 仅控制导航与标题路径候选，`>`、`/`、`\\` 均禁止低信息 follow-up 和 LLM 改写。API 与 Windows 代码路径在 active context 下均固定为 `FACTOID/SOFT`、保留原问、不调用 LLM；API 路径也断言零 title/path Mapper 扫描，Markdown 文档定位仍为 `NAVIGATION`。`QueryRewriteServiceImplTest` 21/21、`RagServiceImplTest` 8/8、`KnowledgeToolsScopeTest` 15/15，共 44/44 通过；P1 修复复审无 P0/P1/P2。它只排除 slash/backslash 误触发，合法导航仍使用现有标题路径候选读取，尚未在冻结集或真实 PostgreSQL 度量其范围、Recall 和 p95。
 
-**2026-08-25 G2-3b 独立三路召回重启决策（已实施，默认切换被拒绝）。** 本决策随后已按 `TC-G2-09/10` 实施：Multi-Query 不作为与向量、BM25 平级的新索引，而由原问 Dense、原问 Sparse 和仅含非原问扩展 query 的 Expanded-query 三个分支产出独立排名，再做外层 RRF；分支内按 chunk 去重，第三路为空时不回填原问。2026-08-28 的真实冻结运行已证明实现和报告可比性，但 R2 指标低于 R0 且拒答门禁未通过，因此 R0 保持默认。后续工作是把拒答违规纳入 `rag-badcase-v1`、扩充未调参 release 集并验证 Router/引用，不再重复实现三路结构，也不使用 mMARCO 自然 query 宣称第三路收益。
+**2026-08-25 G2-3b 独立三路召回重启决策（已实施，默认切换被拒绝）。** 本决策随后已按 `TC-G2-09/10` 实施：Multi-Query 不作为与向量、BM25 平级的新索引，而由原问 Dense、原问 Sparse 和仅含非原问扩展 query 的 Expanded-query 三个分支产出独立排名，再做外层 RRF；分支内按 chunk 去重，第三路为空时不回填原问。2026-08-28 的真实冻结运行已证明实现和报告可比性，但 R2 指标低于 R0 且拒答门禁未通过，因此 R0 保持默认。后续已完成拒答 Bad Case 纳入与当前 development 回放修复；仍需扩充未调参 release 集并验证 Router/引用，不再重复实现三路结构，也不使用 mMARCO 自然 query 宣称第三路收益。
 
 当前 RAG 已具备向量、标题精确/包含/关键词/Trigram、标题 BM25、正文 BM25、RRF 和规则 rerank；这不是 G2 的完成状态。代码复核后，下一阶段必须先解决以下问题：
 
@@ -561,7 +563,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | 领域 | 最小门禁 |
 | --- | --- |
 | 构建与 CI | 默认后端测试为零 failure/zero error；前端静态契约、lint、build 统一执行；L2/RAG/Playwright 通过显式 profile 或独立任务运行，不得静默 skip 后宣称全绿。 |
-| 数据库生命周期 | 已提供唯一有序的 [`sql/migrations/manifest.json`](../../../sql/migrations/manifest.json)，并完成 `SchemaMigrationExecutor`/`JdbcMigrationStore` 的 fail-closed 核心、ledger catalog 校验、基线/迁移哈希、顺序依赖、重复执行和失败状态保留；真实隔离 PostgreSQL clean install/upgrade 已通过，完整发布 catalog 对账和生产发布入口仍待验收。 |
+| 数据库生命周期 | 已提供唯一有序的 [`sql/migrations/manifest.json`](../../../sql/migrations/manifest.json) 与 [`catalog-contract.json`](../../../sql/migrations/catalog-contract.json)，并完成 `SchemaMigrationExecutor`/`JdbcMigrationStore` 的 fail-closed 核心、ledger catalog 校验、基线/迁移哈希、顺序依赖、重复执行和失败状态保留；`MigrationReleaseApplication` 显式执行迁移并生成脱敏记录，真实隔离 PostgreSQL clean install/upgrade、release entry、全量契约对象对账和已声明关键定义漂移负向已通过；真实生产执行仍需发布窗口。 |
 | 数据与仓库治理 | 原始公开基准、真实用户内容、凭据和生成报告不得提交 Git；`datasets/` 等本地缓存必须被忽略，只提交来源 registry、manifest、脚本和小型脱敏 fixture。 |
 | 安全与隐私 | owner/Agent/会话范围、MCP/Webhook 身份、prompt injection、外部 URL/SSRF、恶意或超限上传、日志脱敏、审计/消息/任务/记忆保留与删除均有明确边界和负向用例。 |
 | 可观测与负载 | 固定目标负载、文档大小、KB/chunk 规模和并发会话数；记录端到端 trace、线程池拒绝、队列积压、模型/embedding 调用、SSE 重连和存储增长，阈值超限有告警或明确人工处置。 |
@@ -587,7 +589,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G1-04 | G1 / L0-L2 | 越权 KB/文档/任务访问、重复上传和跨用户范围。 | 两个隔离用户经真实 JWT 对 A 的读取、更新、删除、上传、任务查询和 Agent 绑定均收到统一拒绝且不泄露资源标识或内容；KB 删除后关联资源不可再访问。 | `DocumentFacadeServiceImplTest`、`IngestionTaskServiceImplTest`、`IngestionTaskControllerTest` 及隔离 HTTP L2。 |
 | TC-G1-04a | G1 / L0-L1 | 对无 owner、非 owner、缺失、重复和已删除 KB 执行 Agent 绑定、KB/文档 CRUD、索引删除、Factory 和 MCP 检索；验证关系表迁移、替换绑定与空绑定。 | 服务端统一拒绝越权；空绑定不检索；运行时仅保留 owner 范围；无身份 MCP 不访问私有 KB；绑定不再持久化为 Agent JSONB。 | `McpKnowledgeToolTest`、`AgentFacadeServiceImplTest`、`AgentKnowledgeBaseBindingServiceTest`、`AgentKnowledgeBasePersistenceContractTest`、`AgentKnowledgeBaseMigrationContractTest`、`KnowledgeBaseFacadeServiceImplTest`、`DocumentFacadeServiceImplTest`、`JChatMindFactoryOwnershipTest`、`KnowledgeToolsScopeTest` |
 | TC-G1-04b | G1 / L0-L2 | 以无效和有效 MCP 主体调用生产 `STREAMABLE` 协议，验证主体到内部用户映射、owner 范围与追加审计。 | 无效凭据拒绝；有效主体只能访问单一 grant 对应用户的 KB；认证与检索决定可审计且不保存原始凭据或查询正文。 | MCP 主体/审计契约测试、生产迁移记录与受控协议验收。 |
-| TC-G1-04c | G1 / L0-L3 | 重放同 owner KB 删除请求，并覆盖数据库级删除、文件清理、失败重试/死信、跨账号查询和浏览器状态。 | 重放返回同一删除任务；事务内任务/审计与 KB 删除一致；文件目录受控清理；非 owner 不获得资源信息；最终状态可从 UI 观察。 | `KnowledgeBaseDeletionTask*Test`、`DocumentStorageServiceImplTest`、`G1KnowledgeBaseDeletionRuntimeL2Test`、`ui/tests/knowledge-base-deletion.contract.mjs`；真实 PostgreSQL/RabbitMQ 与第二账号隔离 L2 已通过，删除 Edge L3 已通过，生产迁移入口仍待验收。 |
+| TC-G1-04c | G1 / L0-L3 | 重放同 owner KB 删除请求，并覆盖数据库级删除、文件清理、失败重试/死信、跨账号查询和浏览器状态。 | 重放返回同一删除任务；事务内任务/审计与 KB 删除一致；文件目录受控清理；非 owner 不获得资源信息；最终状态可从 UI 观察。 | `KnowledgeBaseDeletionTask*Test`、`DocumentStorageServiceImplTest`、`G1KnowledgeBaseDeletionRuntimeL2Test`、`ui/tests/knowledge-base-deletion.contract.mjs`；真实 PostgreSQL/RabbitMQ 与第二账号隔离 L2 已通过，删除 Edge L3 已通过；迁移发布入口与 catalog 对账由 `MigrationLifecycleRuntimeL2Test` 另行签收，真实生产执行仍须发布窗口。 |
 | TC-G1-05 | G1 / L0-L3 | 前端上传、任务 SSE/轮询兜底、失败重试和查询。 | Edge Playwright 已真实登录、上传、轮询至 `DEAD_LETTER`、切换 KB、跨账号直达拒绝、取消/重试冲突错误提示；第二条已连接 Bearer SSE 在真实重试后收到 `RUNNING`。L0/L1 额外验证事件序号单调、`Last-Event-ID` 回放和断线重连；真实 HTTP SSE 已验证同 owner 多连接广播和跨 owner 无泄露。 | `ui/tests/g1-runtime.spec.ts`、`ui/playwright.config.ts`、`G1IngestionTaskSseHttpRuntimeL2Test`、`IngestionTaskProgressServiceTest`；静态契约、lint、build 仅作回归门禁。 |
 | TC-G1-11 | G1 / L0 | 创建摄入专用 Listener 容器并检查消费者入口绑定。 | 每个实例固定两个摄入消费者，每消费者最多预取一条未确认消息；不宣称任务超时、队列监控、动态扩缩或跨实例协调。 | `IngestionWorkerConcurrencyConfigTest` |
 | TC-G2-01 | G2 / L0-L1 | 为 `DIRECT`、`PRIVATE_RAG`、`HYBRID_RAG`、`MULTIMODAL_RAG`、`EXTERNAL_TOOL`、`CLARIFY`、`ABSTAIN` 提供固定输入。 | Router 输出合法 schema、预期 route、KB 范围和原因。规则组件与生产入口接线分别验收，入口证据见 `TC-G2-05`。 | `RagRouterTest`（已通过） |
@@ -654,7 +656,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G1-04 | mock owner/文档/任务服务；无第二隔离账号或真实数据库 | `backend_v2/target/surefire-reports/` | RED 已确认跨 owner 任务查询与空幂等键写入前保护缺失；GREEN 覆盖任务 owner 拒绝和上传前拒绝空键，退出码 `0`。 | 2026-08-18 | Codex | 部分通过（与 TC-G1-04a 共同覆盖 L0/L1；跨用户 L2 未验收） |
 | TC-G1-04a | mock Mapper/Converter/Storage/RAG；迁移脚本文本契约；无真实模型或网络 | `backend_v2/target/surefire-reports/` | RED 已分别确认 MCP 未拒绝、Agent 未校验/去重、KB/文档全局访问、文档未清 chunk、Factory 可加载越权 KB，以及 Agent JSONB/关系表缺失。GREEN 命令为 `cd backend_v2; .\mvnw.cmd -q "-Dtest=AgentKnowledgeBaseBindingServiceTest,AgentKnowledgeBasePersistenceContractTest,AgentKnowledgeBaseMigrationContractTest,AgentFacadeServiceImplTest,JChatMindFactoryOwnershipTest,KnowledgeToolsScopeTest" test`，退出码 `0`。 | 2026-08-18 | Codex | 通过（L0/L1 owner-only 硬权限与关系表迁移；不替代 TC-G1-04 的 L2 幂等/跨用户真实库验收） |
 | TC-G1-04b | mock MCP 主体/KB/RAG；MCP 迁移与 Mapper 源码契约；无真实凭据、数据库或网络 | `backend_v2/target/surefire-reports/` | RED 已确认主体审计入口、允许/拒绝检索审计及关联 ID 缺失；GREEN 命令为 `cd backend_v2; .\mvnw.cmd -q "-Dtest=McpPrincipalMigrationContractTest,McpPrincipalAccessPersistenceContractTest,McpPrincipalAccessServiceTest,McpAccessAuditPersistenceContractTest,McpPrincipalAuditServiceContractTest,McpServerConfigTest,McpKnowledgeToolAuthorizationContractTest,McpKnowledgeToolTest" test`，退出码 `0`。 | 2026-08-18 | Codex | 通过（L0/L1 MCP 主体映射、owner-only 检索和追加审计；迁移未执行，不替代 L2） |
-| TC-G1-04c | 受控 KB 删除任务；mock Mapper/Rabbit/Storage；迁移与 HTTP 契约；隔离 PostgreSQL/RabbitMQ | `backend_v2/target/surefire-reports/TEST-com.kama.jchatmind.deletion.G1KnowledgeBaseDeletionRuntimeL2Test.xml` | 同 owner 重放返回同一任务；首次请求在同一事务写任务/审计并删除 KB；消费者受控删除目录，失败重试并可死信；任务查询按 owner 隔离。隔离 L2 另验证迁移、真实 Rabbit 消费、数据库级联、文件清理和第二账号拒绝；Edge L3 另验证浏览器最终状态。 | 2026-08-31 | Codex | 部分通过（L0/L1、隔离 L2 与删除 Edge L3；生产迁移入口待验收） |
+| TC-G1-04c | 受控 KB 删除任务；mock Mapper/Rabbit/Storage；迁移与 HTTP 契约；隔离 PostgreSQL/RabbitMQ | `backend_v2/target/surefire-reports/TEST-com.kama.jchatmind.deletion.G1KnowledgeBaseDeletionRuntimeL2Test.xml` | 同 owner 重放返回同一任务；首次请求在同一事务写任务/审计并删除 KB；消费者受控删除目录，失败重试并可死信；任务查询按 owner 隔离。隔离 L2 另验证迁移、真实 Rabbit 消费、数据库级联、文件清理和第二账号拒绝；Edge L3 另验证浏览器最终状态。 | 2026-08-31 | Codex | 通过（L0/L1、隔离 L2 与删除 Edge L3；迁移发布入口与 catalog 对账由独立 `TC-REL-02` 验收，真实生产执行仍须发布窗口） |
 | TC-G1-05 | Node 静态契约；本地 TypeScript/Vite；无浏览器或真实后端 | `ui/dist/` | `document-upload-idempotency.contract.mjs` 和 `ingestion-task-progress.contract.mjs` 先 RED 后 GREEN；`npm.cmd run lint`、`npm.cmd run build` 退出码 `0`。当前 UI 轮询任务，不产生 SSE 进度。 | 2026-08-18 | Codex | 部分通过（L0 前端契约和静态构建；Playwright L3 未验收） |
 | TC-G1-05 | 本机 `@playwright/test 1.62.1`；已安装 Edge；本地 UI `http://127.0.0.1:5173` | Playwright Node 冒烟命令；`ui/package.json`、`ui/package-lock.json` | Playwright 以 `msedge` channel 无头访问 UI，响应 `200`、标题 `JChatMind`；Chromium 托管二进制下载未完成，未登录、未上传、未执行 G1 功能旅程。 | 2026-08-19 | Codex | 部分通过（浏览器运行入口通过；非 L3 功能验收） |
 | TC-G1-01 | 独立 PostgreSQL `g1_l2`、独立 RabbitMQ vhost、`18080` 隔离后端；临时用户和 PDF 均在验收后清理 | 临时 L2 脚本运行输出；隔离任务/队列计数 | 真实 HTTP 上传进入隔离 RabbitMQ；不支持 PDF 依次到 `RETRYING` 与 `DEAD_LETTER`，`attemptCount=3`，DLQ 可见消息。此前消费者接收 JSON 字符串 UUID 导致任务停在 `QUEUED`，先 RED 后修复解包并回归。 | 2026-08-19 | Codex | 通过（真实消费、重试和死信；不替代正常 embedding 成功路径） |
@@ -679,7 +681,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G2-07 | `QueryRewriteServiceImplTest` L0；无外部服务 | `backend_v2/target/surefire-reports/` | API/Windows 路径不再进入 `NAVIGATION`/`FOLLOW_UP`/`HARD` 或调用 LLM；章节与 Markdown 文档导航保持 | 2026-08-24 | Codex | 部分通过（21 项改写 L0；跨 KB topic switch、合法导航扫描与真实 PostgreSQL Recall/p95 待验收） |
 | TC-G2-08 | `RagServiceImplTest`、`KnowledgeToolsScopeTest`；本地 JVM，无数据库、模型或网络 | `backend_v2/target/surefire-reports/` | RRF 后 rerank 限制为前 50，rank penalty 上限为 `0.15`，同源组内重复不放大；只有 RRF 分数可比较、Top-1 达标且与 Top-2 保持最小 gap 才更新 retrieval context。 | 2026-08-25 | Codex | 部分通过（L0/L1 已签收；冻结集 replay、真实运行时 L2、Recall/p95 与评测仍待） |
 | TC-G2-09 | 独立三路 L0/L1 fixture；固定 original/expanded query、重复 chunk、HARD scope 与资产边界 | `backend_v2/target/surefire-reports/` | Dense-original、Sparse-original、Expanded-query 分支独立；原问不进入第三路；分支内 chunk 唯一且 outer RRF 每分支最多一票；授权/HARD 约束不后移。 | 2026-08-28 | Codex | 通过（实现与结构契约；不代表 R2 有质量收益） |
-| TC-G2-10 | `g2-pre-bm25-v1` 9 case、7 fixture chunk；真实 MyBatis/VectorChord/BM25/Ollama；rerank 关闭 | `backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json` | R0/R1/R2 输入哈希、scope、gold、预算和分母可比；复跑后拒答/权限违规均为 `0`，Recall@5 均为 `1.0`，R2 的 MRR/nDCG 低于 R0。 | 2026-08-30 | Codex | 通过（评测与拒答可比性）；默认切换仍被拒绝，整体结论 `inconclusive`，R0 保持默认，两个拒答 Bad Case 已 fixed |
+| TC-G2-10 | `g2-pre-bm25-v1` 9 case、7 fixture chunk；真实 MyBatis/VectorChord/BM25/Ollama；rerank 关闭 | `backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json` | R0/R1/R2 输入哈希、scope、gold、预算和分母可比；`query-anchor-tiebreak-v1` 回放后拒答/权限违规均为 `0`，Recall@5、MRR、nDCG 均为 `1.0`，R1/R2 两个 reviewed P1 gold 均为第 1 名，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`。 | 2026-09-01 | Codex | 通过（当前 Bad Case 与评测门禁）；gate=`eligible_for_rerank_ab`，R2 p95 低于 R0 约 `10.5%`，但 release-v1、Router/固定链路消融和默认切换仍待完成，R0 保持默认 |
 | TC-G3-01 | `BuiltinSkillRegistryTest`、`BuiltinSkillExecutorTest`、`HarnessedSkillKnowledgeToolExecutorTest`；本地 JVM，无数据库、模型或网络 | `backend_v2/target/surefire-reports/` | 只接受登记模板和授权 KB 子集；调用方不能指定工具；正常输出含范围内证据或显式拒答原因；放行检索经 Harness 代理记录成功，熔断不触发检索并记录拒绝。 | 2026-08-25 | Codex | 部分通过（L0/L1 本地执行与 Harness 接线已签收；HTTP/队列、模型总结、独立预算调度与 L2 待验收） |
 | TC-G3-02 | mock Mapper/会话服务与 `RequestScopeData`；本地 Node 静态契约 | `backend_v2/target/surefire-reports/`；`ui/tests/user-memory-candidate-discard.contract.mjs`；`ui/tests/user-memory-clear.contract.mjs`；`ui/tests/user-memory-edit.contract.mjs`；`ui/tests/user-memory-expiration.contract.mjs` | 确认/忽略、编辑、单条删除与本人清空只作用于当前用户；编辑不保留旧 embedding，清空不触碰候选，空集合成功；`更新：` 候选保留旧行并将其关联到新行，读取只见当前行；新确认、冲突新版本和正文编辑统一为 365 天期限，空期限仅保留为不回填的历史数据。 | 2026-08-25 | Codex | 部分通过（L0/L1 确认、忽略、编辑、单条删除、清空、节流、去重、冲突关系与 365 天过期治理已签收；L2/L3 待验收） |
 | TC-G3-03 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
@@ -698,7 +700,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 
 本计划已为 G0-G5 的每项交付定义正向、失败/拒绝或恢复/边界测试，并将每个阶段退出条件绑定到 `TC-ID`、隔离环境和通过判定。RAG 指标细则由现有 Spec 维护；任务、Router、记忆、Webhook、并发和多实例 SSE 的测试均明确为对应阶段实现后的必需交付。
 
-当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收。G1 的 owner-only 权限、任务摄入、真实队列/数据库、单实例 SSE、MCP 主体和真实模型工具调用已签收；受控 KB 删除任务已完成 L0/L1、真实 PostgreSQL/RabbitMQ、第二账号隔离 L2 与 Edge Playwright L3，生产迁移入口仍待完成。默认回归已恢复为当前源码 `0 failures`；此前错误源于未隔离的外部测试与测试环境临时目录权限。G2 已完成原生 BM25、Router/资产入口、独立三路实现和真实结构消融；R2 指标低于 R0且拒答门禁失败，TEI 质量增益也未通过延迟门禁，因此两项均不得切换默认，下一步转为 Bad Case、release-v1、引用/拒答和 Router 消融收口。G3、G4、G5 均已有 L0/L1 子项，但 LongMemEval、真实集成、负载、持久化与多实例边界尚未完成；它们应表述为“未达到阶段退出”，不能再写成“尚未实现”。
+当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收。G1 的 owner-only 权限、任务摄入、真实队列/数据库、单实例 SSE、MCP 主体和真实模型工具调用已签收；受控 KB 删除任务已完成 L0/L1、真实 PostgreSQL/RabbitMQ、第二账号隔离 L2 与 Edge Playwright L3；显式迁移发布入口已要求批准基线、manifest/catalog/baseline SHA、人工确认和密码环境变量，并在真实隔离 PostgreSQL 中完成全量契约对象对账、已声明关键定义漂移负向和脱敏记录，真实生产执行仍须发布窗口，外部签名由发布系统保证。默认回归已恢复为当前源码 `0 failures`；此前错误源于未隔离的外部测试与测试环境临时目录权限。G2 已完成原生 BM25、Router/资产入口、独立三路实现和真实结构消融；当前 reviewed Bad Case 已通过同一开发集的 RED/GREEN 与真实回放，两个 P1 的 R1/R2 gold 均回到第 1 名，R0/R1/R2 的拒答/权限违规为 `0` 且 R2 p95 门禁通过，但 release-v1、Router/固定链路消融、引用/答案质量和组合授权 L2 仍未完成，因此 R0 与本地 rerank 继续保持默认。G3、G4、G5 均已有 L0/L1 子项，但 LongMemEval、真实集成、负载、持久化与多实例边界尚未完成；它们应表述为“未达到阶段退出”，不能再写成“尚未实现”。
 
 ## 7. 风险与决策规则
 
@@ -748,4 +750,5 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | 2026-08-30 | G1 受控 KB 删除任务隔离 L2 验收 | `G1KnowledgeBaseDeletionRuntimeL2Test` 在随机命名的 PostgreSQL `16` 与 RabbitMQ `3-management-alpine` 临时容器中执行，测试库内应用删除任务迁移并创建双 owner、KB、文档、chunk、摄入任务和物理文件。三项测试全部通过（`3 tests, 0 failures, 0 errors, 0 skipped`）：非 owner 请求在创建任务前拒绝且无文件/任务副作用；owner 删除经真实 Rabbit 消费后完成数据库级联、审计保留、任务 `SUCCEEDED/progress=100` 和文件清理；第二 owner 无法读取删除任务。容器、测试目录和临时数据已精确清理，未触碰业务库；生产迁移与 Edge Playwright L3 仍待后续。 |
 | 2026-08-30 | 迁移 manifest 与删除 UI/L3 准备 | 新增 `sql/migrations/manifest.json`，固定 16 份增量 SQL 的顺序、依赖、事务属性和 SHA-256；原始基线 schema 不在仓库，未知或部分状态必须停止。新增删除 UI/Hook 终态轮询和 Edge 删除旅程静态契约；真实 Edge 运行与自动迁移器仍待单独验收。 |
 | 2026-08-31 | 迁移执行器 L0/L1 与真实生命周期 L2 | 新增 `SchemaMigrationExecutor` 与 `JdbcMigrationStore`：clean install 必须提供并核对批准基线，ledger 缺失但存在业务对象、ledger catalog 漂移、未知/运行中/错序/哈希不一致状态均 fail-closed；已应用迁移可按 manifest 重放跳过，事务属性显式提交，失败保留 `RUNNING`。真实 VectorChord PostgreSQL 隔离测试以最小批准 baseline 完成 16 条迁移、前缀 upgrade、重放和失败恢复，`3 tests, 0 failures, 0 errors, 0 skipped`；证据为 `backend_v2/target/migration-l2/migration-lifecycle-l2.json`。完整生产对象 catalog 对账和发布入口仍待执行。 |
+| 2026-09-01 | 迁移执行器、托管 catalog 对账与显式发布入口 L0/L1/L2 收口 | 新增 `catalog-contract.json`、`MigrationCatalogContract`/`MigrationCatalogVerifier`/`JdbcMigrationCatalogVerifier` 和 `MigrationReleaseApplication`；发布必须使用 canonical manifest/catalog、显式确认、仓库外批准基线及 manifest/catalog/baseline SHA、人工前置项和密码环境变量，迁移后在同一 advisory lock 保护下以迁移后 `REPEATABLE READ` 快照校验全量契约对象及已声明关键定义并写脱敏报告。隔离 VectorChord PostgreSQL 实际通过 16 条迁移、release entry、额外表/列/约束/禁留列/关键定义漂移负向、失败报告、前缀 upgrade、重放和失败恢复，`3 tests, 0 failures, 0 errors, 0 skipped`；证据为 `backend_v2/target/migration-l2/migration-lifecycle-l2.json` 与 `backend_v2/target/migration-l2/migration-release-l2.json`。外部批准签名和真实生产发布未执行，均须由发布窗口完成。 |
 | 2026-08-31 | G1 删除 Edge Playwright L3 验收 | 动态端口隔离 PostgreSQL/RabbitMQ/Redis、后端和 Vite 环境中，Edge 完成注册/登录、创建 KB、进入详情、二次确认删除、等待异步任务完成并确认列表移除；`g1-runtime.spec.ts --grep "deletion completion"` 为 `1 passed`。测试使用临时容器/数据库/存储目录，全部清理；生产迁移仍未执行。 |

@@ -2,7 +2,7 @@
 
 > 状态：当前唯一实施 Spec
 > 对应计划：[可信研发知识协作 Agent 升级总计划](../plans/active/trusted-knowledge-agent-roadmap.md)
-> 当前实施阶段：G0 已结项。G1 核心权限、任务摄入、真实队列/数据库、单实例任务 SSE、MCP 主体与真实模型工具调用已签收，受控 KB 删除任务隔离 L2 和 Edge Playwright L3 已通过，生产迁移入口仍待完成。G2 已完成 VectorChord BM25、Router/资产入口、独立三路实现与真实结构消融；R2 低于 R0且拒答门禁失败，TEI 也未通过延迟门禁，因此默认结构和 rerank 开关保持不变，当前转入 Bad Case、release-v1、引用/拒答和 Router 消融收口。G3、G4、G5 均为部分实现，LongMemEval、真实集成、负载、持久化和多实例验收尚未完成。`TC-REL-02` 的迁移执行器 L0/L1 和真实隔离 PostgreSQL 生命周期 L2 已通过，完整发布 catalog 对账和生产发布入口仍待完成。
+> 当前实施阶段：G0 已结项。G1 核心权限、任务摄入、真实队列/数据库、单实例任务 SSE、MCP 主体与真实模型工具调用已签收，受控 KB 删除任务隔离 L2 和 Edge Playwright L3 已通过，显式生产迁移入口与托管 catalog 对账已实现并通过隔离 L2，真实生产执行仍须发布窗口。G2 已完成 VectorChord BM25、Router/资产入口、独立三路实现与真实结构消融；当前 reviewed Bad Case 已在同一开发集真实回放中全绿，但 release-v1、Router/固定链路消融、组合授权 L2、引用/答案质量和真实多模态验收仍待完成，因此默认结构和 rerank 开关保持不变。G3、G4、G5 均为部分实现，LongMemEval、真实集成、负载、持久化和多实例验收尚未完成。`TC-REL-02` 的迁移执行器、完整发布 catalog 对账和显式发布入口已通过隔离生命周期验收。
 
 ## 1. 文档定位与范围
 
@@ -19,8 +19,8 @@
 | 阶段 | 实现级契约 | 必需测试入口 | 当前状态 |
 | --- | --- | --- | --- |
 | G0 | 聊天、RAG、SSE、审批在隔离环境可观测且可回归；不改变现有公开 API。 | `TC-G0-01` 至 `TC-G0-06` | 2026-08-18 已完成全部 G0 必需证据；当时 G1 尚未开始。 |
-| G1 | owner-only KB 硬权限、Agent 默认范围关系表、任务状态机、异步摄入、幂等、重试、删除任务和任务进度均必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-11`，含 `TC-G1-04a/04b/04c` | 已完成隔离 L2 的 HTTP/JWT、真实队列重试/死信、MCP 主体授权、advisory lock、文件补偿、摄入恢复、Markdown/HTML/PDF 与真实 embedding、任务 SSE、多实例连接、真实模型工具调用和生产 `STREAMABLE` MCP 协议；Edge L3 已覆盖摄入和删除旅程。受控 KB 删除任务已通过真实 PostgreSQL/RabbitMQ、第二账号隔离 L2；仅生产迁移入口仍待完成。 |
-| G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答；普通文本检索必须以可评测的独立分支融合，不能把 query 改写伪装为额外索引票。 | `TC-G2-01` 至 `TC-G2-10` | 确定性 Router、生产入口计划、VectorChord BM25、PDF/Markdown 表格资产和独立三路均已实现；`TC-G2-09/10` 已产出真实结构消融，R2 未通过质量/拒答门禁，保持 R0。仍待 Bad Case 全绿、release-v1、组合授权 L2、Router 消融、引用/答案质量和真实多模态验收。 |
+| G1 | owner-only KB 硬权限、Agent 默认范围关系表、任务状态机、异步摄入、幂等、重试、删除任务和任务进度均必须有确定状态与隔离边界。 | `TC-G1-01` 至 `TC-G1-11`，含 `TC-G1-04a/04b/04c` | 已完成隔离 L2 的 HTTP/JWT、真实队列重试/死信、MCP 主体授权、advisory lock、文件补偿、摄入恢复、Markdown/HTML/PDF 与真实 embedding、任务 SSE、多实例连接、真实模型工具调用和生产 `STREAMABLE` MCP 协议；Edge L3 已覆盖摄入和删除旅程。受控 KB 删除任务已通过真实 PostgreSQL/RabbitMQ、第二账号隔离 L2；显式迁移发布入口与 catalog 对账已通过隔离 L2，真实生产执行仍须发布窗口。 |
+| G2 | Router 必须输出受限 schema，并按权限、证据与用户授权决定检索或拒答；普通文本检索必须以可评测的独立分支融合，不能把 query 改写伪装为额外索引票。 | `TC-G2-01` 至 `TC-G2-10` | 确定性 Router、生产入口计划、VectorChord BM25、PDF/Markdown 表格资产和独立三路均已实现；当前 reviewed Bad Case 已通过 `query-anchor-tiebreak-v1` 的同分母真实回放，R0/R1/R2 质量和拒答/权限门禁通过，但尚未完成 release-v1、组合授权 L2、Router 消融、引用/答案质量和真实多模态验收，保持 R0。 |
 | G3 | Skill 与记忆必须有可验证 schema、所有权和失败不阻断主链路的约束。 | `TC-G3-01` 至 `TC-G3-05` | 候选确认/忽略/编辑/删除、节流、语义去重、冲突、365 天过期治理与首个内置 Skill 已完成 L0/L1；LongMemEval 30 题尚未下载/冻结，记忆 L2/L3、Skill HTTP/队列、模型总结和运行时预算仍待实现。 |
 | G4 | 工作流验证与 Webhook 必须对证据、权限、超时、签名、重试和死信作出确定响应。 | `TC-G4-01` 至 `TC-G4-04` | `WorkflowPlanVerifier` 已完成 L0 计划预算、工具白名单、证据和矛盾校验；`WorkflowPlanExecutor` 已完成本地 L1 顺序执行、Harness 放行/拒绝与失败停止。Planner、可中断超时、fallback、持久化审计、Webhook 与投递 schema 仍待实现。 |
 | G5 | 并发、缓存和多实例 SSE 必须满足顺序、隔离、背压和恢复语义。 | `TC-G5-01` 至 `TC-G5-04` | `TC-G5-01` 已完成单实例 L0/L1 会话互斥：同会话不重叠、不同会话并行，锁覆盖 Agent 与候选记忆提取；跨 `@Async` 提交顺序、真实负载、多实例、缓存和 SSE 恢复仍待对应契约。 |
@@ -83,6 +83,8 @@
 **2026-08-30 删除 UI/L3 旅程准备。** `useKnowledgeBases` 新增删除任务终态轮询，`KnowledgeBaseTabContent` 提供二次确认删除按钮，删除成功后刷新列表并反馈完成状态；`ui/tests/g1-runtime.spec.ts` 新增“创建 KB -> 删除确认 -> 等待完成 -> 列表移除”Edge 旅程，静态契约、TypeScript、ESLint 和 Vite 构建均通过。由于本轮未启动隔离后端和 Vite 服务，该浏览器旅程尚未执行，不计入 L3 通过证据。 |
 
 **2026-08-31 删除 Edge Playwright L3 验收。** 在动态端口隔离 PostgreSQL/RabbitMQ/Redis、后端和 Vite 环境中，`g1-runtime.spec.ts --grep "deletion completion"` 完成注册、登录、创建知识库、二次确认删除、异步任务完成和列表移除，结果为 `1 passed`。临时容器、数据库、后端/Vite 进程和存储目录均已清理，生产迁移入口仍待验收。
+
+**2026-09-01 G1/REL-02 迁移发布入口收口。** `MigrationReleaseApplication` 固定 canonical manifest，并将 catalog 路径绑定到 manifest 声明；`SchemaMigrationReleaseEntry` 在 `JdbcMigrationStore` advisory lock 内执行迁移和 catalog 对账，catalog 阶段使用迁移后 `REPEATABLE READ` 快照。隔离 VectorChord PostgreSQL L2 覆盖 16 条迁移、完整托管 catalog、额外表/禁留列/列定义漂移负向、迁移失败后的 `RUNNING` 与脱敏 `FAILED` 报告、前缀升级和重放；默认后端、前端 lint/build 与静态契约均通过。真实生产数据库和 CLI 密码环境注入未在本地执行，必须由发布窗口按 `sql/migrations/README.md` 操作。
 
 | TC-ID | 先写的失败测试 | 已观察的 RED | GREEN 入口与覆盖 |
 | --- | --- | --- | --- |
@@ -177,9 +179,9 @@
 
 分支输出必须是 chunk 唯一、rank 连续、带 branch/channel/query-source provenance 的候选 list。外层 RRF 只接收三份分支 list，同一 chunk 在同一分支只能贡献一次，在不同分支最多三次；第三支路为空时不得重新执行原问。所有叶子查询必须在数据库 `LIMIT` 前执行已授权 KB、`HARD` 来源/类型/路径过滤。普通文本三路与 `MULTIMODAL_RAG` 的表格/PDF 资产候选继续分开：资产优先级和 chunk 去重沿用已有入口契约，不计入三路 outer RRF。三路共享总候选与前 50 条 rerank 预算，禁止用每支路独立 50 条 rerank 造成总预算膨胀。
 
-L0 RED/GREEN 已由 `RagServiceImplTest.shouldKeepOriginalQueryOutOfExpandedBranch`、`RagServiceImplTest.shouldCountSameChunkAtMostOncePerIndependentBranch`、`RagServiceImplTest.shouldApplyHardScopeBeforeLimitForEveryIndependentBranch` 和 `RagIndependentBranchEvaluatorTest.shouldRejectNonComparableVariants` 固定。最小 GREEN 只补分支编排、provenance、可比性校验和报告，没有改变授权入口、数据库 schema、VectorChord provider 或默认 rerank 开关。定向回归入口为 `mvn.cmd "-Dtest=RagServiceImplTest,QueryRewriteServiceImplTest,RagIndependentBranchEvaluatorTest" test`；真实数据库 L2 与冻结 replay 由 `TC-G2-10` 显式启用，不能以 mock 单测替代。2026-08-28 的首次真实运行显示 R2 指标低于 R0 且三臂均有 2 个拒答违规；2026-08-30 复用同一隔离库和输入、先执行生产 Router 后重跑，拒答/权限违规均为 `0`，Recall@5 保持 `1.0`，但 R2 的 MRR/nDCG 仍低于 R0，因此默认切换门禁仍失败，R0 保持默认。
+L0 RED/GREEN 已由 `RagServiceImplTest.shouldKeepOriginalQueryOutOfExpandedBranch`、`RagServiceImplTest.shouldCountSameChunkAtMostOncePerIndependentBranch`、`RagServiceImplTest.shouldApplyHardScopeBeforeLimitForEveryIndependentBranch` 和 `RagIndependentBranchEvaluatorTest.shouldRejectNonComparableVariants` 固定。最小 GREEN 只补分支编排、provenance、可比性校验和报告，没有改变授权入口、数据库 schema、VectorChord provider 或默认 rerank 开关。定向回归入口为 `mvn.cmd "-Dtest=RagServiceImplTest,QueryRewriteServiceImplTest,RagIndependentBranchEvaluatorTest" test`；真实数据库 L2 与冻结 replay 由 `TC-G2-10` 显式启用，不能以 mock 单测替代。2026-08-28 的首次真实运行显示 R2 指标低于 R0 且三臂均有 2 个拒答违规；2026-08-30 复用同一隔离库和输入、先执行生产 Router 后重跑，拒答/权限违规均为 `0`，Recall@5 保持 `1.0`，但 R2 的 MRR/nDCG 仍低于 R0，因此默认切换门禁仍失败，R0 保持默认；这是 query-anchor 修复前的历史结论。
 
-**发布边界。** 当前仓库没有自动 schema migrator；该 SQL 是版本化、一次性发布工件，提交不代表任何生产业务库已升级。发布前必须确认 `document_asset`、`document_asset_chunk`、所有命名约束与两个索引均不存在；随后在维护窗口以脚本原有事务一次执行，并通过 PostgreSQL catalog 核验表、检查约束、外键和索引，再将迁移文件名、提交 SHA、执行时间和 catalog 核验结果登记到发布记录。若 preflight 发现任一对象已存在或部分漂移，必须停止并人工比对修复，禁止以 `IF NOT EXISTS` 或重复执行掩盖状态。
+**发布边界。** 当前仓库不在普通应用启动时自动执行 schema migration；迁移仍是版本化发布工件，提交不代表任何生产业务库已升级。显式入口为 `MigrationReleaseApplication`，要求发布窗口传入仓库外批准基线文件、manifest/catalog/baseline SHA-256、人工前置批准项和 `--confirm-schema-release`，由 `SchemaMigrationExecutor` 执行唯一 manifest。迁移完成后，`JdbcMigrationCatalogVerifier` 通过同一数据库连接按 `sql/migrations/catalog-contract.json` 核验托管表、列、约束、索引、扩展、函数和触发器，并由入口写入不含连接信息、密码、SQL 正文或基线内容的脱敏发布记录。若 ledger、基线或 catalog 发现未知、部分、哈希不一致或禁留对象，必须以非零状态停止并人工比对修复，禁止以重复执行或 `IF NOT EXISTS` 掩盖状态；SHA 的外部签名、Git revision 和发布权限由发布系统保证，本实现不代替实际生产发布窗口执行。
 
 | TC-ID | 先写的失败测试 | GREEN 与边界 |
 | --- | --- | --- |
@@ -199,7 +201,9 @@ L0 RED/GREEN 已由 `RagServiceImplTest.shouldKeepOriginalQueryOutOfExpandedBran
 
 首版 `rag-badcase-v1` 至少包含跨 KB topic switch、短 follow-up、API/Windows 路径、精确术语、旧版本/重复 chunk、全局高分越权干扰、无答案/冲突/部分证据、错误引用、外部依赖回退和文档内 prompt injection。三路结构消融的两个拒答违规已由 `RagBadCaseManifestTest` 校验并冻结为 `backend_v2/src/test/resources/rag-eval/badcase/rag-badcase-v1.json` 的 reviewed case；Router 修复与同一隔离库三路复跑后，两个 case 均为 `fixed`，拒答/权限违规为 `0`，但 R2 的 MRR/nDCG 仍低于 R0，整体报告保持 `inconclusive`。Bad Case 分别绑定 `TC-G2-04/05/06/07/08`，不单独制造一套指标；G2 退出时 reviewed P0/P1 必须全部 GREEN，且既有正向冻结集不得退化。
 
-同一复跑还将 `g2-pre-bm25-v1-002` 的实际 gold rank `R0=1/R1=2/R2=2` 冻结为 P1 `retrieval_rank_regression`，将 `g2-pre-bm25-v1-009` 的 PDF 第 2 页 gold rank `R0=1/R1=2/R2=2` 与预期 `chunkId/pageNumber` 冻结为 P1 `citation_rank_regression`。两条均为 `development-regression`，尚未修复；它们解释 R2 的 MRR/nDCG 退化，不能因拒答 case fixed 而提前放行 R2。
+同一复跑还将 `g2-pre-bm25-v1-002` 的实际 gold rank `R0=1/R1=2/R2=2` 冻结为 P1 `retrieval_rank_regression`，将 `g2-pre-bm25-v1-009` 的 PDF 第 2 页 gold rank `R0=1/R1=2/R2=2` 与预期 `chunkId/pageNumber` 冻结为 P1 `citation_rank_regression`。两条在修复前均为 `development-regression`；它们解释 R2 的 MRR/nDCG 退化，不能因拒答 case fixed 而提前放行 R2。
+
+2026-09-01 针对这两条 P1 增加 `query-anchor-tiebreak-v1`：仅在同一分支集合内的相邻 outer RRF 近 tie 中保留查询明确包含的代码标识符或 PDF 来源/页码锚点，不增加分支投票、不增加专用权重，且仅用于独立评测变体，普通生产 `retrieve` 默认路径不变。`RagServiceImplTest` 固定两个局部 RED/GREEN 用例，`RagIndependentBranchRuntimeEvaluationTest` 在同一 `g2-pre-bm25-v1` 隔离库复跑后确认 R1/R2 两个 gold 均为第 1 名；最新报告中 R0/R1/R2 的 Recall@1/3/5/10、MRR@10、nDCG@10 均为 `1.0`，拒答/权限违规均为 `0`，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`（下降约 `10.5%`），gate 为 `eligible_for_rerank_ab`。manifest 中两条 P1 更新为 `fixed` 并保留 `fixed_in_evaluation_keep_r0_default` 处置；由于该修复使用 development 输入，仍必须进入下一冻结 release-v1 验证，不能回填 untouched test 或宣称同版本收益。
 
 ### 3.2 G3 候选记忆确认与忽略契约
 
@@ -459,7 +463,27 @@ rag:
 - 开启后，报告包含 `ragas.status`、四项指标和 skip 统计。
 - judge 不可用时测试仍能完成，且报告明确记录 `judge_unavailable`。
 
-#### 4.7.3 当前计划用例映射
+#### 4.7.3 分块字符上限与 Overlap 实验
+
+本实验只改变 Markdown section 的字符上限和 overlap，固定 corpus、embedding、BM25/RRF、候选预算、rerank 与评测 query 生成规则。实验入口为 [`run-chunking-overlap-experiment.ps1`](../../rag-eval/run-chunking-overlap-experiment.ps1)，专用 corpus 为 [`rag-chunking-experiment.md`](../../backend_v2/src/test/resources/rag-eval/fixtures/rag-chunking-experiment.md)，实验版本为 `chunking-overlap-v1`。结构不设上限使用 `maxChars=0`；其余四档分别使用 `1,000/1,500/2,000/3,000`，每档对照 `overlap=0` 与 `overlap=10%`（分别为 `100/150/200/300` 字符）。
+
+2026-08-31 在隔离 PostgreSQL/VectorChord 与本机 Ollama `bge-m3:latest` 上完成 9 组真实向量/BM25/RRF/rerank 评测。专用 corpus SHA-256 为 `c712fcbd3ac3c6bee0ff278f741d8ad6a5369c6c829a4aa5ab875ee8ac07671c`，结果汇总为 [`summary.json`](../../backend_v2/target/rag-eval/chunking-overlap/summary.json)：
+
+| 组合 | chunk 数 | 重叠字符占比 | 正文 Recall@5 | 跨边界 Recall@5 | 正文 MRR@10 | 跨边界 Context Precision@5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 结构不设上限 | 3 | 0% | 1.00 | 不适用 | 1.00 | 不适用 |
+| 1,000 / 0 | 12 | 0% | 1.00 | 1.00 | 1.00 | 1.00 |
+| 1,000 / 100 | 12 | 8.71% | 1.00 | 1.00 | 1.00 | 0.9444 |
+| 1,500 / 0 | 9 | 0% | 1.00 | 1.00 | 1.00 | 0.9722 |
+| 1,500 / 150 | 9 | 8.72% | 1.00 | 1.00 | 1.00 | 0.9222 |
+| 2,000 / 0 | 6 | 0% | 1.00 | 1.00 | 1.00 | 1.00 |
+| 2,000 / 200 | 6 | 5.98% | 1.00 | 1.00 | 1.00 | 1.00 |
+| 3,000 / 0 | 6 | 0% | 1.00 | 1.00 | 1.00 | 1.00 |
+| 3,000 / 300 | 6 | 8.73% | 1.00 | 1.00 | 0.9167 | 1.00 |
+
+结论：本实验不支持启用 10% overlap；`2,000/0` 是当前较稳妥的默认点，原因是与 `3,000/0` 质量持平但最大 chunk 更小，且没有重复字符开销。`1,000/0`、`1,500/0` 没有质量收益却增加 chunk 数；结构不设上限仅作为结构化 section 的上界参考。该结果来自受控长文档 fixture，不能替代真实 KB、代码、PDF 和无答案集上的 release 评测；任何后续改变 chunk 边界的实现都必须升级 `chunkingVersion` 并重新执行未见测试集。
+
+#### 4.7.4 当前计划用例映射
 
 本章节只覆盖总计划中的 RAG 指标与检索质量验收；任务、记忆、Skill、Webhook、并发和浏览器 E2E 的全局实施约束见本 Spec 第 1 至 3 节。对应关系如下：
 
@@ -536,9 +560,11 @@ rag:
 
 项目内冻结集至少有一组具备授权会话上下文且 replay 包含非原问扩展 query 的 follow-up case；否则 R2 只能标为 `not_exercised`，不得解释为 Multi-Query 分支无收益。mMARCO-zh-sampled 若不具备此类 replay，继续只用于 Dense/Sparse/RRF 与 `4.7.3.2` 的 rerank 诊断。只有 `TC-G2-09` 和 `TC-G2-10` 全绿、R2 对相同有效 query 集不低于 R0 的 `Recall@5`、`MRR@10`、`nDCG@10`、p95 增幅不超过 15%，且授权/拒答无回归时，R2 才可进入同一链路上的 A/B/C rerank 对比；否则保持 R0 为默认并保存失败报告。
 
-**已运行结论（2026-08-30 复跑）。** `g2-pre-bm25-v1` 使用 9 个 case（7 个可回答、2 个拒答）和 7 个 fixture chunk，在真实 MyBatis/VectorChord/BM25/Ollama 链路运行 R0/R1/R2。输入哈希、scope、gold、query replay、候选预算和有效分母可比；复跑前将生产 Router 的确定性拒答纳入 replay，三臂拒答/权限违规均为 `0`，Recall@5 均为 `1.0`。R2 的 MRR/nDCG 仍低于 R0，因此质量门禁失败，R0 保持默认，R2 不进入默认链路；两个拒答 Bad Case 已标记 `fixed`，不能通过改换分母或将 case 用于同版本调参来重写质量结论。
+**已运行结论（2026-08-30 复跑，query-anchor 修复前）。** `g2-pre-bm25-v1` 使用 9 个 case（7 个可回答、2 个拒答）和 7 个 fixture chunk，在真实 MyBatis/VectorChord/BM25/Ollama 链路运行 R0/R1/R2。输入哈希、scope、gold、query replay、候选预算和有效分母可比；复跑前将生产 Router 的确定性拒答纳入 replay，三臂拒答/权限违规均为 `0`，Recall@5 均为 `1.0`。R2 的 MRR/nDCG 仍低于 R0，因此质量门禁失败，R0 保持默认，R2 不进入默认链路；两个拒答 Bad Case 已标记 `fixed`，不能通过改换分母或将 case 用于同版本调参来重写质量结论。
 
-同一报告中的 `g2-pre-bm25-v1-002` 与 `g2-pre-bm25-v1-009` 已冻结为 P1 development Bad Case：R0 的多通道平铺 RRF 将 vector、title BM25、content BM25 分别计票，而 R1/R2 按 `outer_rrf_one_vote_per_branch` 把词法通道先归并为 Sparse 分支，外层不允许以同一分支的多个通道重复投票。该差异是本次结构消融的受控变量，不是可通过专用权重掩盖的生产缺陷；两条 Case 的处置固定为 `keep_r0_default_not_fixed`，待新的独立结构假设和同分母评测验证后再决定是否变更。
+同一报告中的 `g2-pre-bm25-v1-002` 与 `g2-pre-bm25-v1-009` 已冻结为 P1 development Bad Case：R0 的多通道平铺 RRF 将 vector、title BM25、content BM25 分别计票，而 R1/R2 按 `outer_rrf_one_vote_per_branch` 把词法通道先归并为 Sparse 分支，外层不允许以同一分支的多个通道重复投票。该差异是本次结构消融的受控变量，不是可通过专用权重掩盖的生产缺陷；修复前两条 Case 的处置为 `keep_r0_default_not_fixed`，待新的独立结构假设和同分母评测验证后再决定是否变更。
+
+2026-09-01 的独立修复假设为 `query-anchor-tiebreak-v1`：仅对同一分支集合、相邻 outer RRF 近 tie 候选，优先保留查询明确命中的代码标识符或 PDF 来源/页码锚点；不恢复多票、不增加专用权重，也不改变普通生产默认链路。局部测试和 `TC-G2-10` 真实回放均确认两个 P1 的 R1/R2 gold 回到第 1 名；R0/R1/R2 的 Recall@1/3/5/10、MRR@10、nDCG@10 均为 `1.0`，拒答/权限违规为 `0`，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`（下降约 `10.5%`），报告 gate 为 `eligible_for_rerank_ab`。两条 Case 现标记为 `fixed`，但由于修复使用当前 development 输入，必须在未参与调参的 release-v1 中复验；在此之前 R0 仍为生产默认。
 
 #### 4.7.4 与总计划一致的通过判定
 
@@ -600,7 +626,7 @@ rag:
 | TC-ID | RED / 当前缺口 | GREEN 与证据 |
 | --- | --- | --- |
 | TC-REL-01 默认构建 | 默认后端命令当前已达到 `0 failures/0 errors`；前端 lint/build 已可执行，但静态契约、L2/RAG/Playwright 的统一入口与 executed/skipped/reason 报告仍未收口。 | 一条文档化入口完成默认后端零 failure/zero error；一条前端入口完成静态契约、lint、build；L2/RAG/Playwright 使用显式 profile/任务并在报告中列出 executed/skipped/reason。 |
-| TC-REL-02 数据库生命周期 | 根 README 只列两个 auth SQL，无法从 16 个增量 SQL/说明文件推导唯一 clean install/upgrade 顺序；此前没有可执行 schema migrator。 | 已提供 [`sql/migrations/manifest.json`](../../sql/migrations/manifest.json)，并由 `SchemaMigrationExecutor`/`JdbcMigrationStore` 固定 schemaVersion、16 份脚本的顺序/依赖/事务属性/SHA-256、批准基线、ledger 状态与 catalog fail-closed 校验；真实 VectorChord PostgreSQL 隔离 clean install、前缀 upgrade、重放和失败恢复已通过 `MigrationLifecycleRuntimeL2Test`（`3 tests, 0 failures, 0 errors, 0 skipped`），完整生产对象 catalog 对账和发布入口仍待实现。 |
+| TC-REL-02 数据库生命周期 | 根 README 只列两个 auth SQL，无法从 16 个增量 SQL/说明文件推导唯一 clean install/upgrade 顺序；此前没有可执行 schema migrator。 | 已提供 [`sql/migrations/manifest.json`](../../sql/migrations/manifest.json) 与 [`catalog-contract.json`](../../sql/migrations/catalog-contract.json)，由 `SchemaMigrationExecutor`/`JdbcMigrationStore` 固定 schemaVersion、16 份脚本的顺序/依赖/事务属性/SHA-256、批准基线、ledger 状态与 fail-closed catalog 对账；`MigrationReleaseApplication` 提供显式发布入口和脱敏记录。真实 VectorChord PostgreSQL 隔离 clean install、前缀 upgrade、重放、失败恢复、全量契约对象对账及已声明关键定义漂移负向已通过 `MigrationLifecycleRuntimeL2Test`（`3 tests, 0 failures, 0 errors, 0 skipped`）；外部批准签名与真实生产执行仍须由发布窗口完成。 |
 | TC-REL-03 数据与 Git 边界 | 本地 `datasets/` 未被根忽略规则覆盖，存在误提交公开基准或大文件风险；报告位于 target 但来源 manifest 尚不统一。 | 原始公开数据、真实用户内容、凭据和生成报告被忽略；只提交来源 registry、不可变 manifest、预处理/评测代码和小型脱敏 fixture；测试验证关键目录 ignore 规则及 manifest 必填字段。 |
 | TC-REL-04 安全与隐私 | 现有 owner/Harness/MCP 边界较完整，但缺统一的 prompt injection、SSRF/外部 URL、恶意/超限上传、日志脱敏和数据保留负向矩阵。 | 对 REST/SSE/MCP/Webhook/摄入/记忆建立威胁到 TC 的映射；高风险输入在副作用前拒绝；日志不含凭据、用户正文或内部路径；审计、消息、任务、记忆和文件有保留/删除规则。 |
 | TC-REL-05 负载与可观测 | G5 只规定局部线程池和相对 p95 增幅，没有固定并发、KB/chunk 数、文件大小、队列积压或观测阈值。 | 固定 release 负载 profile；报告首 token/完整响应 p50/p95/p99、错误率、队列积压、线程池拒绝、SSE 重连、模型/embedding 调用和存储增长；traceId 可贯通 HTTP、任务、Rabbit、Worker、RAG/模型与 SSE。 |
