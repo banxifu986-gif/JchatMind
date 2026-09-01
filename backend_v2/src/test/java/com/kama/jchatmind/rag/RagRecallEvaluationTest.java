@@ -99,6 +99,7 @@ class RagRecallEvaluationTest {
     private static final String QUERY_STYLE_USER_LIKE_QUESTION = "user_like_question";
     private static final String QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE = "follow_up_contextual_rewrite";
     private static final String QUERY_STYLE_TOPIC_SWITCH_GUARD = "topic_switch_guard";
+    private static final String QUERY_STYLE_BOUNDARY_REWRITE = "boundary_rewrite";
     private static final String DIMENSION_TITLE_RECALL = "title_recall";
     private static final String DIMENSION_QUERY_REWRITE = "query_rewrite";
     private static final String DIMENSION_RERANK_QUALITY = "rerank_quality";
@@ -214,8 +215,29 @@ class RagRecallEvaluationTest {
     @Value("classpath:rag-eval/fixtures/fixture-kb-membership.md")
     private Resource fixtureMembership;
 
+    @Value("classpath:rag-eval/fixtures/rag-chunking-experiment.md")
+    private Resource chunkingExperimentFixture;
+
     @Value("${rag.eval.fixture.multi-doc:true}")
     private boolean fixtureMultiDoc;
+
+    @Value("${rag.eval.fixture.only-chunking:false}")
+    private boolean fixtureOnlyChunking;
+
+    @Value("${rag.eval.chunking.boundary-cases:false}")
+    private boolean chunkingBoundaryCases;
+
+    @Value("${rag.eval.chunking.max-section-content-length:2000}")
+    private int chunkingMaxSectionContentLength;
+
+    @Value("${rag.eval.chunking.overlap-length:0}")
+    private int chunkingOverlapLength;
+
+    @Value("${rag.eval.chunking.stats-path:}")
+    private String chunkingStatsPath;
+
+    @Value("${rag.eval.chunking.quick:false}")
+    private boolean chunkingQuick;
 
     @Value("${rag.eval.answer-quality.enabled:false}")
     private boolean answerQualityEnabled;
@@ -232,12 +254,17 @@ class RagRecallEvaluationTest {
     @Value("${document.storage.base-path}")
     private String documentStorageBasePath;
 
+    @Value("${rag.eval.report-path:target/rag-eval/report.json}")
+    private String configuredReportPath;
+
     private Path reportOutputPath;
 
     @BeforeEach
     void setUp() throws IOException {
-        reportOutputPath = Path.of("target", "rag-eval", "report.json");
-        Files.createDirectories(reportOutputPath.getParent());
+        reportOutputPath = Path.of(configuredReportPath);
+        if (reportOutputPath.getParent() != null) {
+            Files.createDirectories(reportOutputPath.getParent());
+        }
         Files.createDirectories(Path.of(documentStorageBasePath));
         ensurePgTrgmReady();
     }
@@ -297,27 +324,72 @@ class RagRecallEvaluationTest {
         KnowledgeBase knowledgeBase = createKnowledgeBase(FIXTURE_KB_NAME, "离线召回测试知识库");
 
         List<Resource> fixtureResources = new ArrayList<>();
-        fixtureResources.add(fixtureMarkdown);
-        if (fixtureMultiDoc) {
-            fixtureResources.add(fixtureReturns);
-            fixtureResources.add(fixtureLogistics);
-            fixtureResources.add(fixtureMembership);
+        if (fixtureOnlyChunking) {
+            fixtureResources.add(chunkingExperimentFixture);
+        } else {
+            fixtureResources.add(fixtureMarkdown);
+            if (fixtureMultiDoc) {
+                fixtureResources.add(fixtureReturns);
+                fixtureResources.add(fixtureLogistics);
+                fixtureResources.add(fixtureMembership);
+            }
         }
 
         List<QueryCase> queryCases = new ArrayList<>();
+        int totalChunkCount = 0;
+        long totalChunkCharacters = 0L;
+        int maxChunkCharacters = 0;
+        int overlapPairs = 0;
+        long observedOverlapCharacters = 0L;
         for (Resource resource : fixtureResources) {
             Document document = ingestFixtureMarkdown(knowledgeBase.getId(), resource);
             List<ChunkBgeM3> persistedChunks = chunkBgeM3Mapper.selectByDocId(document.getId());
             List<MarkdownParserService.MarkdownSection> sections = parseMarkdownByDocument(document);
-            queryCases.addAll(buildQueryCases(
+            totalChunkCount += sections.size();
+            for (int i = 0; i < sections.size(); i++) {
+                String content = sections.get(i).getContent();
+                int contentLength = content == null ? 0 : content.length();
+                totalChunkCharacters += contentLength;
+                maxChunkCharacters = Math.max(maxChunkCharacters, contentLength);
+                if (i > 0 && java.util.Objects.equals(
+                        sections.get(i - 1).getContentPath(),
+                        sections.get(i).getContentPath()
+                )) {
+                    int overlap = observedOverlap(sections.get(i - 1).getContent(), content);
+                    if (overlap > 0) {
+                        overlapPairs++;
+                        observedOverlapCharacters += overlap;
+                    }
+                }
+            }
+            queryCases.addAll(chunkingQuick
+                    ? buildQuickChunkingQueryCases(
+                    knowledgeBase.getId(),
+                    document.getId(),
+                    sections,
+                    persistedChunks,
+                    "fixture"
+            )
+                    : buildQueryCases(
                     knowledgeBase.getId(),
                     document.getId(),
                     sections,
                     persistedChunks,
                     "fixture"
             ));
+            if (chunkingBoundaryCases) {
+                addBoundaryQueryCases(
+                        queryCases,
+                        knowledgeBase.getId(),
+                        document.getId(),
+                        sections,
+                        persistedChunks,
+                        "fixture"
+                );
+            }
         }
 
+        writeChunkingStats(totalChunkCount, totalChunkCharacters, maxChunkCharacters, overlapPairs, observedOverlapCharacters);
         return evaluateCases("fixture", queryCases, Map.of(), previousMissCaseIds);
     }
 
@@ -432,7 +504,7 @@ class RagRecallEvaluationTest {
                 .collect(Collectors.groupingBy(QueryCase::queryStyle, LinkedHashMap::new, Collectors.toList()));
 
         List<EvaluationSummary> primaryBreakdown = new ArrayList<>();
-        for (String queryStyle : List.of(QUERY_STYLE_TITLE, QUERY_STYLE_REWRITE)) {
+        for (String queryStyle : primaryQueryStyles()) {
             primaryBreakdown.add(evaluateStyleGroup(
                     source + "/" + queryStyle,
                     caseGroups.getOrDefault(queryStyle, List.of()),
@@ -450,7 +522,8 @@ class RagRecallEvaluationTest {
                 QUERY_STYLE_TITLE_PATH,
                 QUERY_STYLE_USER_LIKE_QUESTION,
                 QUERY_STYLE_FOLLOW_UP_CONTEXTUAL_REWRITE,
-                QUERY_STYLE_TOPIC_SWITCH_GUARD
+                QUERY_STYLE_TOPIC_SWITCH_GUARD,
+                QUERY_STYLE_BOUNDARY_REWRITE
         )) {
             diagnosticBreakdown.add(evaluateStyleGroup(
                     source + "/" + queryStyle,
@@ -655,6 +728,12 @@ class RagRecallEvaluationTest {
                 List.of(),
                 null
         );
+    }
+
+    private List<String> primaryQueryStyles() {
+        return chunkingQuick
+                ? List.of(QUERY_STYLE_REWRITE)
+                : List.of(QUERY_STYLE_TITLE, QUERY_STYLE_REWRITE);
     }
 
     private List<VariantComparison> buildVariantComparisons(
@@ -989,6 +1068,32 @@ class RagRecallEvaluationTest {
         return retrievalService.retrieve(List.of(queryCase.kbId()), queryCase.query(), queryCase.context(), EVAL_RETRIEVAL_LIMIT);
     }
 
+    private List<QueryCase> buildQuickChunkingQueryCases(
+            String kbId,
+            String docId,
+            List<MarkdownParserService.MarkdownSection> sections,
+            List<ChunkBgeM3> persistedChunks,
+            String source
+    ) {
+        List<QueryCase> queryCases = new ArrayList<>();
+        List<ChunkBgeM3> sortedChunks = persistedChunks.stream()
+                .sorted(Comparator.comparing(ChunkBgeM3::getCreatedAt))
+                .toList();
+        for (int i = 0; i < sections.size(); i++) {
+            MarkdownParserService.MarkdownSection section = sections.get(i);
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_REWRITE,
+                    kbId,
+                    docId,
+                    i,
+                    buildRewriteQuery(section.getContent()),
+                    resolveGoldChunks(docId, section, sortedChunks, i)
+            ));
+        }
+        return queryCases;
+    }
+
     private List<QueryCase> buildQueryCases(
             String kbId,
             String docId,
@@ -1135,6 +1240,48 @@ class RagRecallEvaluationTest {
         }
 
         return queryCases;
+    }
+
+    private void addBoundaryQueryCases(
+            List<QueryCase> queryCases,
+            String kbId,
+            String docId,
+            List<MarkdownParserService.MarkdownSection> sections,
+            List<ChunkBgeM3> persistedChunks,
+            String source
+    ) {
+        List<ChunkBgeM3> sortedChunks = persistedChunks.stream()
+                .sorted(Comparator.comparing(ChunkBgeM3::getCreatedAt))
+                .toList();
+        for (int i = 0; i + 1 < sections.size(); i++) {
+            MarkdownParserService.MarkdownSection current = sections.get(i);
+            MarkdownParserService.MarkdownSection next = sections.get(i + 1);
+            if (!java.util.Objects.equals(current.getContentPath(), next.getContentPath())) {
+                continue;
+            }
+
+            GoldResolution currentGold = resolveGoldChunks(docId, current, sortedChunks, i);
+            GoldResolution nextGold = resolveGoldChunks(docId, next, sortedChunks, i + 1);
+            LinkedHashSet<String> boundaryGoldIds = new LinkedHashSet<>();
+            boundaryGoldIds.addAll(currentGold.chunkIds());
+            boundaryGoldIds.addAll(nextGold.chunkIds());
+            String currentQuery = buildRewriteQuery(current.getContent());
+            String nextQuery = buildRewriteQuery(next.getContent());
+            if (boundaryGoldIds.size() < 2 || !StringUtils.hasText(currentQuery) || !StringUtils.hasText(nextQuery)) {
+                continue;
+            }
+
+            queryCases.add(createCase(
+                    source,
+                    QUERY_STYLE_BOUNDARY_REWRITE,
+                    kbId,
+                    docId,
+                    i,
+                    currentQuery + "；" + nextQuery,
+                    null,
+                    new GoldResolution(List.copyOf(boundaryGoldIds), "boundary_pair")
+            ));
+        }
     }
 
     private GoldResolution resolveTitleAnchorGoldChunks(
@@ -1545,6 +1692,49 @@ class RagRecallEvaluationTest {
             }
             knowledgeBaseMapper.deleteById(knowledgeBase.getId());
         }
+    }
+
+    private void writeChunkingStats(
+            int totalChunkCount,
+            long totalChunkCharacters,
+            int maxChunkCharacters,
+            int overlapPairs,
+            long observedOverlapCharacters
+    ) throws IOException {
+        if (!StringUtils.hasText(chunkingStatsPath)) {
+            return;
+        }
+        Path outputPath = Path.of(chunkingStatsPath);
+        if (outputPath.getParent() != null) {
+            Files.createDirectories(outputPath.getParent());
+        }
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("maxSectionContentLength", chunkingMaxSectionContentLength);
+        stats.put("configuredOverlapLength", chunkingOverlapLength);
+        stats.put("totalChunkCount", totalChunkCount);
+        stats.put("totalChunkCharacters", totalChunkCharacters);
+        stats.put("maxChunkCharacters", maxChunkCharacters);
+        stats.put("overlapPairs", overlapPairs);
+        stats.put("observedOverlapCharacters", observedOverlapCharacters);
+        Files.writeString(outputPath, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(stats));
+    }
+
+    private int observedOverlap(String previousContent, String currentContent) {
+        if (!StringUtils.hasText(previousContent) || !StringUtils.hasText(currentContent)) {
+            return 0;
+        }
+        int maxLength = Math.min(previousContent.length(), currentContent.length());
+        for (int length = maxLength; length > 0; length--) {
+            if (previousContent.regionMatches(
+                    previousContent.length() - length,
+                    currentContent,
+                    0,
+                    length
+            )) {
+                return length;
+            }
+        }
+        return 0;
     }
 
     private boolean shouldRunFixture() {
@@ -2145,7 +2335,6 @@ class RagRecallEvaluationTest {
             DocumentConverter.class,
             KnowledgeBaseConverter.class,
             DocumentStorageServiceImpl.class,
-            MarkdownParserServiceImpl.class,
             QueryRewriteServiceImpl.class,
             RagServiceImpl.class
     })
@@ -2153,6 +2342,14 @@ class RagRecallEvaluationTest {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean
+        MarkdownParserService markdownParserService(
+                @Value("${rag.eval.chunking.max-section-content-length:2000}") int maxSectionContentLength,
+                @Value("${rag.eval.chunking.overlap-length:0}") int overlapLength
+        ) {
+            return new MarkdownParserServiceImpl(maxSectionContentLength, overlapLength);
         }
 
         @Bean

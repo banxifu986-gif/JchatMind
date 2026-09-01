@@ -260,6 +260,37 @@ class MarkdownParserServiceImplTest {
     }
 
     @Test
+    void shouldApplyConfiguredOverlapWhenSplittingLongSection() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl(1000, 100);
+        String markdown = "# 长文\n" + "x".repeat(3000);
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parseMarkdown(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(4, sections.size());
+        assertTrue(sections.stream().allMatch(section -> section.getContent().length() <= 1000));
+        assertEquals(
+                sections.get(0).getContent().substring(900),
+                sections.get(1).getContent().substring(0, 100)
+        );
+        assertEquals(3000, sections.stream().mapToInt(section -> section.getContent().length()).sum() - 300);
+    }
+
+    @Test
+    void shouldKeepOneStructuredSectionWhenLengthLimitIsDisabled() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl(0, 0);
+        String markdown = "# 长文\n" + "x".repeat(3000);
+
+        List<MarkdownParserService.MarkdownSection> sections = service.parseMarkdown(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(1, sections.size());
+        assertEquals(3000, sections.get(0).getContent().length());
+    }
+
+    @Test
     void shouldNotKeepRequestMarkdownInSingletonState() {
         for (Field field : MarkdownParserServiceImpl.class.getDeclaredFields()) {
             assertFalse(field.getName().equals("originalMarkdownContent"));

@@ -27,8 +27,8 @@ import java.util.regex.Pattern;
 @Slf4j
 public class MarkdownParserServiceImpl implements MarkdownParserService {
 
-    private static final int MAX_SECTION_CONTENT_LENGTH = 2000;
-    private static final int MIN_PREFERRED_CHUNK_LENGTH = 1000;
+    private static final int DEFAULT_MAX_SECTION_CONTENT_LENGTH = 2000;
+    private static final int DEFAULT_MIN_PREFERRED_CHUNK_LENGTH = 1000;
     private static final String DOCUMENT_TITLE = "文档";
     private static final String PREAMBLE_TITLE = "文档前言";
     private static final Pattern HTML_HEADING_PATTERN = Pattern.compile(
@@ -36,8 +36,27 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
     );
 
     private final Parser parser;
+    private final int maxSectionContentLength;
+    private final int minPreferredChunkLength;
+    private final int overlapLength;
 
     public MarkdownParserServiceImpl() {
+        this(DEFAULT_MAX_SECTION_CONTENT_LENGTH, 0);
+    }
+
+    public MarkdownParserServiceImpl(int maxSectionContentLength, int overlapLength) {
+        if (maxSectionContentLength < 0) {
+            throw new IllegalArgumentException("分块最大字符数不能为负数");
+        }
+        if (overlapLength < 0 || (maxSectionContentLength > 0 && overlapLength >= maxSectionContentLength)) {
+            throw new IllegalArgumentException("overlap 字符数必须大于等于 0 且小于分块最大字符数");
+        }
+        this.maxSectionContentLength = maxSectionContentLength;
+        this.minPreferredChunkLength = maxSectionContentLength == 0
+                ? 0
+                : Math.min(DEFAULT_MIN_PREFERRED_CHUNK_LENGTH, Math.max(1, maxSectionContentLength / 2));
+        this.overlapLength = overlapLength;
+
         MutableDataSet options = new MutableDataSet();
         options.set(Parser.EXTENSIONS, List.of(TablesExtension.create()));
         this.parser = Parser.builder(options).build();
@@ -348,7 +367,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
         List<MarkdownSection> splitSections = new ArrayList<>();
         for (MarkdownSection section : sections) {
             String content = section.getContent();
-            if (content == null || content.length() <= MAX_SECTION_CONTENT_LENGTH) {
+            if (maxSectionContentLength == 0 || content == null || content.length() <= maxSectionContentLength) {
                 splitSections.add(section);
                 continue;
             }
@@ -380,7 +399,9 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             if (!chunk.isEmpty()) {
                 chunks.add(chunk);
             }
-            start = end;
+            start = overlapLength > 0 && end < normalizedContent.length()
+                    ? Math.max(start + 1, end - overlapLength)
+                    : end;
             while (start < normalizedContent.length() && Character.isWhitespace(normalizedContent.charAt(start))) {
                 start++;
             }
@@ -389,11 +410,11 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
     }
 
     private int findChunkEnd(String content, int start) {
-        int limit = Math.min(start + MAX_SECTION_CONTENT_LENGTH, content.length());
+        int limit = Math.min(start + maxSectionContentLength, content.length());
         if (limit == content.length()) {
             return limit;
         }
-        int minimumPreferredEnd = Math.min(start + MIN_PREFERRED_CHUNK_LENGTH, limit);
+        int minimumPreferredEnd = Math.min(start + minPreferredChunkLength, limit);
         for (int index = limit - 1; index >= minimumPreferredEnd; index--) {
             char character = content.charAt(index);
             if (character == '\n' || character == '。' || character == '！' || character == '？'
