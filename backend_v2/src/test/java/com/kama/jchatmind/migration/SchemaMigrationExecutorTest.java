@@ -181,6 +181,35 @@ class SchemaMigrationExecutorTest {
         assertThat(store.operations).isEmpty();
     }
 
+    @Test
+    void shouldRequireManualApprovalAgainWhenReplayingAppliedMigrations() throws Exception {
+        Path baseline = Files.createTempFile("jchatmind-approved-baseline-", ".sql");
+        Files.writeString(baseline, "CREATE TABLE approved_baseline_marker(id INTEGER);", StandardCharsets.UTF_8);
+        String baselineSha256 = sha256(baseline);
+        RecordingStore store = new RecordingStore(SchemaMigrationExecutor.MigrationState.empty());
+
+        executor(store, baseline, baselineSha256).migrate();
+
+        assertThatThrownBy(() -> executor(store, baseline, baselineSha256, Set.of()).migrate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("manual.owner-review");
+    }
+
+    @Test
+    void shouldRevalidateApprovedBaselineFileDuringUpgrade() throws Exception {
+        Path baseline = Files.createTempFile("jchatmind-approved-baseline-", ".sql");
+        Files.writeString(baseline, "CREATE TABLE approved_baseline_marker(id INTEGER);", StandardCharsets.UTF_8);
+        String baselineSha256 = sha256(baseline);
+        RecordingStore store = new RecordingStore(SchemaMigrationExecutor.MigrationState.empty());
+
+        executor(store, baseline, baselineSha256).migrate();
+        Files.writeString(baseline, "CREATE TABLE changed_baseline_marker(id INTEGER);", StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> executor(store, baseline, baselineSha256).migrate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Approved baseline hash verification failed");
+    }
+
     private SchemaMigrationExecutor executor(
             RecordingStore store,
             Path baseline,

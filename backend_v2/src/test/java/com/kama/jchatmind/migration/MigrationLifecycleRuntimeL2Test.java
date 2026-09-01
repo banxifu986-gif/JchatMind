@@ -46,6 +46,11 @@ class MigrationLifecycleRuntimeL2Test {
     private static int hostPort;
     private static boolean containerStarted;
     private static String executionResult = "not_completed";
+    private static boolean catalogVerified;
+    private static String catalogFingerprint = "not_completed";
+    private static final Path RELEASE_REPORT = Path.of(
+            "target", "migration-l2", "migration-release-l2.json"
+    );
 
     @BeforeAll
     static void setUpRuntime() throws Exception {
@@ -81,17 +86,20 @@ class MigrationLifecycleRuntimeL2Test {
         try {
             Path report = Path.of("target", "migration-l2", "migration-lifecycle-l2.json");
             Files.createDirectories(report.getParent());
-            new ObjectMapper().writeValue(report.toFile(), Map.of(
-                    "executionMode", "isolated_postgresql_runtime",
-                    "testClass", MigrationLifecycleRuntimeL2Test.class.getName(),
-                    "manifestPath", "sql/migrations/manifest.json",
-                    "schemaVersion", "2026-08-30",
-                    "migrationCount", 16,
-                    "containerImage", IMAGE,
-                    "containerName", CONTAINER,
-                    "result", executionResult,
-                    "databaseIsolation", "random_database_per_test",
-                    "productionDatabaseTouched", false
+            new ObjectMapper().writeValue(report.toFile(), Map.ofEntries(
+                    Map.entry("executionMode", "isolated_postgresql_runtime"),
+                    Map.entry("testClass", MigrationLifecycleRuntimeL2Test.class.getName()),
+                    Map.entry("manifestPath", "sql/migrations/manifest.json"),
+                    Map.entry("schemaVersion", "2026-08-30"),
+                    Map.entry("migrationCount", 16),
+                    Map.entry("containerImage", IMAGE),
+                    Map.entry("containerName", CONTAINER),
+                    Map.entry("result", executionResult),
+                    Map.entry("catalogVerified", catalogVerified),
+                    Map.entry("catalogFingerprint", catalogFingerprint),
+                    Map.entry("releaseReportPath", RELEASE_REPORT.toString()),
+                    Map.entry("databaseIsolation", "random_database_per_test"),
+                    Map.entry("productionDatabaseTouched", false)
             ));
         } catch (Exception exception) {
             throw new AssertionError("无法写入迁移 L2 证据报告", exception);
@@ -104,11 +112,39 @@ class MigrationLifecycleRuntimeL2Test {
         String database = createDatabase();
         try {
             DataSource dataSource = dataSource(database);
-            SchemaMigrationExecutor.MigrationRunResult result = runner(dataSource, MANIFEST).migrate();
+            JdbcMigrationStore migrationStore = new JdbcMigrationStore(dataSource);
+            JdbcMigrationCatalogVerifier catalogVerifier = new JdbcMigrationCatalogVerifier(
+                    migrationStore,
+                    MigrationCatalogContract.load(PROJECT_ROOT.resolve("sql/migrations/catalog-contract.json"))
+            );
+            SchemaMigrationReleaseEntry.ReleaseResult release = new SchemaMigrationReleaseEntry(
+                    runner(dataSource, MANIFEST, migrationStore)::migrate,
+                    catalogVerifier::verify,
+                    migrationStore::withMigrationLock,
+                    new SchemaMigrationReleaseEntry.ReleaseMetadata(
+                            sha256(Files.readAllBytes(MANIFEST)),
+                            baselineSha256,
+                            List.of("manual.owner-review"),
+                            "migration-l2",
+                            "test-revision",
+                            "manual_restore_and_rebuild_required",
+                            "isolated runtime evidence only"
+                    ),
+                    RELEASE_REPORT
+            ).run();
+            SchemaMigrationExecutor.MigrationRunResult result = release.migration();
+            MigrationCatalogVerifier.VerificationResult catalog = release.catalog();
 
+            assertThat(release.status()).isEqualTo(SchemaMigrationReleaseEntry.ReleaseStatus.SUCCEEDED);
             assertThat(result.cleanInstall()).isTrue();
             assertThat(result.schemaVersion()).isEqualTo("2026-08-30");
             assertThat(result.appliedMigrationIds()).hasSize(16);
+            assertThat(catalog.verified())
+                    .withFailMessage("迁移后 catalog 对账失败: missing=%s, forbidden=%s",
+                            catalog.missingObjects(), catalog.forbiddenObjects())
+                    .isTrue();
+            catalogVerified = true;
+            catalogFingerprint = catalog.observedFingerprint();
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(17);
             assertThat(queryForLong(dataSource,
@@ -126,6 +162,38 @@ class MigrationLifecycleRuntimeL2Test {
                             + "('agent_knowledge_base', 'document_asset', 'document_asset_chunk', "
                             + "'knowledge_base_deletion_task', 'knowledge_base_deletion_audit')"))
                     .isEqualTo(5);
+
+            execute(dataSource, "CREATE TABLE unexpected_release_drift (id INTEGER)");
+            MigrationCatalogVerifier.VerificationResult unexpected = catalogVerifier.verify();
+            assertThat(unexpected.verified()).isFalse();
+            assertThat(unexpected.unexpectedObjects())
+                    .contains("table:public::unexpected_release_drift:");
+
+            execute(dataSource, "ALTER TABLE agent ADD COLUMN unexpected_release_column TEXT");
+            execute(dataSource, "ALTER TABLE agent ADD CONSTRAINT chk_unexpected_release CHECK (1 = 1)");
+            MigrationCatalogVerifier.VerificationResult unexpectedColumnAndConstraint = catalogVerifier.verify();
+            assertThat(unexpectedColumnAndConstraint.verified()).isFalse();
+            assertThat(unexpectedColumnAndConstraint.unexpectedObjects()).contains(
+                    "column:public:agent:unexpected_release_column:",
+                    "constraint:public:agent:chk_unexpected_release:c:true"
+            );
+
+            execute(dataSource, "ALTER TABLE agent ADD COLUMN allowed_kbs JSONB");
+            MigrationCatalogVerifier.VerificationResult forbidden = catalogVerifier.verify();
+            assertThat(forbidden.verified()).isFalse();
+            assertThat(forbidden.forbiddenObjects()).contains("column:public:agent:allowed_kbs:");
+
+            execute(dataSource, "ALTER TABLE user_memory ALTER COLUMN importance DROP DEFAULT");
+            execute(dataSource, "ALTER TABLE user_memory ALTER COLUMN importance TYPE TEXT");
+            MigrationCatalogVerifier.VerificationResult definitionDrift = catalogVerifier.verify();
+            assertThat(definitionDrift.verified()).isFalse();
+            assertThat(definitionDrift.definitionMismatches().stream())
+                    .anyMatch(value -> value.contains("user_memory:importance"));
+
+            execute(dataSource, "ALTER TABLE agent DROP CONSTRAINT chk_unexpected_release");
+            execute(dataSource, "ALTER TABLE agent DROP COLUMN unexpected_release_column");
+            execute(dataSource, "ALTER TABLE agent DROP COLUMN allowed_kbs");
+            execute(dataSource, "DROP TABLE unexpected_release_drift");
             executionResult = "passed";
         } finally {
             dropDatabase(database);
@@ -186,11 +254,24 @@ class MigrationLifecycleRuntimeL2Test {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(brokenManifest.toFile(), manifest);
 
             DataSource dataSource = dataSource(database);
-            SchemaMigrationExecutor brokenRunner = runner(dataSource, brokenManifest);
+            JdbcMigrationStore migrationStore = new JdbcMigrationStore(dataSource);
+            SchemaMigrationExecutor brokenRunner = runner(dataSource, brokenManifest, migrationStore);
+            Path failureReport = Path.of("target", "migration-l2", "migration-release-failure-l2.json");
 
-            assertThatThrownBy(brokenRunner::migrate)
+            assertThatThrownBy(() -> new SchemaMigrationReleaseEntry(
+                    brokenRunner::migrate,
+                    new JdbcMigrationCatalogVerifier(
+                            migrationStore,
+                            MigrationCatalogContract.load(PROJECT_ROOT.resolve("sql/migrations/catalog-contract.json"))
+                    )::verify,
+                    migrationStore::withMigrationLock,
+                    failureReport
+            ).run())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Migration script failed");
+            JsonNode failure = new ObjectMapper().readTree(Files.readString(failureReport));
+            assertThat(failure.path("status").asText()).isEqualTo("FAILED");
+            assertThat(failure.path("errorType").asText()).isEqualTo(IllegalStateException.class.getName());
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger WHERE status = 'RUNNING'"))
                     .isEqualTo(1);
@@ -206,12 +287,20 @@ class MigrationLifecycleRuntimeL2Test {
     }
 
     private static SchemaMigrationExecutor runner(DataSource dataSource, Path manifest) {
+        return runner(dataSource, manifest, new JdbcMigrationStore(dataSource));
+    }
+
+    private static SchemaMigrationExecutor runner(
+            DataSource dataSource,
+            Path manifest,
+            JdbcMigrationStore migrationStore
+    ) {
         return new SchemaMigrationExecutor(
                 PROJECT_ROOT,
                 manifest,
                 baselinePath,
                 baselineSha256,
-                new JdbcMigrationStore(dataSource),
+                migrationStore,
                 Set.of("manual.owner-review")
         );
     }
@@ -255,6 +344,13 @@ class MigrationLifecycleRuntimeL2Test {
                 throw new AssertionError("查询未返回结果: " + sql);
             }
             return resultSet.getLong(1);
+        }
+    }
+
+    private static void execute(DataSource dataSource, String sql) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute(sql);
         }
     }
 

@@ -43,6 +43,8 @@ docker compose up -d
 
 后端的 `SchemaMigrationExecutor` + `JdbcMigrationStore` 提供显式的 ledger/事务执行能力，但默认不随应用启动自动运行；生产执行仍须由发布流程传入批准基线文件、SHA-256 和人工前置批准项。
 
+发布入口、catalog 对账契约和脱敏报告规则见 [`sql/migrations/README.md`](sql/migrations/README.md)。生产迁移必须通过其中的 `MigrationReleaseApplication` 显式执行，不能把迁移绑定到普通应用启动。
+
 3. 在 `backend_v2` 中补全运行配置（`.env` 文件）
 4. 启动后端
 5. 启动前端

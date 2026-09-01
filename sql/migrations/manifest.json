@@ -1,6 +1,8 @@
 {
   "manifestVersion": "1",
   "schemaVersion": "2026-08-30",
+  "catalogContract": "sql/migrations/catalog-contract.json",
+  "catalogContractSha256": "fc227ffd8cb84d5e55abe93389f684282eb2bc92d47a4feedb7b9bff5f0055a4",
   "baseline": {
     "required": true,
     "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",

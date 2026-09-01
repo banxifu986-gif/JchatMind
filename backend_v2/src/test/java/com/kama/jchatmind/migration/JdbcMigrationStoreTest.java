@@ -12,6 +12,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -345,6 +346,75 @@ class JdbcMigrationStoreTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not updated");
         org.mockito.Mockito.verify(completionConnection).rollback();
+    }
+
+    @Test
+    void shouldReuseLockedConnectionForCatalogVerification() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement lockStatement = mock(Statement.class);
+        PreparedStatement tryLockStatement = mock(PreparedStatement.class);
+        ResultSet tryLockResult = mock(ResultSet.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(lockStatement);
+        when(connection.prepareStatement(anyString())).thenReturn(tryLockStatement);
+        when(tryLockStatement.executeQuery()).thenReturn(tryLockResult);
+        when(tryLockResult.next()).thenReturn(true);
+        when(tryLockResult.getBoolean(1)).thenReturn(true);
+
+        JdbcMigrationStore store = new JdbcMigrationStore(dataSource);
+        String connectionIdentity = store.withMigrationLock(() ->
+                store.withMigrationConnection(locked -> locked == connection
+                        ? "locked"
+                        : "different")
+        );
+
+        assertThat(connectionIdentity).isEqualTo("locked");
+        org.mockito.Mockito.verify(dataSource).getConnection();
+    }
+
+    @Test
+    void shouldRollbackLockedConnectionWhenCatalogInspectionFails() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement lockStatement = mock(Statement.class);
+        PreparedStatement tryLockStatement = mock(PreparedStatement.class);
+        ResultSet tryLockResult = mock(ResultSet.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(lockStatement);
+        when(connection.prepareStatement(anyString())).thenReturn(tryLockStatement);
+        when(tryLockStatement.executeQuery()).thenReturn(tryLockResult);
+        when(tryLockResult.next()).thenReturn(true);
+        when(tryLockResult.getBoolean(1)).thenReturn(true);
+        when(connection.getAutoCommit()).thenReturn(true);
+
+        JdbcMigrationStore store = new JdbcMigrationStore(dataSource);
+
+        assertThatThrownBy(() -> store.withMigrationLock(() -> store.withMigrationConnection(ignored -> {
+            throw new IllegalStateException("catalog inspection failed");
+        })))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("catalog inspection failed");
+        org.mockito.Mockito.verify(connection).rollback();
+    }
+
+    @Test
+    void shouldFailWhenMigrationLockCannotBeAcquiredBeforeDeadline() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement lockStatement = mock(PreparedStatement.class);
+        ResultSet lockResult = mock(ResultSet.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(lockStatement);
+        when(lockStatement.executeQuery()).thenReturn(lockResult);
+        when(lockResult.next()).thenReturn(true);
+        when(lockResult.getBoolean(1)).thenReturn(false);
+        when(connection.getAutoCommit()).thenReturn(true);
+
+        assertThatThrownBy(() -> new JdbcMigrationStore(dataSource, Duration.ZERO)
+                .withMigrationLock(() -> "unreachable"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Timed out waiting for migration lock");
     }
 
     private String sha256(String value) throws Exception {

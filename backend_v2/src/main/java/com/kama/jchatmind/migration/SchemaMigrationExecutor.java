@@ -158,7 +158,7 @@ public final class SchemaMigrationExecutor {
 
     private MigrationRunResult migrate(ManifestBundle manifest) {
         MigrationState state = store.readState();
-        validateState(state, manifest.migrations());
+        validateState(state, manifest.migrations(), approvedPrerequisites);
 
         boolean cleanInstall = !state.ledgerPresent();
         if (cleanInstall) {
@@ -169,7 +169,8 @@ public final class SchemaMigrationExecutor {
             if (approvedBaselineSha256 == null || !approvedBaselineSha256.matches("[0-9a-f]{64}")) {
                 throw new IllegalStateException("An approved baseline hash is required for upgrade");
             }
-            if (!approvedBaselineSha256.equals(state.baselineSha256())) {
+            VerifiedBaseline baseline = verifyApprovedBaseline();
+            if (!baseline.sha256().equals(state.baselineSha256())) {
                 throw new IllegalStateException("Approved baseline hash does not match migration ledger");
             }
         }
@@ -289,7 +290,11 @@ public final class SchemaMigrationExecutor {
         }
     }
 
-    private void validateState(MigrationState state, List<Migration> migrations) {
+    private void validateState(
+            MigrationState state,
+            List<Migration> migrations,
+            Set<String> approvedPrerequisites
+    ) {
         if (state == null || state.entries() == null) {
             throw new IllegalStateException("Migration ledger state is unknown");
         }
@@ -333,7 +338,7 @@ public final class SchemaMigrationExecutor {
             if (entry.status() != MigrationStatus.APPLIED) {
                 throw new IllegalStateException("Migration ledger contains an unknown status: " + entry.id());
             }
-            verifyAppliedRequirements(migration, seen);
+            verifyAppliedRequirements(migration, seen, approvedPrerequisites);
             seen.add(entry.id());
             previousOrder = entry.order();
         }
@@ -351,8 +356,17 @@ public final class SchemaMigrationExecutor {
         }
     }
 
-    private void verifyAppliedRequirements(Migration migration, Set<String> appliedIds) {
+    private void verifyAppliedRequirements(
+            Migration migration,
+            Set<String> appliedIds,
+            Set<String> approvedPrerequisites
+    ) {
         for (String requirement : migration.requires()) {
+            if (requirement.startsWith("manual.") && !approvedPrerequisites.contains(requirement)) {
+                throw new IllegalStateException(
+                        "Manual migration prerequisite is not approved: " + requirement
+                );
+            }
             if (!requirement.startsWith("baseline.")
                     && !requirement.startsWith("manual.")
                     && !appliedIds.contains(requirement)) {

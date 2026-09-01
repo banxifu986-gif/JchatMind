@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,8 +22,8 @@ public final class JdbcMigrationStore implements SchemaMigrationExecutor.Migrati
     private static final String LEDGER_SCHEMA = "public";
     private static final String LEDGER_TABLE_REFERENCE = LEDGER_SCHEMA + "." + LEDGER_TABLE;
     private static final String BASELINE_ID = "__baseline__";
-    private static final String MIGRATION_LOCK_SQL =
-            "SELECT pg_advisory_lock(hashtextextended('jchatmind.schema.migration', 0))";
+    private static final String MIGRATION_TRY_LOCK_SQL =
+            "SELECT pg_try_advisory_lock(hashtextextended('jchatmind.schema.migration', 0))";
     private static final String MIGRATION_UNLOCK_SQL =
             "SELECT pg_advisory_unlock(hashtextextended('jchatmind.schema.migration', 0))";
     private static final Set<String> LEDGER_COLUMNS = Set.of(
@@ -50,9 +51,19 @@ public final class JdbcMigrationStore implements SchemaMigrationExecutor.Migrati
     }
 
     private final DataSource dataSource;
+    private final Duration lockWaitTimeout;
+    private final ThreadLocal<Connection> lockedConnection = new ThreadLocal<>();
 
     public JdbcMigrationStore(DataSource dataSource) {
+        this(dataSource, Duration.ofSeconds(30));
+    }
+
+    public JdbcMigrationStore(DataSource dataSource, Duration lockWaitTimeout) {
         this.dataSource = dataSource;
+        if (lockWaitTimeout.isNegative()) {
+            throw new IllegalArgumentException("Migration lock timeout must not be negative");
+        }
+        this.lockWaitTimeout = lockWaitTimeout;
     }
 
     @Override
@@ -90,14 +101,20 @@ public final class JdbcMigrationStore implements SchemaMigrationExecutor.Migrati
 
     @Override
     public <T> T withMigrationLock(Supplier<T> operation) {
+        Connection current = lockedConnection.get();
+        if (current != null) {
+            return operation.get();
+        }
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(true);
-            executeLockStatement(connection, MIGRATION_LOCK_SQL);
+            acquireMigrationLock(connection);
+            lockedConnection.set(connection);
             RuntimeException operationFailure = null;
             try {
                 return operation.get();
             } catch (RuntimeException e) {
                 operationFailure = e;
+                rollbackIfTransactionIsOpen(connection, e);
                 throw e;
             } finally {
                 try {
@@ -108,10 +125,51 @@ public final class JdbcMigrationStore implements SchemaMigrationExecutor.Migrati
                     } else {
                         throw e;
                     }
+                } finally {
+                    lockedConnection.remove();
                 }
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot acquire migration lock", e);
+        }
+    }
+
+    public <T> T withMigrationConnection(ConnectionOperation<T> operation) {
+        Connection current = lockedConnection.get();
+        try {
+            if (current != null) {
+                boolean startedTransaction = current.getAutoCommit();
+                if (startedTransaction) {
+                    current.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+                    current.setAutoCommit(false);
+                }
+                try {
+                    T result = operation.apply(current);
+                    if (startedTransaction) {
+                        current.commit();
+                    }
+                    return result;
+                } catch (SQLException e) {
+                    if (startedTransaction) {
+                        rollback(current, e);
+                    }
+                    throw e;
+                } catch (RuntimeException e) {
+                    if (startedTransaction) {
+                        rollback(current, e);
+                    }
+                    throw e;
+                } finally {
+                    if (startedTransaction) {
+                        current.setAutoCommit(true);
+                    }
+                }
+            }
+            try (Connection connection = dataSource.getConnection()) {
+                return operation.apply(connection);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot inspect migration catalog connection", e);
         }
     }
 
@@ -331,11 +389,49 @@ public final class JdbcMigrationStore implements SchemaMigrationExecutor.Migrati
         }
     }
 
+    private void acquireMigrationLock(Connection connection) throws SQLException {
+        long deadline = System.nanoTime() + lockWaitTimeout.toNanos();
+        while (!tryAcquireMigrationLock(connection)) {
+            if (System.nanoTime() >= deadline) {
+                throw new IllegalStateException("Timed out waiting for migration lock");
+            }
+            try {
+                Thread.sleep(25L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Migration lock wait interrupted", e);
+            }
+        }
+    }
+
+    private boolean tryAcquireMigrationLock(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(MIGRATION_TRY_LOCK_SQL);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() && resultSet.getBoolean(1);
+        }
+    }
+
     private void rollback(Connection connection, Throwable failure) {
         try {
             connection.rollback();
         } catch (SQLException rollbackFailure) {
             failure.addSuppressed(rollbackFailure);
         }
+    }
+
+    private void rollbackIfTransactionIsOpen(Connection connection, Throwable failure) {
+        try {
+            if (!connection.getAutoCommit()) {
+                rollback(connection, failure);
+            }
+        } catch (SQLException autoCommitFailure) {
+            failure.addSuppressed(autoCommitFailure);
+        }
+    }
+
+    @FunctionalInterface
+    public interface ConnectionOperation<T> {
+
+        T apply(Connection connection) throws SQLException;
     }
 }

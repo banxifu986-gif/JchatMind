@@ -86,6 +86,11 @@ class MigrationManifestContractTest {
         assertThat(root.path("execution").path("cleanInstall").asText()).isNotBlank();
         assertThat(root.path("execution").path("upgrade").asText()).isNotBlank();
         assertThat(root.path("execution").path("unknownState").asText()).containsIgnoringCase("fail");
+        String catalogContract = root.path("catalogContract").asText();
+        assertThat(catalogContract).isEqualTo("sql/migrations/catalog-contract.json");
+        assertThat(Files.exists(Path.of("..", catalogContract))).isTrue();
+        assertThat(root.path("catalogContractSha256").asText())
+                .isEqualTo(sha256(Path.of("..", catalogContract)));
     }
 
     private String sha256(Path path) throws Exception {
