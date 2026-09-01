@@ -1,5 +1,5 @@
 import { Routes, Route, useParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Layout from "../layout/Layout.tsx";
 import Sidebar from "../layout/Sidebar.tsx";
 import SideMenu from "./SideMenu.tsx";
@@ -25,11 +25,26 @@ export default function JChatMindLayout() {
   const [sessionTraceCache] = useState(
     () => new Map<string, AgentExecutionTraceItem[]>(),
   );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    window.matchMedia("(max-width: 880px)").matches,
+  );
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 880px)");
+    const handleViewportChange = (event: MediaQueryListEvent) => {
+      setSidebarCollapsed(event.matches);
+    };
+    mediaQuery.addEventListener("change", handleViewportChange);
+    return () => mediaQuery.removeEventListener("change", handleViewportChange);
+  }, []);
 
   return (
     <Layout>
-      <Sidebar>
-        <SideMenu />
+      <Sidebar collapsed={sidebarCollapsed}>
+        <SideMenu
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed((previous) => !previous)}
+        />
       </Sidebar>
       <Content>
         <Routes>

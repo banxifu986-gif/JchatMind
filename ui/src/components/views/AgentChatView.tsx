@@ -331,14 +331,19 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {agentName && (
-        <div className="border-b border-gray-200 bg-white px-4 py-2 flex items-center gap-2">
-          <RobotOutlined className="text-gray-400" />
-          <span className="text-sm text-gray-600">当前智能体：</span>
-          <span className="text-sm font-medium text-gray-900">{agentName}</span>
+    <div className="app-chat-page">
+      <div className="app-chat__topbar">
+        <div className="app-chat__agent-context">
+          <span className="app-chat__agent-avatar app-chat__agent-avatar--live">
+            <RobotOutlined />
+          </span>
+          <div className="app-chat__agent-select-copy">
+            <span className="app-chat__eyebrow">当前对话</span>
+            <span className="app-chat__active-agent-name">{agentName ?? "JChatMind"}</span>
+          </div>
         </div>
-      )}
+        <span className="app-chat__topbar-hint">实时工作区</span>
+      </div>
       <AgentChatHistory
         messages={messages}
         displayAgentStatus={displayAgentStatus}
@@ -351,7 +356,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
         onApprove={() => handleApproval(true)}
         onReject={() => handleApproval(false)}
       />
-      <div className="border-t border-gray-200 p-4 bg-white">
+      <div className="app-chat__active-composer">
         <AgentChatInput onSend={handleSendMessage} />
       </div>
     </div>

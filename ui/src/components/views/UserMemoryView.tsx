@@ -128,9 +128,9 @@ const UserMemoryView: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-100/60">
-      <div className="max-w-5xl mx-auto p-6 space-y-6">
-        <Card className="border-0 shadow-sm bg-gradient-to-r from-amber-50 to-orange-50">
+    <div className="app-memory-page">
+      <div className="app-management-page__inner app-memory-page__inner">
+        <Card className="app-memory-hero">
           <Space align="start" size="large">
             <div className="w-14 h-14 rounded-2xl bg-orange-500 text-white flex items-center justify-center text-2xl">
               <SafetyOutlined />
@@ -149,7 +149,7 @@ const UserMemoryView: React.FC = () => {
           </Space>
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="app-memory-grid grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card
             title="待确认候选"
             loading={loading}

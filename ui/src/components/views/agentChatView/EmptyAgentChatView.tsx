@@ -1,20 +1,24 @@
 import React, { useMemo, useState } from "react";
-import { Card, Space, Typography, Select, Tag } from "antd";
-import {
-  BulbOutlined,
-  MessageOutlined,
-  RobotOutlined,
-  DownOutlined,
-} from "@ant-design/icons";
+import { message as antdMessage, Select, Typography } from "antd";
+import { DownOutlined, RobotOutlined } from "@ant-design/icons";
 import { Sender } from "@ant-design/x";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   type AgentVO,
   createChatSession,
 } from "../../../api/api.ts";
 import { getAgentAvatar } from "../../../utils";
 import { useChatSessions } from "../../../hooks/useChatSessions.ts";
+import { useUser } from "../../../hooks/useUser.ts";
+
 const { Title, Text } = Typography;
+
+const QUICK_PROMPTS = [
+  "帮我分析一个问题",
+  "从知识库中查找资料",
+  "整理并沉淀我的记忆",
+  "帮我规划下一步",
+] as const;
 
 interface EmptyAgentChatViewProps {
   loading: boolean;
@@ -26,155 +30,162 @@ const EmptyAgentChatView: React.FC<EmptyAgentChatViewProps> = ({
   agents,
 }) => {
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { refreshChatSessions } = useChatSessions();
-  const agentsWithEmoji = useMemo(() => {
+  const { isLogin } = useUser();
+  const agentsWithAvatar = useMemo(() => {
     return agents.map((agent) => ({
       ...agent,
       ...getAgentAvatar(agent.id, agent.name),
     }));
   }, [agents]);
 
-  const preselectedAgentId = (location.state as { selectedAgentId?: string })?.selectedAgentId;
+  const preselectedAgentId = (location.state as { selectedAgentId?: string })
+    ?.selectedAgentId;
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
     () => preselectedAgentId ?? null,
   );
 
   const effectiveAgentId = useMemo(() => {
-    if (selectedAgentId && agents.some((a) => a.id === selectedAgentId)) {
+    if (selectedAgentId && agents.some((agent) => agent.id === selectedAgentId)) {
       return selectedAgentId;
     }
     return agents.length > 0 ? agents[0].id : null;
-  }, [selectedAgentId, agents]);
+  }, [agents, selectedAgentId]);
 
   const effectiveAgent = useMemo(() => {
-    return agentsWithEmoji.find((a) => a.id === effectiveAgentId) ?? null;
-  }, [agentsWithEmoji, effectiveAgentId]);
+    return agentsWithAvatar.find((agent) => agent.id === effectiveAgentId) ?? null;
+  }, [agentsWithAvatar, effectiveAgentId]);
+
+  const handleSubmit = async () => {
+    if (submitting) {
+      return;
+    }
+    if (!isLogin) {
+      antdMessage.warning("请先登录");
+      return;
+    }
+    if (!effectiveAgentId || !message.trim()) {
+      return;
+    }
+
+    const initialMessage = message.trim();
+    setSubmitting(true);
+    try {
+      const response = await createChatSession({
+        agentId: effectiveAgentId,
+        title: initialMessage.slice(0, 20),
+      });
+      await refreshChatSessions();
+      setMessage("");
+      navigate(`/chat/${response.chatSessionId}`, {
+        replace: true,
+        state: {
+          init: true,
+          initMessage: initialMessage,
+        },
+      });
+    } catch (error) {
+      antdMessage.error(error instanceof Error ? error.message : "创建聊天会话失败，请重试");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="app-chat-page app-chat-page--empty">
       {agents.length > 0 && (
-        <div className="border-b border-gray-200 bg-white px-4 py-3 flex items-center gap-3">
-          <Select
-            value={effectiveAgentId}
-            onChange={(value) => setSelectedAgentId(value)}
-            style={{ width: 220 }}
-            className="agent-selector"
-            suffixIcon={<DownOutlined className="text-gray-400" />}
-            placeholder="选择智能体"
-            optionRender={(option) => {
-              const agent = agentsWithEmoji.find((a) => a.id === option.value);
-              return (
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex w-5 h-5 rounded bg-gradient-to-br ${agent?.gradientClass} items-center justify-center text-white text-[10px] font-semibold`}>
-                    {agent?.initial}
-                  </span>
-                  <span className="text-sm">{option.label}</span>
-                </div>
-              );
-            }}
-            options={agentsWithEmoji.map((agent) => ({
-              value: agent.id,
-              label: agent.name,
-            }))}
-          />
-          {effectiveAgent && (
-            <Tag color="blue">
-              当前：{effectiveAgent.name}
-            </Tag>
-          )}
+        <div className="app-chat__topbar">
+          <div className="app-chat__agent-context">
+            <span
+              className={`app-chat__agent-avatar bg-gradient-to-br ${effectiveAgent?.gradientClass ?? "from-slate-400 to-slate-500"}`}
+            >
+              {effectiveAgent?.initial ?? "A"}
+            </span>
+            <div className="app-chat__agent-select-copy">
+              <span className="app-chat__eyebrow">当前智能体</span>
+              <Select
+                value={effectiveAgentId}
+                onChange={(value) => setSelectedAgentId(value)}
+                variant="borderless"
+                className="app-chat__agent-select"
+                suffixIcon={<DownOutlined />}
+                placeholder="选择智能体"
+                optionRender={(option) => {
+                  const agent = agentsWithAvatar.find((item) => item.id === option.value);
+                  return (
+                    <div className="app-chat__agent-option">
+                      <span
+                        className={`app-chat__agent-option-avatar bg-gradient-to-br ${agent?.gradientClass ?? "from-slate-400 to-slate-500"}`}
+                      >
+                        {agent?.initial}
+                      </span>
+                      <span>{option.label}</span>
+                    </div>
+                  );
+                }}
+                options={agentsWithAvatar.map((agent) => ({
+                  value: agent.id,
+                  label: agent.name,
+                }))}
+              />
+            </div>
+          </div>
+          <span className="app-chat__topbar-hint">准备好开始工作</span>
         </div>
       )}
 
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-5xl w-full space-y-6">
-          <div className="text-center mb-8">
-            <Title level={2} className="mb-2">
-              开始新的对话
-            </Title>
-            <Text type="secondary" className="text-base">
-              {effectiveAgent
-                ? `当前智能体：${effectiveAgent.name}，在下方输入消息即可开始对话。`
-                : "请先在左侧「智能体」标签中创建一个智能体助手。"}
-            </Text>
-          </div>
+      <div className="app-chat__empty-main">
+        <div className="app-chat__signal-mark" aria-hidden="true">
+          <span className="app-chat__signal-ring" />
+          <span className="app-chat__signal-core">
+            <RobotOutlined />
+          </span>
+        </div>
+        <span className="app-chat__eyebrow app-chat__empty-eyebrow">JCHATMIND WORKSPACE</span>
+        <Title level={1} className="app-chat__empty-title">
+          你想让 JChatMind 帮你构建什么？
+        </Title>
+        <Text className="app-chat__empty-subtitle">
+          {effectiveAgent
+            ? `从一个想法开始，让 ${effectiveAgent.name} 帮你拆解、检索和执行。`
+            : "从左侧工作区添加一个智能体，开始你的第一段对话。"}
+        </Text>
 
-          <Space orientation="vertical" size="large" className="w-full">
-            <Card hoverable className="cursor-pointer transition-all hover:shadow-lg">
-              <Space size="middle">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center">
-                  <RobotOutlined className="text-white text-xl" />
-                </div>
-                <div>
-                  <Title level={5} className="mb-1">
-                    智能对话
-                  </Title>
-                  <Text type="secondary">和 AI 助手对话，自动结合当前会话与长期记忆。</Text>
-                </div>
-              </Space>
-            </Card>
-
-            <Card hoverable className="cursor-pointer transition-all hover:shadow-lg">
-              <Space size="middle">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center">
-                  <BulbOutlined className="text-white text-xl" />
-                </div>
-                <div>
-                  <Title level={5} className="mb-1">
-                    记忆沉淀
-                  </Title>
-                  <Text type="secondary">候选记忆需要你确认后才会进入长期上下文。</Text>
-                </div>
-              </Space>
-            </Card>
-
-            <Card hoverable className="cursor-pointer transition-all hover:shadow-lg">
-              <Space size="middle">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center">
-                  <MessageOutlined className="text-white text-xl" />
-                </div>
-                <div>
-                  <Title level={5} className="mb-1">
-                    快速开始
-                  </Title>
-                  <Text type="secondary">直接在底部输入消息，自动创建新会话。</Text>
-                </div>
-              </Space>
-            </Card>
-          </Space>
+        <div className="app-chat__prompt-list" aria-label="快捷提示">
+          {QUICK_PROMPTS.map((prompt) => (
+            <button
+              type="button"
+              className="app-chat__prompt-chip"
+              key={prompt}
+              onClick={() => setMessage(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="border-t border-gray-200 bg-white px-4 pb-4 pt-4">
-        <Sender
-          onSubmit={async () => {
-            if (!effectiveAgentId || !message.trim()) {
-              return;
+      <div className="app-chat__composer-area">
+        <div className="app-chat__composer-shell">
+          <Sender
+            onSubmit={handleSubmit}
+            value={message}
+            loading={loading || submitting}
+            disabled={!effectiveAgentId || submitting}
+            placeholder={
+              effectiveAgent
+                ? `向 ${effectiveAgent.name} 发送消息...`
+                : "请先在左侧工作区添加智能体"
             }
-            const response = await createChatSession({
-              agentId: effectiveAgentId,
-              title: message.slice(0, 20),
-            });
-            await refreshChatSessions();
-            setMessage("");
-            navigate(`/chat/${response.chatSessionId}`, {
-              replace: true,
-              state: {
-                init: true,
-                initMessage: message,
-              },
-            });
-          }}
-          value={message}
-          loading={loading}
-          placeholder={
-            effectiveAgent
-              ? `向 ${effectiveAgent.name} 发送消息...`
-              : "请先选择智能体"
-          }
-          onChange={setMessage}
-        />
+            onChange={setMessage}
+          />
+        </div>
+        <span className="app-chat__composer-note">
+          JChatMind 可能会出错，请核对重要信息
+        </span>
       </div>
     </div>
   );

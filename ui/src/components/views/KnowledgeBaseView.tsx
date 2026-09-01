@@ -309,7 +309,7 @@ const KnowledgeBaseView: React.FC = () => {
   // 未选择知识库时的提示
   if (!knowledgeBaseId) {
     return (
-      <div className="flex flex-col h-full items-center justify-center p-6">
+      <div className="app-page-empty">
         <Empty
           image={<BookOutlined className="text-6xl text-gray-300" />}
           description={
@@ -330,7 +330,7 @@ const KnowledgeBaseView: React.FC = () => {
   // 知识库不存在
   if (!currentKnowledgeBase) {
     return (
-      <div className="flex flex-col h-full items-center justify-center p-6">
+      <div className="app-page-empty">
         <Empty
           description={
             <div className="mt-4">
@@ -349,12 +349,12 @@ const KnowledgeBaseView: React.FC = () => {
 
   // 显示知识库详情和文档列表
   return (
-    <div className="flex flex-col h-full p-6 overflow-y-auto">
-      <div className="max-w-5xl w-full mx-auto">
+    <div className="app-management-page">
+      <div className="app-management-page__inner">
         <div className="mb-3">
           <Card>
             <div className="flex items-start gap-4">
-              <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-blue-200 to-purple-200 flex items-center justify-center text-3xl shrink-0">
+              <div className="app-management-icon w-16 h-16 rounded-lg flex items-center justify-center text-3xl shrink-0">
                 <BookOutlined />
               </div>
               <div className="flex-1">

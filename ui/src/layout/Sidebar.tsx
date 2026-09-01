@@ -2,15 +2,13 @@ import React from "react";
 
 interface SidebarProps {
   children: React.ReactNode;
+  collapsed?: boolean;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ children }) => {
+const Sidebar: React.FC<SidebarProps> = ({ children, collapsed = false }) => {
   return (
     <div
-      className="h-full bg-slate-50"
-      style={{
-        width: "320px",
-      }}
+      className={`app-sidebar h-full ${collapsed ? "is-collapsed" : ""}`}
     >
       {children}
     </div>

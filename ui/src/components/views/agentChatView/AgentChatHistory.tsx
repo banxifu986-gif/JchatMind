@@ -244,13 +244,14 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
   };
 
   return (
-    <div 
+    <div
       ref={scrollContainerRef}
-      className="flex-1 px-16 pt-4 overflow-y-scroll"
+      className="app-chat__history"
     >
+      <div className="app-chat__history-inner">
       {messages.map((message) => {
         return (
-          <div className="mb-4" key={message.id}>
+          <div className={`app-chat__message app-chat__message--${message.role}`} key={message.id}>
             {/* Assistant 消息 */}
             {message.role === "assistant" && (
               <Bubble
@@ -308,7 +309,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
         );
       })}
       {streamingContent && (
-        <div className="mb-4">
+        <div className="app-chat__message app-chat__message--assistant">
           <Bubble
             content={
               <XMarkdown streaming={{ enableAnimation: true, hasNextChunk: true }}>
@@ -320,20 +321,21 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
         </div>
       )}
       {agentTrace.length > 0 && (
-        <div className="mb-3 border-l-2 border-blue-400 pl-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700">
+        <div className="app-chat__trace">
+          <div className="app-chat__trace-header">
             <ThunderboltOutlined className="text-blue-600" />
             <span>执行轨迹</span>
           </div>
-          <div className="flex flex-col gap-1.5 text-xs">
+          <div className="app-chat__trace-list">
             {agentTrace.map((traceItem) => (
-              <div className="flex items-start gap-2 text-gray-600" key={traceItem.id}>
-                <span className="min-w-10 font-semibold text-blue-600">
+              <div className="app-chat__trace-item" key={traceItem.id}>
+                <span className="app-chat__trace-dot" />
+                <span className="app-chat__trace-label">
                   {getTraceLabel(traceItem.type)}
                 </span>
-                <span className="flex-1">{traceItem.statusText}</span>
+                <span className="app-chat__trace-text">{traceItem.statusText}</span>
                 {traceItem.stepNumber !== undefined && (
-                  <span className="text-gray-400">步骤 {traceItem.stepNumber}</span>
+                  <span className="app-chat__trace-step">步骤 {traceItem.stepNumber}</span>
                 )}
               </div>
             ))}
@@ -341,27 +343,27 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
         </div>
       )}
       {displayAgentStatus && agentStatusType === "TOOL_APPROVAL_REQUIRED" && pendingApproval && (
-        <div className="mb-3">
+        <div className="app-chat__approval">
           <Bubble
             content={
-              <div className="flex flex-col gap-2">
-                <span className="font-semibold text-orange-600">
+              <div className="app-chat__approval-card">
+                <span className="app-chat__approval-title">
                   <SafetyCertificateOutlined className="mr-1" />
                   工具执行需要审批
                 </span>
-                <span className="text-xs text-gray-600">
+                <span className="app-chat__approval-tool">
                   {pendingApproval.toolName}
                   {pendingApproval.callCount > 1 ? `，共 ${pendingApproval.callCount} 次调用` : ""}
                 </span>
                 {pendingApproval.toolInput && (
-                  <details className="text-xs text-gray-600">
+                  <details className="app-chat__approval-details">
                     <summary className="cursor-pointer">查看调用参数</summary>
-                    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-gray-50 p-2">
+                    <pre className="app-chat__approval-input">
                       {pendingApproval.toolInput}
                     </pre>
                   </details>
                 )}
-                <Space size="small">
+                <Space size="small" className="app-chat__approval-actions">
                   <Button
                     type="primary"
                     size="small"
@@ -388,7 +390,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
         </div>
       )}
       {displayAgentStatus && agentStatusType !== "TOOL_APPROVAL_REQUIRED" && (
-        <div className="mb-3">
+        <div className={`app-chat__status ${agentStatusType === "AI_ERROR" ? "is-error" : ""}`}>
           <div
             className="animate-pulse"
             style={{
@@ -401,13 +403,6 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
                 <span className="flex items-center gap-2">
                   <span
                     className={`font-semibold ${agentStatusType === "AI_ERROR" ? "text-red-600" : "text-blue-600"}`}
-                    style={{
-                      animation:
-                        "pulse 0.7s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-                      textShadow:
-                        "0 0 10px rgba(37, 99, 235, 1), 0 0 20px rgba(37, 99, 235, 0.8), 0 0 30px rgba(37, 99, 235, 0.5)",
-                      filter: "brightness(1.3)",
-                    }}
                   >
                     <ThunderboltOutlined className="mr-1" />
                     {getStatusLabel()}
@@ -421,6 +416,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };
