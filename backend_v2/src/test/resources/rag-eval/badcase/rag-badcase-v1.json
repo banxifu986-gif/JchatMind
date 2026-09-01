@@ -81,8 +81,8 @@
       "failureType": "retrieval_rank_regression",
       "severity": "P1",
       "discoveredVersion": "g2-pre-bm25-v1",
-      "fixedVersion": null,
-      "regressionStatus": "development-regression",
+      "fixedVersion": "2026-09-01-query-anchor-tiebreak-v1",
+      "regressionStatus": "fixed",
       "reviewStatus": "reviewed",
       "reviewedBy": "codex_badcase_review",
       "reviewedAt": "2026-08-31T00:00:00+08:00",
@@ -93,11 +93,14 @@
         "goldRankR1": 2,
         "goldRankR2": 2,
         "branchFusionContract": "outer_rrf_one_vote_per_branch",
-        "disposition": "keep_r0_default_not_fixed",
+        "postFixGoldRankR1": 1,
+        "postFixGoldRankR2": 1,
+        "fixVariant": "query-anchor-tiebreak-v1",
+        "disposition": "fixed_in_evaluation_keep_r0_default",
         "inputSha256": "6acb2659cd155a7a7791a3dd7073f27856b2f2d554fbc3460a4b950b1202c428",
         "sourceReport": "backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json"
       },
-      "labels": ["code-identifier", "retrieval-rank", "g2-structure"]
+      "labels": ["code-identifier", "retrieval-rank", "query-anchor-tiebreak", "g2-structure"]
     },
     {
       "caseId": "g2-pre-bm25-v1-009-citation-rank-regression",
@@ -118,8 +121,8 @@
       "failureType": "citation_rank_regression",
       "severity": "P1",
       "discoveredVersion": "g2-pre-bm25-v1",
-      "fixedVersion": null,
-      "regressionStatus": "development-regression",
+      "fixedVersion": "2026-09-01-query-anchor-tiebreak-v1",
+      "regressionStatus": "fixed",
       "reviewStatus": "reviewed",
       "reviewedBy": "codex_badcase_review",
       "reviewedAt": "2026-08-31T00:00:00+08:00",
@@ -130,11 +133,14 @@
         "goldRankR1": 2,
         "goldRankR2": 2,
         "branchFusionContract": "outer_rrf_one_vote_per_branch",
-        "disposition": "keep_r0_default_not_fixed",
+        "postFixGoldRankR1": 1,
+        "postFixGoldRankR2": 1,
+        "fixVariant": "query-anchor-tiebreak-v1",
+        "disposition": "fixed_in_evaluation_keep_r0_default",
         "inputSha256": "6acb2659cd155a7a7791a3dd7073f27856b2f2d554fbc3460a4b950b1202c428",
         "sourceReport": "backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json"
       },
-      "labels": ["pdf-page", "citation", "retrieval-rank", "g2-structure"]
+      "labels": ["pdf-page", "citation", "retrieval-rank", "query-anchor-tiebreak", "g2-structure"]
     }
   ]
 }

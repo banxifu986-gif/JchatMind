@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
@@ -51,8 +53,10 @@ public class RagServiceImpl implements RagService {
     private static final int TITLE_CONTAINS_MIN_QUERY_LENGTH = 2;
     private static final int TITLE_KEYWORD_MIN_LENGTH = 2;
     private static final int TITLE_KEYWORD_MAX_COUNT = 6;
+    private static final int TECHNICAL_ANCHOR_MIN_LENGTH = 16;
     private static final Duration EMBEDDING_TIMEOUT = Duration.ofSeconds(30);
     private static final Set<String> GENERIC_LEAF_TITLES = Set.of("回答", "原理", "总结", "方案");
+    private static final Pattern PAGE_REFERENCE_PATTERN = Pattern.compile("第\\s*(\\d+)\\s*页");
 
     private final WebClient webClient;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
@@ -191,8 +195,8 @@ public class RagServiceImpl implements RagService {
         QueryRewriteResult rewritten = queryRewriteService.rewrite(effectiveKbIds, query, null);
         return switch (variant) {
             case "current-flat" -> retrieveCurrentFlat(effectiveKbIds, rewritten, limit);
-            case "two-branch-original" -> retrieveWithPlan(effectiveKbIds, rewritten, limit, false);
-            case "three-branch-expanded" -> retrieveWithPlan(effectiveKbIds, rewritten, limit, true);
+            case "two-branch-original" -> retrieveWithPlan(effectiveKbIds, rewritten, limit, false, true);
+            case "three-branch-expanded" -> retrieveWithPlan(effectiveKbIds, rewritten, limit, true, true);
             default -> throw new IllegalArgumentException("未知独立三路评测变体: " + variant);
         };
     }
@@ -298,7 +302,7 @@ public class RagServiceImpl implements RagService {
     }
 
     private List<RagRetrievalResult> retrieveWithPlan(List<String> kbIds, QueryRewriteResult rewritten, int limit) {
-        return retrieveWithPlan(kbIds, rewritten, limit, true);
+        return retrieveWithPlan(kbIds, rewritten, limit, true, false);
     }
 
     private List<RagRetrievalResult> retrieveWithPlan(
@@ -306,6 +310,16 @@ public class RagServiceImpl implements RagService {
             QueryRewriteResult rewritten,
             int limit,
             boolean includeExpandedQuery
+    ) {
+        return retrieveWithPlan(kbIds, rewritten, limit, includeExpandedQuery, false);
+    }
+
+    private List<RagRetrievalResult> retrieveWithPlan(
+            List<String> kbIds,
+            QueryRewriteResult rewritten,
+            int limit,
+            boolean includeExpandedQuery,
+            boolean preserveQueryAnchors
     ) {
         String originalQuery = rewritten.getQuery();
         String normalizedOriginalQuery = normalize(originalQuery);
@@ -395,6 +409,9 @@ public class RagServiceImpl implements RagService {
         if (normalizedContext.applyMode() == QueryRewriteResult.ContextApplyMode.HARD) {
             candidates = filterByContext(candidates, normalizedContext);
         }
+        if (preserveQueryAnchors) {
+            candidates = preserveQueryAnchors(candidates, normalizedOriginalQuery);
+        }
 
         List<RagRetrievalResult> finalResults = disableRerank
                 ? candidates
@@ -403,6 +420,86 @@ public class RagServiceImpl implements RagService {
         return finalResults.stream()
                 .limit(limit)
                 .toList();
+    }
+
+    private List<RagRetrievalResult> preserveQueryAnchors(
+            List<RagRetrievalResult> candidates,
+            String normalizedQuery
+    ) {
+        List<RagRetrievalResult> ordered = new ArrayList<>(candidates);
+        for (int index = 1; index < ordered.size(); index++) {
+            int current = index;
+            while (current > 0
+                    && shouldPromoteAnchor(ordered.get(current), ordered.get(current - 1), normalizedQuery)) {
+                RagRetrievalResult promoted = ordered.set(current - 1, ordered.get(current));
+                ordered.set(current, promoted);
+                current--;
+            }
+        }
+        for (int index = 0; index < ordered.size(); index++) {
+            ordered.get(index).setRank(index + 1);
+        }
+        return ordered;
+    }
+
+    private boolean shouldPromoteAnchor(
+            RagRetrievalResult candidate,
+            RagRetrievalResult incumbent,
+            String normalizedQuery
+    ) {
+        if (!hasQueryAnchor(candidate, normalizedQuery) || hasQueryAnchor(incumbent, normalizedQuery)) {
+            return false;
+        }
+        Set<String> candidateBranches = branchNames(candidate);
+        if (candidateBranches.isEmpty() || !candidateBranches.equals(branchNames(incumbent))) {
+            return false;
+        }
+        Double candidateRrf = candidate.getRrfScore();
+        Double incumbentRrf = incumbent.getRrfScore();
+        if (candidateRrf == null || incumbentRrf == null) {
+            return false;
+        }
+        double adjacentRankGap = 1D / (RRF_K + 1D) - 1D / (RRF_K + 2D);
+        return Math.abs(candidateRrf - incumbentRrf)
+                <= candidateBranches.size() * adjacentRankGap + 1.0E-12D;
+    }
+
+    private Set<String> branchNames(RagRetrievalResult result) {
+        Set<String> branches = new LinkedHashSet<>();
+        if (result.getRetrievalProvenance() == null) {
+            return branches;
+        }
+        for (String provenance : result.getRetrievalProvenance()) {
+            int separator = provenance.indexOf(':');
+            if (separator > 0) {
+                branches.add(provenance.substring(0, separator));
+            }
+        }
+        return branches;
+    }
+
+    private boolean hasQueryAnchor(RagRetrievalResult result, String normalizedQuery) {
+        Integer queryPageNumber = pageNumber(normalizedQuery);
+        if (queryPageNumber != null
+                && queryPageNumber.equals(extractMetadataInt(result.getMetadata(), "pageNumber"))) {
+            String sourceName = normalize(extractMetadataText(result.getMetadata(), "sourceName"));
+            if (StringUtils.hasText(sourceName) && normalizedQuery.contains(sourceName)) {
+                return true;
+            }
+        }
+
+        String searchableText = normalize(extractRetrievableTitle(result.getMetadata()) + " " + result.getContent());
+        for (String token : normalizedQuery.split("[^a-z0-9_]+")) {
+            if (token.length() >= TECHNICAL_ANCHOR_MIN_LENGTH && searchableText.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Integer pageNumber(String normalizedQuery) {
+        Matcher matcher = PAGE_REFERENCE_PATTERN.matcher(normalizedQuery);
+        return matcher.find() ? Integer.valueOf(matcher.group(1)) : null;
     }
 
     private List<RagRetrievalResult> retrieveCurrentFlat(

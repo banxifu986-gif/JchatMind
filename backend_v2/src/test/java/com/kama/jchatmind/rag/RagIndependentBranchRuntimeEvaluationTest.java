@@ -116,6 +116,14 @@ class RagIndependentBranchRuntimeEvaluationTest {
         assertThat(queryReplay(runs.get(2), "g2-pre-bm25-v1-005").branchDiagnostics())
                 .extracting(RagIndependentBranchEvaluator.BranchDiagnostic::branch)
                 .containsExactly("dense-original", "sparse-original", "expanded-query");
+        assertThat(queryReplay(runs.get(1), "g2-pre-bm25-v1-002").rankedChunkIds().get(0))
+                .isEqualTo("g2-architecture#JVM 词法候选边界#0");
+        assertThat(queryReplay(runs.get(2), "g2-pre-bm25-v1-002").rankedChunkIds().get(0))
+                .isEqualTo("g2-architecture#JVM 词法候选边界#0");
+        assertThat(queryReplay(runs.get(1), "g2-pre-bm25-v1-009").rankedChunkIds().get(0))
+                .isEqualTo("architecture.pdf#第 2 页#0");
+        assertThat(queryReplay(runs.get(2), "g2-pre-bm25-v1-009").rankedChunkIds().get(0))
+                .isEqualTo("architecture.pdf#第 2 页#0");
         assertThat(REPORT_PATH).isRegularFile();
     }
 
@@ -347,7 +355,8 @@ class RagIndependentBranchRuntimeEvaluationTest {
                 sha256(gold),
                 sha256(scope),
                 replay.inputSha256(),
-                sha256(variant + "|fixture=" + fixture.fixtureSha256() + "|RRF_K=60|topK=10|candidateBudget=50"),
+                sha256(variant + "|fixture=" + fixture.fixtureSha256()
+                        + "|RRF_K=60|topK=10|candidateBudget=50|query-anchor-tiebreak-v1"),
                 TOP_K,
                 CANDIDATE_BUDGET,
                 sha256(effectiveQuerySet)

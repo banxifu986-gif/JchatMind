@@ -1130,6 +1130,109 @@ class RagServiceImplTest {
         }
     }
 
+    @Test
+    void shouldPreserveCodeIdentifierAnchorWithinIndependentRrfTie() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            String query = "selectContentLexicalCandidatesByKbIds 为什么不能继续用于正文 BM25？";
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), query, null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query(query)
+                            .retrievalQueries(List.of(query))
+                            .retrievalQuerySources(List.of("original"))
+                            .build());
+            RagRetrievalResult distractor = candidate("distractor", 1);
+            distractor.setContent("PostgreSQL 原生 BM25 迁移");
+            RagRetrievalResult gold = candidate("gold", 2);
+            gold.setContent("selectContentLexicalCandidatesByKbIds 会把全文候选拉回 JVM");
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(List.of(distractor, gold));
+            when(bm25QueryService.searchContent(
+                    List.of("kb-1"), query.toLowerCase(), null, null, null, 20
+            )).thenReturn(List.of(distractor, gold));
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieveForIndependentBranchEvaluation(
+                    List.of("kb-1"), query, 2, "two-branch-original"
+            );
+
+            assertEquals("gold", results.get(0).getChunkId());
+
+            List<RagRetrievalResult> defaultResults = service.retrieve(List.of("kb-1"), query, 2);
+            assertEquals("distractor", defaultResults.get(0).getChunkId());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldPreservePdfPageAnchorWithinIndependentRrfTie() throws Exception {
+        HttpServer server = createEmbeddingServer();
+        server.start();
+
+        try {
+            String query = "architecture.pdf 第 2 页的引用需要包含什么？";
+            ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+            QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+            VchordBm25QueryService bm25QueryService = mock(VchordBm25QueryService.class);
+            when(rewriteService.rewrite(List.of("kb-1"), query, null))
+                    .thenReturn(QueryRewriteResult.builder()
+                            .query(query)
+                            .retrievalQueries(List.of(query))
+                            .retrievalQuerySources(List.of("original"))
+                            .build());
+            RagRetrievalResult pageOne = candidate("page-one", 1);
+            pageOne.setMetadata("{\"sourceName\":\"architecture.pdf\",\"sourceType\":\"pdf\",\"pageNumber\":1}");
+            RagRetrievalResult pageTwo = candidate("page-two", 2);
+            pageTwo.setMetadata("{\"sourceName\":\"architecture.pdf\",\"sourceType\":\"pdf\",\"pageNumber\":2}");
+            when(mapper.similaritySearchDetailed(List.of("kb-1"), "[0.1,0.2,0.3]", 50))
+                    .thenReturn(List.of(pageOne, pageTwo));
+            when(bm25QueryService.searchContent(
+                    List.of("kb-1"), query.toLowerCase(), null, null, null, 20
+            )).thenReturn(List.of(pageOne, pageTwo));
+
+            RagServiceImpl service = new RagServiceImpl(
+                    WebClient.builder(),
+                    mapper,
+                    rewriteService,
+                    bm25QueryService,
+                    mock(BgeRerankerService.class),
+                    "http://localhost:" + server.getAddress().getPort(),
+                    "bge-m3:latest",
+                    false,
+                    false,
+                    true,
+                    0
+            );
+
+            List<RagRetrievalResult> results = service.retrieveForIndependentBranchEvaluation(
+                    List.of("kb-1"), query, 2, "three-branch-expanded"
+            );
+
+            assertEquals("page-two", results.get(0).getChunkId());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static RagRetrievalResult candidate(String chunkId, int rank) {
         RagRetrievalResult candidate = new RagRetrievalResult();
         candidate.setChunkId(chunkId);

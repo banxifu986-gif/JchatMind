@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS public.document (
     CONSTRAINT chk_document_evaluation_namespace CHECK (evaluation_namespace = 'rag-eval')
 );
 
-CREATE INDEX IF NOT EXISTS public.idx_document_kb_id ON public.document(kb_id);
+CREATE INDEX IF NOT EXISTS idx_document_kb_id ON public.document(kb_id);
 
 CREATE TABLE IF NOT EXISTS public.chunk_bge_m3 (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -26,7 +26,7 @@ class RagBadCaseManifestTest {
     );
 
     @Test
-    void shouldFreezeReviewedRefusalViolationsWithTraceableEvidence() throws Exception {
+    void shouldFreezeReviewedCasesWithTraceableEvidence() throws Exception {
         assertThat(Files.exists(MANIFEST)).isTrue();
 
         JsonNode root;
@@ -79,9 +79,8 @@ class RagBadCaseManifestTest {
         assertThat(rankRegression.path("evidence").path("branchFusionContract").asText())
                 .isEqualTo("outer_rrf_one_vote_per_branch");
         assertThat(rankRegression.path("evidence").path("disposition").asText())
-                .isEqualTo("keep_r0_default_not_fixed");
-        assertThat(rankRegression.path("fixedVersion").isNull()).isTrue();
-        assertThat(rankRegression.path("regressionStatus").asText()).isEqualTo("development-regression");
+                .isEqualTo("fixed_in_evaluation_keep_r0_default");
+        assertFixedQueryAnchorCase(rankRegression);
 
         JsonNode citationRegression = casesById.get("g2-pre-bm25-v1-009-citation-rank-regression");
         assertThat(citationRegression.path("expectedRoute").asText()).isEqualTo("PRIVATE_RAG");
@@ -92,9 +91,18 @@ class RagBadCaseManifestTest {
         assertThat(citationRegression.path("evidence").path("branchFusionContract").asText())
                 .isEqualTo("outer_rrf_one_vote_per_branch");
         assertThat(citationRegression.path("evidence").path("disposition").asText())
-                .isEqualTo("keep_r0_default_not_fixed");
-        assertThat(citationRegression.path("fixedVersion").isNull()).isTrue();
-        assertThat(citationRegression.path("regressionStatus").asText()).isEqualTo("development-regression");
+                .isEqualTo("fixed_in_evaluation_keep_r0_default");
+        assertFixedQueryAnchorCase(citationRegression);
+    }
+
+    private void assertFixedQueryAnchorCase(JsonNode badCase) {
+        assertThat(badCase.path("fixedVersion").asText())
+                .isEqualTo("2026-09-01-query-anchor-tiebreak-v1");
+        assertThat(badCase.path("regressionStatus").asText()).isEqualTo("fixed");
+        assertThat(badCase.path("evidence").path("fixVariant").asText())
+                .isEqualTo("query-anchor-tiebreak-v1");
+        assertThat(badCase.path("evidence").path("postFixGoldRankR1").asInt()).isEqualTo(1);
+        assertThat(badCase.path("evidence").path("postFixGoldRankR2").asInt()).isEqualTo(1);
     }
 
     private void assertAbstentionCase(JsonNode badCase) {
