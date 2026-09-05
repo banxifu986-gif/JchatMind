@@ -76,6 +76,10 @@ import java.util.stream.Collectors;
         classes = RagRecallEvaluationTest.RagEvalTestConfig.class,
         properties = {
                 "spring.ai.mcp.client.enabled=false",
+                "spring.datasource.url=jdbc:postgresql://127.0.0.1:55432/jchatmind_rag_eval",
+                "spring.datasource.username=rag_eval",
+                "spring.datasource.password=",
+                "document.storage.base-path=target/rag-eval/current/uploads",
                 "ollama.base-url=http://localhost:11434",
                 "ollama.embedding-model=bge-m3:latest"
         }
@@ -293,6 +297,7 @@ class RagRecallEvaluationTest {
 
     @Test
     void evaluateRecall() throws Exception {
+        assertIsolatedDatabase();
         List<EvaluationSummary> summaries = new ArrayList<>();
         Map<String, Set<String>> previousMissCaseIds = loadPreviousMissCaseIds();
 
@@ -1743,6 +1748,19 @@ class RagRecallEvaluationTest {
 
     private boolean shouldRunReal() {
         return MODE_REAL.equalsIgnoreCase(evalMode) || MODE_BOTH.equalsIgnoreCase(evalMode);
+    }
+
+    private void assertIsolatedDatabase() throws Exception {
+        try (var connection = jdbcTemplate.getDataSource().getConnection()) {
+            String actualUrl = connection.getMetaData().getURL();
+            String actualDatabase = jdbcTemplate.queryForObject("SELECT current_database()", String.class);
+            if (!"jdbc:postgresql://127.0.0.1:55432/jchatmind_rag_eval".equals(actualUrl)
+                    || !"jchatmind_rag_eval".equals(actualDatabase)) {
+                throw new IllegalStateException(
+                        "RAG 评测只能连接 127.0.0.1:55432/jchatmind_rag_eval，实际为 " + actualUrl + "/" + actualDatabase
+                );
+            }
+        }
     }
 
     private boolean isMarkdown(String fileType) {

@@ -34,11 +34,34 @@ recorded in `external-benchmark-registry.json`. The registry is authoritative
 for official URLs, revisions, license evidence, redistribution status, and
 the required artifact checksums.
 
-The current `regression-v1-candidate` L2 mapping can run only after restoring
-the exact original Markdown sources whose hashes are recorded in
-`backend_v2/src/test/resources/rag-eval/datasets/candidates/` and importing
-them into this isolated runtime. The mapping test verifies source hashes and
-headings before it accepts any runtime chunk UUID mapping.
+The historical `regression-v1-candidate` L2 mapping is retired and is not a
+current evaluation prerequisite. Its candidate JSON, source anchors and
+release manifest remain only for audit; do not restore missing internal
+Markdown sources or generate a runtime mapping for that retired dataset.
+Current local RAG evaluation uses the frozen
+`mMARCO-zh-sampled-v3-local-diagnostic` inputs and the repository-owned
+`fixture-fast-v1` fixture. The `g2-pre-bm25-v1` fixture remains the
+development-only three-branch structure fixture. These
+tracks have separate reports and must not be combined into a product release
+claim: mMARCO covers public retrieval/rerank diagnostics, while the project
+fixture covers Router, authorization, refusal, citation and multimodal
+contracts.
+
+The current fixture profile and replay-level Router comparison are covered by
+`backend_v2/target/rag-eval/router/fixture-fast-v1-router-ablation.json`.
+Its `executionMode` is `fixture-replay-router-contract`; its latency and token
+fields are replay/contract values, not production measurements. The isolated
+runtime retrieval baseline is written to
+`backend_v2/target/rag-eval/current/fixture-fast-v1-runtime.json` and uses the
+explicit database `127.0.0.1:55432/jchatmind_rag_eval`. It does not yet provide
+Router timing, citation correctness, answer quality or an end-to-end cost
+measurement.
+
+In this profile, `expectedRoute` describes the pre-retrieval Router decision,
+while `shouldAbstain` describes the final retrieval/answer outcome. Therefore,
+the two no-answer/permission-boundary cases may route to `PRIVATE_RAG` before
+evidence is known; owner and cross-KB permission refusal is covered separately
+by the isolated PostgreSQL L2 test.
 
 To remove the isolated data after a completed evaluation run:
 
