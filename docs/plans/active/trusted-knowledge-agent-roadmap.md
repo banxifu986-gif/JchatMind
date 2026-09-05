@@ -1,6 +1,6 @@
 # 可信研发知识协作 Agent 升级总计划
 
-> 状态：G0 已结项；G1 核心链路已完成，受控 KB 删除任务已通过隔离 L2 与 Edge Playwright L3，显式生产迁移入口和托管 catalog 对账已实现并通过隔离 L2，真实生产执行仍须发布窗口；G2 已完成原生 BM25、Router/资产候选接线、独立三路实现及诊断评测，当前 Bad Case 回放已全绿但 release-v1、Router/固定链路消融和默认切换门禁仍未完成，R0 与本地 rerank 默认保持不变；G3、G4、G5 均为部分实现，尚未达到阶段退出条件。
+> 状态：G0 已结项；G1 核心链路已完成，受控 KB 删除任务已通过隔离 L2 与 Edge Playwright L3，显式生产迁移入口和托管 catalog 对账已实现并通过隔离 L2，真实生产执行仍须发布窗口；G2 已完成原生 BM25、Router/资产候选接线、独立三路实现及 mMARCO v3 本机诊断，当前 Bad Case 回放已全绿，KnowledgeTools/MCP 双 KB 组合授权 L2 已补齐，但当前项目 fixture 的固定链路/Router 质量成本消融、引用/答案质量和多模态验收仍未完成，R0 与本地 rerank 默认保持不变；旧 `regression-v1` 内部文档来源路线已退役，仅保留历史审计资料；G3、G4、G5 均为部分实现，尚未达到阶段退出条件。
 > 创建日期：2026-08-14  
 > 产品定位：面向个人开发者和小型研发团队的可信知识协作 Agent。  
 > 本文是当前唯一维护的跨模块计划，负责需求、设计、实施和验收的主索引。历史专项方案已归档；当前实施范围和验收以本文与现有 Spec 为准。
@@ -11,11 +11,30 @@
 
 本节是本文唯一的当前状态视图。后文按时间保留的 RED/GREEN、实验和决策记录只用于追溯；若与本节冲突，以本节及第 6.3 节验收矩阵的最新状态为准。
 
+### 0.1 计划修订（2026-09-01）
+
+本次修订废弃原先依赖 `interview-qa`/`sql-tuning` exact source 的 `regression-v1` 路线。该路线的候选 JSON、anchor、release manifest、UUID mapping 测试和阻塞记录均保留为历史审计资料，但不再作为当前计划、发布门禁或后续实现前置；不再恢复缺失的内部文档，也不修改或读取 `datasets/mmarco`。
+
+当前评测真源改为两条明确分工的链路：
+
+1. **mMARCO v3 本机诊断**：使用已冻结的中文 300 query 池、50 条 development 实际样本和 1,116 条候选库，验证 Dense/BM25/RRF/rerank 的检索质量与延迟。已有报告继续作为当前外部检索基线，但不代表全量 mMARCO、内部知识库授权、引用或最终答案质量。
+2. **项目当前 fixture 验收**：以仓库已有的 `fixture-fast-v1` 作为当前文本/权限/拒答基线，验证 Router、owner/Agent/会话范围和拒答；多模态资产另以独立扩展 fixture 验证。`g2-pre-bm25-v1` 继续保留为三路结构 development fixture，不直接升级为 current release；任何新扩展都必须单独记录来源、gold、配置和哈希。
+
+当前计划不再追求一个混合的 `release-v1` 数据集。外部检索能力、项目授权安全和回答/引用质量分别报告、分别设门禁，任一门禁失败都保持 R0，不用另一条链路的结果替代。
+
+修订后的执行顺序为：
+
+1. **保留外部检索基线**：以已完成的 mMARCO v3 报告作为当前公开检索诊断基线；后续重跑必须显式校验隔离库、输入哈希、模型和 TEI 状态，不默认扩大到未运行 split。
+2. **确认当前项目 fixture**：复用已冻结的 `fixture-fast-v1` 文本/权限/拒答集（20 case、18 answerable、2 abstention），先补 Router/引用字段的独立评测映射；多模态后续新增独立 `g2-current-multimodal-v1`，不修改旧 fixture。
+3. **执行 fixed chain/Router 对比**：在 `fixture-fast-v1` 上跑项目内 Router、权限、拒答和引用契约；在 mMARCO v3 上只跑公开检索/RRF/rerank 诊断；多模态使用独立扩展 fixture。报告分别记录 Recall/MRR/nDCG、p95、成本代理、权限违规和拒答违规，不能跨数据集合并分数。
+4. **默认切换门禁**：只有 `fixture-fast-v1` 及多模态扩展的授权/拒答/引用全绿，且 mMARCO v3 或新的公开诊断没有违反质量、p95 和成本门禁时，才评估 R0/rerank 默认调整；否则继续保持 R0 和 rerank 关闭。
+5. **阶段顺序**：G2 当前 fixture 门禁完成后，再执行 G3 LongMemEval 与记忆 L2/L3；G5 的负载、背压和恢复能力仍先于 G4 Planner/Webhook/多 Agent 扩面。
+
 | 阶段 | 当前状态 | 已签收边界 | 未完成退出项 |
 | --- | --- | --- | --- |
 | G0 | 已完成 | 聊天、RAG 回归哨兵、SSE、Harness、前端关键旅程 | 无；后续仅做回归维护 |
 | G1 | 部分完成，核心主链路可用 | owner-only 权限、任务摄入、真实队列/数据库、PDF/HTML/Markdown、单实例任务 SSE、MCP 主体与真实模型工具调用、KB 删除任务隔离 L2/L3、显式迁移发布入口与 catalog 对账 | 真实生产发布窗口执行与记录；多实例 SSE/持久化恢复 |
-| G2 | 部分完成，默认结构不切换 | VectorChord BM25、范围谓词下推、Router 入口、PDF/Markdown 表格资产、独立三路实现与真实结构消融、mMARCO 本机诊断、当前 reviewed Bad Case 回放 | release-v1 未调参集、Router 相对固定链路消融、组合授权 L2、引用/拒答/答案质量门禁、真实多模态验收 |
+| G2 | 部分完成，默认结构不切换 | VectorChord BM25、范围谓词下推、Router 入口、PDF/Markdown 表格资产、独立三路实现与真实结构消融、mMARCO v3 本机诊断、当前 reviewed Bad Case 回放、KnowledgeTools/MCP 双 KB 组合授权 L2 | 基于当前 fixture 的固定链路/Router 质量成本消融、引用/拒答/答案质量门禁、真实多模态验收 |
 | G3 | 部分完成 | 内置 Skill L0/L1、候选确认/忽略/编辑/删除、节流、去重、冲突和过期治理 | LongMemEval 30 题、记忆 L2/L3、Skill HTTP/队列/模型总结和运行时预算 |
 | G4 | 部分完成，暂不扩面 | 工作流验证/顺序执行 L0/L1、入站 Webhook 本地验签 | Planner、实际超时/fallback、持久化审计、Webhook 任务映射/投递/重试/DLQ；须先证明质量收益 |
 | G5 | 部分完成 | 单实例会话互斥、Agent 专用有界执行池 | 明确负载模型、工具/索引/Webhook 线程池、背压、缓存隔离、多实例 SSE 与恢复 |
@@ -24,9 +43,27 @@
 
 1. 已完成工程基线收口：三份真源已同步，默认后端测试零失败/零错误，前端 lint/build/静态契约通过，数据库迁移顺序、clean install、release entry 和隔离 catalog 对账可复现；真实生产迁移仍由发布窗口单独执行。
 2. 已完成 G1 KB 删除任务 L2/L3，证明数据库级删除、文件清理、重试/死信、跨账号隔离和浏览器状态一致。
-3. 当前下一步收口 G2：Bad Case 的当前 reviewed 集已完成修复回放，继续建立未参与调参的 `release-v1`，完成固定链路/Router 的质量、p95 与成本消融；门禁通过前保持 R0 和本地 rerank 默认值。
+3. 当前下一步收口 G2：Bad Case 的当前 reviewed 集已完成修复回放，mMARCO v3 外部检索诊断基线和 KnowledgeTools/MCP 双 KB 组合授权 L2 已建立；先基于仓库内当前 fixture 重新冻结 Router/固定链路质量评测输入，再完成质量、p95、成本、引用和多模态门禁，门禁通过前保持 R0 和本地 rerank 默认值。
 4. 执行 G3 LongMemEval 30 题及记忆 L2/L3；若 M2 相对 M0 无明确净收益，不扩展反思和更多记忆类型。
 5. 完成最小 G5 负载、背压、观测和恢复能力后，再决定是否投入 G4 Planner、Webhook 和多 Agent。
+
+### 0.2 工具选择与执行门禁补强（2026-09-03）
+
+当前普通 `JChatMind` 链路没有独立的顶层意图分类器：模型通过 `ToolCall` 提出动作，`RagRouter` 只在 `KnowledgeTool` 已被选中后负责 RAG 路由，不能作为模型工具权限。现有 Prompt 规则、20 步上限和重复调用提醒不能单独阻止模型误调用；同时，外部 `ToolCallbackProvider` 当前可能被全量注入，`terminate` 提示与生产运行时工具集合不一致，Harness 对本轮未暴露工具也没有 fail-closed 的硬拒绝。
+
+本轮以最小安全闭环修复普通 Agent 主链路，范围固定为：
+
+1. 增加确定性的轻量工具选择策略：闲聊/低信息请求不暴露工具；知识类请求只暴露 `KnowledgeTool`；明确的天气、日期、邮件、数据库或文件请求只暴露对应 callback；不明确请求不猜测工具。
+2. 每轮模型调用只接收本轮策略选出的 callback；执行前将该集合传入 Harness，工具名不在集合内直接生成拒绝结果，不进入真实工具执行；执行侧对缺失 Harness 决策按拒绝处理。
+3. 外部 callback 仅在 Agent 的 `allowedTools` 显式包含 callback 名称时注入；空配置不得获得外部工具。固定测试日期/城市/天气工具改为可选，避免无关工具默认暴露。
+4. 同一次 Agent 运行中，对相同 `tool + arguments` 只允许首次执行，重复调用生成可审计的拒绝 Observation；修正 `terminate` 提示，使完成语义统一为直接输出最终回答。
+5. 保留现有 Harness 审批、熔断、审计、超时和 KB owner/session 收窄；不在本轮接入 Planner，不新增模型分类调用、依赖、持久化状态或兼容性分支。
+
+验收必须覆盖：闲聊零工具可见、知识请求工具收窄、明确副作用工具不被其他意图暴露、未授权 ToolCall 不执行、外部 callback 未显式授权不注入、重复调用不执行第二次、现有审批/KB 范围与 SSE/消息链路不回归。对应新增 `TC-G0-07`，实现未完成前不得将其标记为通过。
+
+**2026-09-04 实施状态。** `ToolSelectionPolicy` 已接入普通 `JChatMind` 每轮模型调用：闲聊和不可识别请求不暴露工具，知识请求只暴露 `KnowledgeTool`，明确动作才暴露对应 callback；`HarnessRunner` 新增本轮工具白名单和重复调用预阻断，缺失 Harness 决策按拒绝处理；Factory 外部 callback 改为 Agent `allowedTools` 精确授权，日期/城市/天气测试工具改为可选，`terminate` 不再出现在普通 Agent 完成提示中。保留现有审批、熔断、审计、30 秒工具超时、20 步总预算和 KB owner/session 收窄。本轮尚未实现参数 JSON Schema 注册中心、连续失败上限/退避、跨运行持久化预算或 Planner 接入。
+
+`TC-G0-07` 已完成本地 GREEN 验收：`ToolSelectionPolicyTest`、`JChatMindToolGuardTest`、`JChatMindFactoryToolScopeTest`、`TestToolRegistrationTest`、`HarnessRunnerTest` 及既有 Agent/Harness/SSE/Factory/KB/RAG 回归共 13 个测试类定向执行，退出码为 `0`。RED 阶段已稳定复现未授权外部 callback 注入、固定测试工具默认暴露、重复调用被审批分组覆盖等问题；本轮修复后均通过。该证据不覆盖真实模型质量、参数 Schema 注册中心、Planner 或跨进程预算。
 
 ## 1. 目标与产品边界
 
@@ -117,7 +154,7 @@ JSONB `allowedKbs` 已从 `agent` 持久化模型移除，不能作为授权或�
 
 外部数据集不能直接写入或覆盖真实业务库。执行前必须建立独立 PostgreSQL/VectorChord 测试库和独立上传目录，记录官方来源 URL、版本/发布日期、许可证、下载文件 SHA-256、预处理脚本版本、语言或事件过滤条件，以及映射到本项目 `kb_id`/`doc_id`/`chunk_id` 的映射清单。评测集不得参与 embedding、BM25 词典或 RRF 参数调优；需要调参时必须另行划分 development split，并保留 untouched test split。
 
-**2026-08-24 准备状态。** [docker-compose.rag-eval.yml](../../../docker-compose.rag-eval.yml) 已创建独立的本机回环 PostgreSQL/VectorChord 运行时、卷和 `rag-eval/uploads/` 目录；运行时已验证 `vchord_bm25 0.3.0` 与 `vector 0.8.2`。[002-evaluation-schema.sql](../../../rag-eval/init/002-evaluation-schema.sql) 已应用到该隔离库，显式创建 `public.knowledge_base`、`public.document` 和 `public.chunk_bge_m3`；每条记录的 `evaluation_namespace` 均被默认值和约束固定为 `rag-eval`，并已由 [verify-isolated-schema.ps1](../../../rag-eval/verify-isolated-schema.ps1) 实测 `vector(1024)` 与两条 VectorChord BM25 索引。官方来源、修订、许可证证据、再分发判定和数据文件 SHA-256 规则统一登记在 [rag-eval/external-benchmark-registry.json](../../../rag-eval/external-benchmark-registry.json)：mMARCO 官方仓库和数据集卡均声明 Apache-2.0，但因其 MS MARCO 血缘仍须在再分发前复核上游条款；CRUD-RAG README 只有 Apache 徽章且 GitHub license API 返回 `404`，在权利人给出明确数据许可前禁止下载或处理其数据。两套基准尚未下载，因而没有可登记的数据文件 SHA-256。
+**2026-08-24 准备状态，2026-09-01 修订。** [docker-compose.rag-eval.yml](../../../docker-compose.rag-eval.yml) 已创建独立的本机回环 PostgreSQL/VectorChord 运行时、卷和 `rag-eval/uploads/` 目录；运行时已验证 `vchord_bm25 0.3.0` 与 `vector 0.8.2`。[002-evaluation-schema.sql](../../../rag-eval/init/002-evaluation-schema.sql) 已应用到该隔离库，显式创建 `public.knowledge_base`、`public.document` 和 `public.chunk_bge_m3`；每条记录的 `evaluation_namespace` 均被默认值和约束固定为 `rag-eval`，并已由 [verify-isolated-schema.ps1](../../../rag-eval/verify-isolated-schema.ps1) 实测 `vector(1024)` 与两条 VectorChord BM25 索引。官方来源、修订、许可证证据、再分发判定和数据文件 SHA-256 规则统一登记在 [rag-eval/external-benchmark-registry.json](../../../rag-eval/external-benchmark-registry.json)：mMARCO v3 的四份中文输入已物化、哈希已登记并完成本机 50 条 development 诊断；CRUD-RAG README 只有 Apache 徽章且 GitHub license API 返回 `404`，在权利人给出明确数据许可前继续禁止下载或处理其数据。mMARCO v3 的报告和输入证据可继续复用；CRUD-RAG 仍无可登记的数据文件 SHA-256，不进入当前执行链路。
 
 两个基准分别出报告并与同一配置下的 G0 fixture、G2 pre-BM25 基线和当前 VectorChord 链路对比；不做跨数据集平均，不以单一 Recall 数值宣称 G2 已完成。mMARCO 主要支撑公开多语言检索能力的横向比较，CRUD-RAG 主要支撑中文 RAG 任务覆盖；二者都不能替代本项目的 owner/Agent/会话授权、拒答、动态更新一致性和引用准确性冻结集。
 
@@ -273,6 +310,18 @@ Bad Case 分四层管理：
 
 **2026-09-01 G2 Bad Case 修复回放。** 针对上述两条 P1，新增独立的 `query-anchor-tiebreak-v1` 评测变体规则：仅在同一组分支、相邻 outer RRF 分数差不超过一名的可比候选之间，优先保留查询中明确出现的代码标识符或 PDF 来源/页码锚点；不增加分支投票、不引入专用权重，不改变普通生产 `retrieve` 默认路径。先以 `RagServiceImplTest` 固定 code identifier/PDF page 两个 RED/GREEN 单测，再由 `RagIndependentBranchRuntimeEvaluationTest` 在同一 `g2-pre-bm25-v1` 隔离库和有效分母上复跑。最新报告 `backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json` 中 R0/R1/R2 的 Recall@1/3/5/10、MRR@10、nDCG@10 均为 `1.0`，拒答/权限违规均为 `0`，R1/R2 两个 gold 均为第 `1` 名，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`（下降约 `10.5%`），评测 gate 为 `eligible_for_rerank_ab`。两个 case 更新为 `fixed`，处置为 `fixed_in_evaluation_keep_r0_default`；由于修复使用了当前 development 输入，尚不能回填 untouched test 或宣称 release-v1 同版本收益，R0 仍保持默认。
 
+**2026-09-01 旧 `regression-v1` 路线记录（已退役）。** 当时曾以候选集 SHA-256 固定 57 个 approved case，并新增 Router 消融 L0 契约；但该路线依赖当前工作区不存在的 `interview-qa`/`sql-tuning` exact source，未形成 runtime mapping/replay，也不再作为当前计划或 `release-v1` 证据。相关 manifest、候选校验器和评测器保留用于历史审计，禁止继续恢复缺失内部文档、修改候选哈希或把它们接入当前发布门禁。
+
+**2026-09-01 TC-G2-05 双 KB 组合授权与真实入口 L2 回放。** `G2KnowledgeToolsPermissionRuntimeL2Test` 在已核验镜像 `sha256:8c106fde...d0c175abd` 的 `g2-vchord-poc/g2vchord` 隔离 PostgreSQL 中创建随机测试角色和双 owner fixture：Agent 绑定原始包含 A1、A2 与他人 B1，真实 `KnowledgeBaseMapper`、`AgentKnowledgeBaseMapper` 和 `KnowledgeBaseAccessService` 过滤后仅允许 A1/A2。真实 `KnowledgeTools.knowledgeQuery` 默认检索双 KB，显式 `kbIds=[A1]` 收窄到 A1，伪造 B1 不进入 RAG；未授权“最新官方文档”在 Router 前置阶段拒答。真实 `McpKnowledgeTool.search` 同样只返回 A1/A2，B1 在 `requireAccessibleKnowledgeBaseIds` 处拒绝且无 B1 证据泄露。报告为 `backend_v2/target/rag-eval/router/g2-05-permission-l2.json`，命令为 `cd backend_v2; .\mvnw.cmd -q -Dtest=G2KnowledgeToolsPermissionRuntimeL2Test -Dg2.router.permission.l2=true test`，结果 `2 tests, 0 failures, 0 errors, 0 skipped`。本项签收真实入口与 owner/KB 组合授权 L2；RAG 使用记录型替身，不替代真实 embedding/检索质量、固定链路 Router 消融或模型成本结论，普通生产 R0 和 rerank 默认不变。
+
+**2026-09-02 当前 fixture profile 与 Router 契约回放。** `G2CurrentFixtureProfileLoader` 复用冻结的 `fixture-fast-v1` manifest/case 文件，独立映射 20 个 case（18 个可回答、2 个最终拒答、1 个 follow-up、2 个 cross-document），保留 query 类型、source document、gold chunk、citation requirement 和 Router expected route；`G2CurrentFixtureAblationDatasetLoader` 将该 profile 接入现有 fixed chain/Router 消融评测器。由于 Router 在检索前只知道已有授权 KB、并不知道具体 query 是否有 gold evidence，20 个 case 的 Router expected route 均为 `PRIVATE_RAG`；`shouldAbstain` 继续表达检索/回答层最终拒答，真正的 owner/他人 KB 越权由双 owner L2 单独覆盖。`G2CurrentFixtureRouterComparisonTest` 使用仓库现有 20-case fixed replay，并调用真实 `RagRouter` 生成 Router 侧 route，报告为 `backend_v2/target/rag-eval/router/fixture-fast-v1-router-ablation.json`。报告 executionMode=`fixture-replay-router-contract`，fixed/router 的 Recall@5=`1.0`、MRR@10=`0.9444`、citationAccuracy=`1.0`、abstentionAccuracy=`1.0`、permission/unauthorizedExternal/route violations 均为 `0`，Router gate=`eligible_for_router_ab`；p95=`27ms` 和 inputTokens=`0` 来自固定 replay/未测量模型 token，不能作为真实运行时性能或成本结论。相关 L0 回归已通过；current fixture 的真实 embedding/固定链路双臂运行、答案质量和真实成本仍待执行，R0 与 rerank 默认不变。
+
+**2026-09-02 当前 fixture 真实检索 baseline。** `RagRecallEvaluationTest` 显式连接 `127.0.0.1:55432/jchatmind_rag_eval`，并在测试入口校验数据库 URL 与 `current_database()`，使用独立上传目录 `backend_v2/target/rag-eval/current/uploads`；报告为 `backend_v2/target/rag-eval/current/fixture-fast-v1-runtime.json`。本次 fixture runtime 共 64 个派生 query，56 个 evaluated、8 个 `empty_rewrite_query` excluded；Recall@1=`0.953125`、Recall@3/5/10=`1.0`、MRR@10=`0.973214`、ContextPrecision@5=`0.973214`、ContextRecall@5=`1.0`，无 miss case。该测试尚未输出 Router route、citation correctness、端到端答案质量或 p95，因此只能作为真实 embedding/检索基线，不能与上面的 20-case replay p95 拼接，也不能单独关闭当前 G2 门禁。
+
+**2026-09-01 G2 fixed chain/Router 真实质量消融前置检查（旧路线，已退役）。** 旧 `regression-v1` 路线因缺失 exact 内部 source 和 runtime mapping/replay 被记录为 `blocked_input_integrity`。该阻塞仅关闭旧内部候选线，不再阻塞当前 mMARCO v3 外部诊断或基于仓库 fixture 的项目内质量验收；当前计划不恢复这些 source，也不把 `g2-pre-bm25-v1` development fixture 冒充 release 集。
+
+**旧路线退役说明（2026-09-01 计划修订覆盖）。** 上述 `regression-v1` source preflight 是旧计划的历史记录，不再是当前执行指令。旧 internal candidate/release 路线不再恢复或推进；当前固定链路/Router 质量实验改以仓库内重新冻结的 current fixture 为输入，mMARCO v3 只承担外部检索诊断。
+
 Bad Case 不新增平行评分体系，分别绑定 `TC-G2-04/05/06/07/08`：改写与 topic switch 归 `TC-G2-04/07`，Router/拒答/权限归 `TC-G2-05`，资产引用归 `TC-G2-06`，融合、rerank 与 context 污染归 `TC-G2-08`。G2 退出时，reviewed 的 P0/P1 case 必须全部 GREEN，权限违规和拒答违规均为 `0`；修复不能降低既有正向冻结集指标或破坏报告可比性。
 
 ## 4. 能力规格与依赖关系
@@ -339,6 +388,26 @@ G2 借鉴 [RAG-Anything](https://github.com/HKUDS/RAG-Anything) 的是“先保�
 多 Agent 只在以下职责稳定后引入：Router/Retriever、Workflow Executor、Verifier、Memory Agent。角色之间必须使用 JSON Schema 交换状态，具有最大轮数、超时、成本预算和单 Agent fallback；不采用自由对话式群体 Agent。
 
 **2026-08-25 G4 工作流验证 L0/L1 子项。** `WorkflowPlanVerifier` 为未来 Planner 输出提供确定性前置校验：`WorkflowPlan` 的声明步骤预算为 1 至 20、超时为 1 至 30 秒，实际步骤数不能超过声明预算；每个步骤必须有唯一 ID、白名单内且无首尾空白的工具名、事实键、声明和同事实键的非空证据。白名单比较可以规范化名称，但任何通过验证的工具名必须与 Harness 策略精确匹配。相同事实键产生不同声明时拒绝，未授权工具、缺证据和超预算均返回违反项。20 步/30 秒与当前 `JChatMind` 的既有执行边界保持一致。`WorkflowPlanExecutor` 只消费已验证的计划，按声明顺序为每步创建 `HarnessContext`；只有 Harness `ALLOW` 才经 `HarnessToolCallbackProxy` 进入调用方的受控执行器。无效计划不创建 Harness 调用；熔断或审批过期等拒绝分别写 `CIRCUIT_OPEN`/`EXPIRED` 合成审计并以 `BLOCKED` 停止，执行器异常由代理审计为 `ERROR` 并以 `FAILED` 停止，绝不执行后续步骤。`WorkflowPlanVerifierTest` 与 `WorkflowPlanExecutorTest` 分别固定验证边界以及成功、拒绝、异常停止与审计。本项不生成 Planner、不提供 HTTP/队列任务、结果持久化、单 Agent fallback、成本预算、多 Agent 协作或可中断角色超时；`timeoutSeconds` 当前只为验证门槛，不能表述为实际超时取消。它签收 `TC-G4-01` 本地 L0/L1，不提前签收 `TC-G4-02` 的超时/fallback。
+
+#### 4.5.1 普通 Agent 的工具选择与执行门禁
+
+普通 Agent 的模型输出是不可信的动作请求，不是授权结果。运行时必须按以下顺序处理：
+
+```text
+用户问题
+  -> 轻量意图/能力策略
+  -> 本轮 callback 白名单
+  -> 模型 ToolCall
+  -> Harness 精确工具名校验
+  -> 参数/资源权限/审批/熔断/审计
+  -> 真实工具执行
+```
+
+本轮轻量策略只负责收窄能力，不负责生成答案，也不通过额外 LLM 调用做第二次猜测。没有明确能力信号时不暴露工具；知识库请求只暴露 `KnowledgeTool`，副作用工具必须同时满足 Agent 显式配置和 Harness 审批策略。`RagRouter` 仍只负责已经进入 `KnowledgeTool` 的 RAG 路由，不替代顶层工具白名单。
+
+执行门禁必须 fail-closed：未在本轮白名单的工具、缺失决策、重复的 `tool + arguments` 均不得进入 `ToolCallingManager` 或 callback delegate，并写入拒绝 Observation/审计。外部 provider 不得按 Bean 全量注入；测试工具不得作为固定工具默认暴露。`terminate` 不作为普通 Agent 的结束依赖，任务完成统一由无 `ToolCall` 的最终 Assistant 消息表达。
+
+本轮只收口单 Agent、单进程、单次消息执行边界；不实现 Planner 生成、跨步骤持久化、跨进程恢复、工具参数 JSON Schema 注册中心或多 Agent 协作。后续如引入 Planner，必须继续复用同一份 callback 白名单和 Harness 门禁。
 
 **2026-08-25 G4 入站 Webhook L0 子项。** `InboundWebhookVerifier` 在任务映射前以调用方提供的预匹配来源和签名密钥验证 `sourceId`、`eventId`、Unix 秒级整秒 `timestamp`、`signature` 与 UTF-8 原始 `payload`。签名原文是固定版本字节、三个文本各自的 4 字节大端有符号 UTF-8 字节长度与内容，以及 8 字节大端有符号 Unix 秒值；HMAC-SHA256 以小写十六进制输出并使用常量时间比较，因此 `.` 等正文或事件 ID 字符不能改变字段边界。Spec 固定一个跨系统 HMAC 向量，测试直接验证该常量而不是由生产编码推导。来源必须精确匹配，时间戳偏差不得超过正负 5 分钟，非整秒时间戳拒绝。验签与时间窗通过后才在同一 JVM 内占用 `(sourceId, eventId)`，重复事件返回固定拒绝状态，失败事件不占用 ID；代码不保留或输出密钥、签名和正文。`InboundWebhookVerifierTest` 先 RED 证明类型缺失，随后 RED 复现分隔符重解释和同秒纳秒篡改，再 GREEN 覆盖有效签名、来源不匹配、无效签名不占用 ID、重复 ID 以及正负 5 分钟边界。本项仅补充 `TC-G4-03` 的 L0 安全门禁，不包含来源配置、Controller、任务中心映射、出站 HTTP、重试、投递日志、DLQ 或跨实例持久化幂等。
 
@@ -583,6 +652,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G0-04 | G0 / L0-L3 | 模拟正文分片、空响应帧、SSE 发送失败和执行异常；重连/重复事件为后续边界。 | 空帧不阻断后续分片；`AI_CONTENT_DELTA` 顺序完整；`AI_ERROR` 可见；恢复/去重不在本次已签收范围。 | `SseMessageStreamingContractTest`、`JChatMindStreamingSseTest`、`JChatMindErrorSseTest`、`SseServiceImplTest`；G0 手工旅程 |
 | TC-G0-05 | G0 / L1 | 对高风险工具分别执行批准、拒绝和超时路径。 | 状态进入并退出 `WAITING_APPROVAL`；工具不绕过 Harness；审计结果可追溯。 | `HarnessRunnerTest` 及审批相关测试 |
 | TC-G0-06 | G0 / L3 | 在测试账号和测试知识库中执行创建 Agent、聊天、检索、审批和回答分片可见性旅程。 | 页面构建与静态契约通过；用户能看到消息、分片、正确结束的状态、失败提示和审批卡片；lint 需单独通过。 | `node ui/tests/chat-auth-guard.contract.mjs`、`node ui/tests/execution-trace.contract.mjs`、`node ui/tests/content-delta-rendering.contract.mjs`、`node ui/tests/final-content-status.contract.mjs`、`node ui/tests/hook-state-in-effect.contract.mjs`、`node ui/tests/new-chat-session.contract.mjs`、`node ui/tests/session-trace-cache.contract.mjs`、`npm.cmd run build`、`npm.cmd run lint`、手工清单 |
+| TC-G0-07 | G0 / L1 | 对闲聊、知识请求、明确副作用请求、未授权 ToolCall、外部 callback、重复 ToolCall 和固定测试工具执行普通 Agent 门禁。 | 闲聊不向模型暴露工具；知识请求只暴露 `KnowledgeTool`；未授权、缺失决策和重复调用不进入真实 callback；外部工具必须显式授权；测试工具不默认暴露；`terminate` 不再出现在完成提示中；既有 Harness 审批、KB 范围和消息链路保持通过。 | `ToolSelectionPolicyTest`、`JChatMindFactoryToolScopeTest`、`HarnessRunnerTest`、`JChatMindToolGuardTest` |
 | TC-G1-01 | G1 / L0-L2 | 创建任务后覆盖排队、运行、取消、重试、失败和死信。 | 状态机只允许 `QUEUED`/`RETRYING` 取消，拒绝 `RUNNING` 取消；损坏 PDF/文件经处理器进入 `RETRYING`、预算耗尽后 `DEAD_LETTER` 和 DLQ。 | `IngestionTaskStateMachineTest`、`IngestionTaskLifecycleTest`、`IngestionTaskServiceImplTest`、`RabbitIngestionTaskPublisherTest`、`IngestionTaskControllerTest`；隔离 L2 记录。 |
 | TC-G1-02 | G1 / L0-L2 | 同 owner 使用相同幂等键重复提交，或跨资源复用相同键。 | 真实 HTTP 顺序重放和独立 PostgreSQL 高并发均确认同资源返回同一文档/任务、跨 KB 拒绝；屏障与数据库可观测状态确认 advisory lock 确有竞争等待，回滚后释放且无持久化残留。 | `IngestionTaskServiceImplTest`、`IngestionTaskPersistenceContractTest`、`IngestionTaskMigrationContractTest`、`DocumentFacadeServiceImplTest`、`G1AdvisoryLockRuntimeL2Test`。 |
 | TC-G1-03 | G1 / L0-L2 | 上传 Markdown、纯文本、HTML 与 PDF，或读取/解析失败。 | Markdown/HTML/PDF L0 结构化分块和页码 metadata 通过；真实 Markdown/HTML 均完成标题分块、1024 维 embedding 与 chunk 持久化；损坏 PDF 稳定失败并可重试。HTML 标题提取先 RED（单个原始 chunk）后 GREEN（两个结构化 chunk）。 | `DefaultIngestionTaskProcessorTest`、`MarkdownParserServiceImplTest`、`DocumentFacadeServiceImplTest`、`G1IngestionSuccessRuntimeL2Test`。 |
@@ -596,7 +666,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G2-02 | G2 / L1-L2 | 在隔离 PostgreSQL 对 ParadeDB `pg_search` 与 VectorChord-bm25 执行正文/标题 BM25、删除/重建、`kb_id` 和上下文过滤、`EXPLAIN`，并复跑冻结数据。 | 选择唯一合规 provider；结果含 chunk/rank/provenance；不再由 `select*LexicalCandidatesByKbIds` 把整库文本拉到 JVM；许可证、镜像和恢复结论入报告。 | 待该阶段实现的插件集成测试、迁移脚本与基准报告 |
 | TC-G2-03 | G2 / L1-L2 | 构造上下文外 chunk 全局 BM25 更高、上下文内 chunk 为 gold 的 `HARD` case，并覆盖 owner、Agent 默认范围和会话收窄。 | 所有 BM25 通道在 `LIMIT` 前过滤；范围内 gold 不被范围外候选挤掉，且无越权 chunk/元数据泄露。 | 待该阶段实现的 Mapper/真实 PostgreSQL 集成测试 |
 | TC-G2-04 | G2 / L0-L2 | 覆盖原问、follow-up standalone 补全、改写超时/无效输出和 topic switch；记录向量、标题、正文 BM25 的 query provenance 与 RRF 贡献。 | 原问始终参与；补充 query 不超过预算；标题精确不被改写污染；RRF 不直接比较异构原始分数。 | 待该阶段实现的 `QueryRewriteServiceImpl`、`RagServiceImpl` 单元与冻结 replay |
-| TC-G2-05 | G2 / L1-L2 | 从真实 `KnowledgeTools`/MCP 入口调用 Router，覆盖无权限、无证据和未授权外部调用，并与固定检索做消融比较。 | 不泄露私有来源；拒答/澄清/外部许可正确；质量、p95、token 成本和数据集版本进入报告，未证明收益不得默认切换。 | 待该阶段实现的授权集成测试、RAG 评测入口与 G2 对比报告 |
+| TC-G2-05 | G2 / L1-L2 | 从真实 `KnowledgeTools`/MCP 入口调用 Router，覆盖无权限、无证据和未授权外部调用，并与固定检索做消融比较。 | 不泄露私有来源；拒答/澄清/外部许可正确；质量、p95、token 成本和数据集版本进入报告，未证明收益不得默认切换。 | L0/L1 入口、`G2CurrentFixtureProfileTest`、`G2CurrentFixtureAblationDatasetLoaderTest` 与 `G2CurrentFixtureRouterComparisonTest` 已完成；真实授权集成已完成；当前 fixture 的真实固定链路双臂质量/成本、模型回放和 G2 默认切换门禁仍待 |
 | TC-G2-06 | G2 / L0-L2 | 对 PDF、图片、表格与公式 golden case 检索并生成引用。 | PDF 页文本和 Markdown `TABLE` 已完成 `READY` 资产关系、范围受限向量候选、资产优先合并与稳定资产/页码或行号引用的 L0/L1 契约；真实数据库/黄金集及图片、OCR、表格单元格关系、公式、坐标回跳仍待独立验收。 | `RagServiceImplTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest`、PDF/Markdown 表格资产 Mapper 契约测试；后续多模态运行时测试 |
 | TC-G2-07 | G2 / L0-L2 | 对默认多 KB 范围、显式会话收窄、跨 KB topic switch、短新标题/代码标识符、`/api/...` 和 Markdown 路径分别检索。 | 默认范围与产品契约一致；不以旧 Top-1 隐式缩窄；follow-up/导航误判不关闭标题通道、不触发无上限扫描或错误 `HARD` 过滤。 | 待该阶段实现的 `KnowledgeTools`、`QueryRewriteServiceImpl`、真实 PostgreSQL 回归测试 |
 | TC-G2-08 | G2 / L0-L2 | 构造 RRF 深层精确候选、重复通道、低相关 Top-1 和后一轮 follow-up。 | rerank 候选预算明确且排名惩罚有界；组内重复不放大；低置信或无答案结果不更新 retrieval context。 | `RagServiceImplTest`、`KnowledgeToolsScopeTest` 已覆盖 L0/L1；冻结集 replay 与真实运行时 L2 仍待。 |
@@ -676,12 +746,12 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | TC-G2-02 | 隔离 `g2-vchord-poc` PostgreSQL；VectorChord-bm25 固定镜像 digest；真实 Mapper 与临时 embedding HTTP | `backend_v2/target/surefire-reports/com.kama.jchatmind.rag.VchordBm25QueryServiceL2Test.txt` | 标题/正文原生 BM25、`SET LOCAL search_path`、字面量路径过滤、删除重建与 `EXPLAIN` 均通过；新增 `RagServiceImpl -> VchordBm25QueryService -> Mapper` 正文/标题调用链回归，结果保留 `content_bm25`/`title_bm25` provenance | 2026-08-24 | Codex | 部分通过（L1/L2 原生 provider 与生产调用链；冻结集规模对比、p95、备份恢复和 mMARCO/CRUD-RAG 评测待执行） |
 | TC-G2-03 | 同上；范围外高分 chunk、范围内标题/正文 gold 与 `HARD` 文件/类型/路径条件 | `backend_v2/target/surefire-reports/com.kama.jchatmind.rag.VchordBm25QueryServiceL2Test.txt` | 标题/正文 BM25 的 `kb_id`、文件名、类型、规范化路径均在数据库 `LIMIT` 前过滤；组合链路只返回范围内 gold，`SET LOCAL` 与每次原生查询使用同一事务连接 | 2026-08-24 | Codex | 部分通过（KB 与上下文 L2；owner/Agent 默认范围/会话收窄的真实 PostgreSQL 组合验收待执行） |
 | TC-G2-04 | `QueryRewriteServiceImplTest`、`RagServiceImplTest`、`KnowledgeToolsScopeTest`；固定改写替身 | `backend_v2/target/surefire-reports/` | 原问保留，受控 standalone 不超过一个；API/Windows 路径不误判导航或 follow-up；改写失败回退原问并保留 provenance。 | 2026-08-24 | Codex | 部分通过（L0/L1；冻结 replay、真实 PostgreSQL Recall/p95 和 Bad Case 回归待验收） |
-| TC-G2-05 | `RagRouterTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest`；mock 授权范围与 RAG 返回值 | `backend_v2/target/surefire-reports/` | Agent/MCP 均执行 Router `topK`；无授权外部请求在检索前拒绝；MCP 空检索返回证据不足并审计为 `ABSTAIN/no_evidence`，非空证据才审计为 `ALLOW/retrieved` | 2026-08-24 | Codex | 部分通过（28 项 L0/L1 入口、拒答与审计；数值证据阈值、受控外部工具实际调用、固定链路消融、p95/token 成本与授权 L2 待执行） |
+| TC-G2-05 | `RagRouterTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest`、`RagRouterAblationEvaluatorTest`、`G2KnowledgeToolsPermissionRuntimeL2Test`、`G2CurrentFixtureProfileTest`、`G2CurrentFixtureAblationDatasetLoaderTest`、`G2CurrentFixtureRouterComparisonTest`；隔离 PostgreSQL、记录型 RAG 替身与 current fixture replay | `backend_v2/target/surefire-reports/`；`backend_v2/target/rag-eval/router/g2-05-permission-l2.json`；`backend_v2/target/rag-eval/router/fixture-fast-v1-router-ablation.json`；`backend_v2/target/rag-eval/current/fixture-fast-v1-runtime.json` | Agent/MCP 均执行 Router `topK`；无授权外部请求在检索前拒绝；MCP 空检索返回证据不足并审计为 `ABSTAIN/no_evidence`，非空证据才审计为 `ALLOW/retrieved`；双 KB owner 过滤、显式收窄、他人 KB 拒绝和真实入口回放已通过；current fixture profile 与 Router/citation contract replay 已通过；旧 `regression-v1` L0 消融报告仅作历史记录 | 2026-09-02 | Codex | 部分通过（组合授权 L2、current fixture profile 和契约回放已通过；真实固定链路双臂质量/成本、模型答案/引用质量和 G2 默认切换仍待；current runtime baseline 不含 Router/p95/答案质量） |
 | TC-G2-06 | `RagRouterTest`、`RagServiceImplTest`、`KnowledgeToolsScopeTest`、`McpKnowledgeToolTest`、PDF/Markdown 表格资产 Mapper 契约测试；mock RAG/授权范围与 Mapper 源码契约 | `backend_v2/target/surefire-reports/` | `MULTIMODAL_RAG` 按 Markdown `TABLE`、`PDF_PAGE_TEXT`、普通检索顺序合并，按 chunk ID 去重并使用 `route.topK()`；资产异常不阻断普通检索；两类 Mapper 均通过资产关系保留 KB/HARD 范围。 | 2026-08-25 | Codex | 部分通过（PDF 页码与 Markdown 行号 L0/L1；真实数据库/黄金集、图片/OCR、单元格关系、公式和坐标回跳待后续） |
 | TC-G2-07 | `QueryRewriteServiceImplTest` L0；无外部服务 | `backend_v2/target/surefire-reports/` | API/Windows 路径不再进入 `NAVIGATION`/`FOLLOW_UP`/`HARD` 或调用 LLM；章节与 Markdown 文档导航保持 | 2026-08-24 | Codex | 部分通过（21 项改写 L0；跨 KB topic switch、合法导航扫描与真实 PostgreSQL Recall/p95 待验收） |
 | TC-G2-08 | `RagServiceImplTest`、`KnowledgeToolsScopeTest`；本地 JVM，无数据库、模型或网络 | `backend_v2/target/surefire-reports/` | RRF 后 rerank 限制为前 50，rank penalty 上限为 `0.15`，同源组内重复不放大；只有 RRF 分数可比较、Top-1 达标且与 Top-2 保持最小 gap 才更新 retrieval context。 | 2026-08-25 | Codex | 部分通过（L0/L1 已签收；冻结集 replay、真实运行时 L2、Recall/p95 与评测仍待） |
 | TC-G2-09 | 独立三路 L0/L1 fixture；固定 original/expanded query、重复 chunk、HARD scope 与资产边界 | `backend_v2/target/surefire-reports/` | Dense-original、Sparse-original、Expanded-query 分支独立；原问不进入第三路；分支内 chunk 唯一且 outer RRF 每分支最多一票；授权/HARD 约束不后移。 | 2026-08-28 | Codex | 通过（实现与结构契约；不代表 R2 有质量收益） |
-| TC-G2-10 | `g2-pre-bm25-v1` 9 case、7 fixture chunk；真实 MyBatis/VectorChord/BM25/Ollama；rerank 关闭 | `backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json` | R0/R1/R2 输入哈希、scope、gold、预算和分母可比；`query-anchor-tiebreak-v1` 回放后拒答/权限违规均为 `0`，Recall@5、MRR、nDCG 均为 `1.0`，R1/R2 两个 reviewed P1 gold 均为第 1 名，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`。 | 2026-09-01 | Codex | 通过（当前 Bad Case 与评测门禁）；gate=`eligible_for_rerank_ab`，R2 p95 低于 R0 约 `10.5%`，但 release-v1、Router/固定链路消融和默认切换仍待完成，R0 保持默认 |
+| TC-G2-10 | `g2-pre-bm25-v1` 9 case、7 fixture chunk；真实 MyBatis/VectorChord/BM25/Ollama；rerank 关闭 | `backend_v2/target/rag-eval/three-branch/g2-pre-bm25-v1-runtime.json` | R0/R1/R2 输入哈希、scope、gold、预算和分母可比；`query-anchor-tiebreak-v1` 回放后拒答/权限违规均为 `0`，Recall@5、MRR、nDCG 均为 `1.0`，R1/R2 两个 reviewed P1 gold 均为第 1 名，R0 p95 为 `6,268ms`、R2 p95 为 `5,608ms`。 | 2026-09-01 | Codex | 通过（当前 Bad Case 与三路结构门禁）；gate=`eligible_for_rerank_ab`，R2 p95 低于 R0 约 `10.5%`，但它仍是项目 development fixture，不替代当前 mMARCO v3 外部诊断或新的 current fixture release 验收，R0 保持默认 |
 | TC-G3-01 | `BuiltinSkillRegistryTest`、`BuiltinSkillExecutorTest`、`HarnessedSkillKnowledgeToolExecutorTest`；本地 JVM，无数据库、模型或网络 | `backend_v2/target/surefire-reports/` | 只接受登记模板和授权 KB 子集；调用方不能指定工具；正常输出含范围内证据或显式拒答原因；放行检索经 Harness 代理记录成功，熔断不触发检索并记录拒绝。 | 2026-08-25 | Codex | 部分通过（L0/L1 本地执行与 Harness 接线已签收；HTTP/队列、模型总结、独立预算调度与 L2 待验收） |
 | TC-G3-02 | mock Mapper/会话服务与 `RequestScopeData`；本地 Node 静态契约 | `backend_v2/target/surefire-reports/`；`ui/tests/user-memory-candidate-discard.contract.mjs`；`ui/tests/user-memory-clear.contract.mjs`；`ui/tests/user-memory-edit.contract.mjs`；`ui/tests/user-memory-expiration.contract.mjs` | 确认/忽略、编辑、单条删除与本人清空只作用于当前用户；编辑不保留旧 embedding，清空不触碰候选，空集合成功；`更新：` 候选保留旧行并将其关联到新行，读取只见当前行；新确认、冲突新版本和正文编辑统一为 365 天期限，空期限仅保留为不回填的历史数据。 | 2026-08-25 | Codex | 部分通过（L0/L1 确认、忽略、编辑、单条删除、清空、节流、去重、冲突关系与 365 天过期治理已签收；L2/L3 待验收） |
 | TC-G3-03 | 待该阶段实现 | 待执行 | 对比 G0 | 待执行 | 待指定 | 未验收 |
@@ -700,7 +770,9 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 
 本计划已为 G0-G5 的每项交付定义正向、失败/拒绝或恢复/边界测试，并将每个阶段退出条件绑定到 `TC-ID`、隔离环境和通过判定。RAG 指标细则由现有 Spec 维护；任务、Router、记忆、Webhook、并发和多实例 SSE 的测试均明确为对应阶段实现后的必需交付。
 
-当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收。G1 的 owner-only 权限、任务摄入、真实队列/数据库、单实例 SSE、MCP 主体和真实模型工具调用已签收；受控 KB 删除任务已完成 L0/L1、真实 PostgreSQL/RabbitMQ、第二账号隔离 L2 与 Edge Playwright L3；显式迁移发布入口已要求批准基线、manifest/catalog/baseline SHA、人工确认和密码环境变量，并在真实隔离 PostgreSQL 中完成全量契约对象对账、已声明关键定义漂移负向和脱敏记录，真实生产执行仍须发布窗口，外部签名由发布系统保证。默认回归已恢复为当前源码 `0 failures`；此前错误源于未隔离的外部测试与测试环境临时目录权限。G2 已完成原生 BM25、Router/资产入口、独立三路实现和真实结构消融；当前 reviewed Bad Case 已通过同一开发集的 RED/GREEN 与真实回放，两个 P1 的 R1/R2 gold 均回到第 1 名，R0/R1/R2 的拒答/权限违规为 `0` 且 R2 p95 门禁通过，但 release-v1、Router/固定链路消融、引用/答案质量和组合授权 L2 仍未完成，因此 R0 与本地 rerank 继续保持默认。G3、G4、G5 均已有 L0/L1 子项，但 LongMemEval、真实集成、负载、持久化与多实例边界尚未完成；它们应表述为“未达到阶段退出”，不能再写成“尚未实现”。
+当前 `TC-G0-01` 至 `TC-G0-06` 已按各自门禁完成验收，G0 基线已签收。G1 的 owner-only 权限、任务摄入、真实队列/数据库、单实例 SSE、MCP 主体和真实模型工具调用已签收；受控 KB 删除任务已完成 L0/L1、真实 PostgreSQL/RabbitMQ、第二账号隔离 L2 与 Edge Playwright L3；显式迁移发布入口已要求批准基线、manifest/catalog/baseline SHA、人工确认和密码环境变量，并在真实隔离 PostgreSQL 中完成全量契约对象对账、已声明关键定义漂移负向和脱敏记录，真实生产执行仍须发布窗口，外部签名由发布系统保证。默认回归已恢复为当前源码 `0 failures`；此前错误源于未隔离的外部测试与测试环境临时目录权限。G2 已完成原生 BM25、Router/资产入口、独立三路实现、mMARCO v3 本机诊断、当前 reviewed Bad Case 回放和 KnowledgeTools/MCP 双 KB 组合授权 L2；当前剩余是基于 current fixture 的固定链路/Router 质量成本消融、引用/答案质量和真实多模态验收，R0 与本地 rerank 继续保持默认。旧 `regression-v1` 内部 source/mapping/replay 路线已退役，不再作为阶段或发布前置。G3、G4、G5 均已有 L0/L1 子项，但 LongMemEval、真实集成、负载、持久化与多实例边界尚未完成；它们应表述为“未达到阶段退出”，不能再写成“尚未实现”。
+
+以上验收结论段保留历史证据；当前执行口径以第 0.1 节为准：`fixture-fast-v1` 是项目文本/权限/拒答基线，mMARCO v3 是公开检索诊断基线，`g2-pre-bm25-v1` 仅用于三路结构 development 回归，旧 `regression-v1` 不再参与当前计划。
 
 ## 7. 风险与决策规则
 
@@ -752,3 +824,4 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 | 2026-08-31 | 迁移执行器 L0/L1 与真实生命周期 L2 | 新增 `SchemaMigrationExecutor` 与 `JdbcMigrationStore`：clean install 必须提供并核对批准基线，ledger 缺失但存在业务对象、ledger catalog 漂移、未知/运行中/错序/哈希不一致状态均 fail-closed；已应用迁移可按 manifest 重放跳过，事务属性显式提交，失败保留 `RUNNING`。真实 VectorChord PostgreSQL 隔离测试以最小批准 baseline 完成 16 条迁移、前缀 upgrade、重放和失败恢复，`3 tests, 0 failures, 0 errors, 0 skipped`；证据为 `backend_v2/target/migration-l2/migration-lifecycle-l2.json`。完整生产对象 catalog 对账和发布入口仍待执行。 |
 | 2026-09-01 | 迁移执行器、托管 catalog 对账与显式发布入口 L0/L1/L2 收口 | 新增 `catalog-contract.json`、`MigrationCatalogContract`/`MigrationCatalogVerifier`/`JdbcMigrationCatalogVerifier` 和 `MigrationReleaseApplication`；发布必须使用 canonical manifest/catalog、显式确认、仓库外批准基线及 manifest/catalog/baseline SHA、人工前置项和密码环境变量，迁移后在同一 advisory lock 保护下以迁移后 `REPEATABLE READ` 快照校验全量契约对象及已声明关键定义并写脱敏报告。隔离 VectorChord PostgreSQL 实际通过 16 条迁移、release entry、额外表/列/约束/禁留列/关键定义漂移负向、失败报告、前缀 upgrade、重放和失败恢复，`3 tests, 0 failures, 0 errors, 0 skipped`；证据为 `backend_v2/target/migration-l2/migration-lifecycle-l2.json` 与 `backend_v2/target/migration-l2/migration-release-l2.json`。外部批准签名和真实生产发布未执行，均须由发布窗口完成。 |
 | 2026-08-31 | G1 删除 Edge Playwright L3 验收 | 动态端口隔离 PostgreSQL/RabbitMQ/Redis、后端和 Vite 环境中，Edge 完成注册/登录、创建 KB、进入详情、二次确认删除、等待异步任务完成并确认列表移除；`g1-runtime.spec.ts --grep "deletion completion"` 为 `1 passed`。测试使用临时容器/数据库/存储目录，全部清理；生产迁移仍未执行。 |
+| 2026-09-04 | 普通 Agent 工具选择采用“轻量能力收窄 + Harness 硬门禁” | 不把 LLM 的 ToolCall 当作授权结果；本轮先减少模型可见工具，再由服务端拦截未授权/重复调用，外部 callback 必须显式绑定。复杂 Planner、参数 Schema 注册中心和跨进程预算另行验收。 |
