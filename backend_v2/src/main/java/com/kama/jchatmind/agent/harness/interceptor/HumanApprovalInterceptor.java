@@ -39,7 +39,12 @@ public class HumanApprovalInterceptor implements HarnessInterceptor {
             return;
         }
 
-        List<HarnessContext> groupedContexts = result.getContextsByToolName(context.getToolName());
+        List<HarnessContext> groupedContexts = result.getContextsByToolName(context.getToolName()).stream()
+                .filter(groupedContext -> {
+                    HarnessDecision decision = result.getDecision(groupedContext.getToolCallId());
+                    return decision == null || decision.getStatus() == HarnessDecision.Status.ALLOW;
+                })
+                .toList();
         HarnessDecision existingDecision = groupedContexts.stream()
                 .map(ctx -> result.getDecision(ctx.getToolCallId()))
                 .filter(decision -> decision != null && decision.getStatus() == HarnessDecision.Status.PENDING_APPROVAL)

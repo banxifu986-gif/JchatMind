@@ -18,7 +18,7 @@ public class CityTool implements Tool {
 
     @Override
     public ToolType getType() {
-        return ToolType.FIXED;
+        return ToolType.OPTIONAL;
     }
 
     @org.springframework.ai.tool.annotation.Tool(name = "getCity", description = "获取当前的城市")

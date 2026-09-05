@@ -263,13 +263,26 @@ public class JChatMindFactory {
         return callbacks;
     }
 
-    private List<ToolCallback> buildExternalToolCallbacks(List<ToolCallback> localCallbacks) {
+    private List<ToolCallback> buildExternalToolCallbacks(
+            List<ToolCallback> localCallbacks,
+            List<String> allowedToolNames
+    ) {
+        Set<String> authorizedNames = allowedToolNames == null
+                ? Set.of()
+                : allowedToolNames.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .collect(Collectors.toSet());
+        if (authorizedNames.isEmpty()) {
+            return List.of();
+        }
         Set<String> localNames = localCallbacks.stream()
                 .map(tc -> tc.getToolDefinition().name())
                 .collect(Collectors.toSet());
         List<ToolCallback> external = new ArrayList<>();
         for (ToolCallback tc : externalToolCallbackProvider.getToolCallbacks()) {
-            if (!localNames.contains(tc.getToolDefinition().name())) {
+            String toolName = tc.getToolDefinition().name();
+            if (authorizedNames.contains(toolName) && !localNames.contains(toolName)) {
                 external.add(wrapToolCallback(tc));
             }
         }
@@ -327,7 +340,7 @@ public class JChatMindFactory {
         List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
         runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases);
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);
-        toolCallbacks.addAll(buildExternalToolCallbacks(toolCallbacks));
+        toolCallbacks.addAll(buildExternalToolCallbacks(toolCallbacks, currentAgentConfig.getAllowedTools()));
 
         return buildAgentRuntime(
                 userId,

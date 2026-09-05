@@ -40,8 +40,10 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -80,6 +82,9 @@ public class JChatMind {
     private HarnessRunner harnessRunner;
     private int currentStepNumber;
     private String conversationSummary;
+    private final ToolSelectionPolicy toolSelectionPolicy = new ToolSelectionPolicy();
+    private final Set<String> executedToolCallSignatures = new HashSet<>();
+    private Set<String> currentTurnAllowedToolNames = Set.of();
 
     public JChatMind() {
         this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
@@ -207,6 +212,10 @@ public class JChatMind {
         this.agentState = AgentState.THINKING;
         sendStatus(SseMessage.Type.AI_THINKING, "思考中...", currentStepNumber);
         compressMemoryIfNeeded();
+        List<ToolCallback> turnTools = toolSelectionPolicy.select(availableTools, latestUserQuery());
+        currentTurnAllowedToolNames = turnTools.stream()
+                .map(tool -> tool.getToolDefinition().name())
+                .collect(Collectors.toUnmodifiableSet());
         String thinkPrompt = buildThinkPrompt();
 
         Prompt prompt = Prompt.builder()
@@ -214,7 +223,7 @@ public class JChatMind {
                 .messages(this.chatMemory.get(this.chatSessionId))
                 .build();
 
-        this.lastChatResponse = streamChatResponse(prompt, thinkPrompt);
+        this.lastChatResponse = streamChatResponse(prompt, thinkPrompt, turnTools);
 
         Assert.notNull(lastChatResponse, "Last chat client response cannot be null");
 
@@ -229,12 +238,16 @@ public class JChatMind {
         return !toolCalls.isEmpty();
     }
 
-    private ChatResponse streamChatResponse(Prompt prompt, String thinkPrompt) {
+    private ChatResponse streamChatResponse(
+            Prompt prompt,
+            String thinkPrompt,
+            List<ToolCallback> turnTools
+    ) {
         StringBuilder fullContent = new StringBuilder();
         List<ChatResponse> responseChunks = this.chatClient
                 .prompt(prompt)
                 .system(thinkPrompt)
-                .toolCallbacks(this.availableTools.toArray(new ToolCallback[0]))
+                .toolCallbacks(turnTools.toArray(new ToolCallback[0]))
                 .stream()
                 .chatResponse()
                 .filter(this::hasAssistantOutput)
@@ -264,6 +277,16 @@ public class JChatMind {
                 .generations(List.of(new Generation(output, lastResponse.getResult().getMetadata())))
                 .metadata(lastResponse.getMetadata())
                 .build();
+    }
+
+    private String latestUserQuery() {
+        return this.chatMemory.get(this.chatSessionId).stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .map(UserMessage::getText)
+                .filter(StringUtils::hasText)
+                .reduce((first, second) -> second)
+                .orElse("");
     }
 
     private void appendContentDelta(ChatResponse response, StringBuilder fullContent) {
@@ -325,13 +348,15 @@ public class JChatMind {
                 【额外信息】
                 - 你当前可访问的知识库：%s
                 - 调用 KnowledgeTool 时，可以显式传入 kbIds 指定搜索范围；如果不传 kbIds，默认搜索当前 Agent 全部可访问知识库
-                """.formatted(formatKbSummary()));
+                - 本回合实际允许调用的工具：%s
+                - 未列出的工具不可调用；如果本回合没有允许工具，请直接回答或澄清问题
+                """.formatted(formatKbSummary(), formatCurrentTurnTools()));
 
         if (previousToolCallSignature != null) {
             prompt.append("""
 
                     【重要提醒】
-                    上一轮你已调用过工具（%s），请检查返回结果，避免重复相同的工具调用。如果结果已满足需求，请直接回答或调用 terminate。
+                    上一轮你已调用过工具（%s），请检查返回结果，避免重复相同的工具调用。如果结果已满足需求，请直接输出最终回答。
                     """.formatted(previousToolCallSignature));
         }
 
@@ -466,6 +491,12 @@ public class JChatMind {
                 .collect(Collectors.joining("、"));
     }
 
+    private String formatCurrentTurnTools() {
+        return currentTurnAllowedToolNames.isEmpty()
+                ? "无"
+                : String.join("、", currentTurnAllowedToolNames);
+    }
+
     private void execute() {
         Assert.notNull(this.lastChatResponse, "Last chat client response cannot be null");
         if (!this.lastChatResponse.hasToolCalls()) {
@@ -474,7 +505,7 @@ public class JChatMind {
         this.agentState = AgentState.EXECUTING;
 
         List<AssistantMessage.ToolCall> toolCalls = this.lastChatResponse.getResult().getOutput().getToolCalls();
-        updateDuplicateSignature(toolCalls);
+        Set<String> duplicateToolCallIds = registerToolCallSignatures(toolCalls);
         sendStatus(
                 SseMessage.Type.AI_EXECUTING,
                 "执行工具: " + summarizeToolNames(toolCalls),
@@ -486,7 +517,9 @@ public class JChatMind {
                 agentId,
                 chatSessionId,
                 currentStepNumber,
-                toolCalls
+                toolCalls,
+                currentTurnAllowedToolNames,
+                duplicateToolCallIds
         );
         if (harnessResult.hasPendingApprovals()) {
             sendApprovalEvents(harnessResult);
@@ -496,7 +529,7 @@ public class JChatMind {
         List<AssistantMessage.ToolCall> allowedToolCalls = toolCalls.stream()
                 .filter(toolCall -> {
                     HarnessDecision decision = harnessResult.getDecision(toolCall.id());
-                    return decision == null || decision.getStatus() == HarnessDecision.Status.ALLOW;
+                    return decision != null && decision.getStatus() == HarnessDecision.Status.ALLOW;
                 })
                 .toList();
 
@@ -541,14 +574,22 @@ public class JChatMind {
         }
     }
 
-    private void updateDuplicateSignature(List<AssistantMessage.ToolCall> toolCalls) {
+    private Set<String> registerToolCallSignatures(List<AssistantMessage.ToolCall> toolCalls) {
         if (toolCalls.isEmpty()) {
             previousToolCallSignature = null;
-            return;
+            return Set.of();
         }
         previousToolCallSignature = toolCalls.stream()
                 .map(tc -> tc.name() + "(" + tc.arguments() + ")")
                 .collect(Collectors.joining("; "));
+        Set<String> duplicateToolCallIds = new HashSet<>();
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            String signature = toolCall.name() + "(" + toolCall.arguments() + ")";
+            if (!executedToolCallSignatures.add(signature)) {
+                duplicateToolCallIds.add(toolCall.id());
+            }
+        }
+        return duplicateToolCallIds;
     }
 
     private ToolResponseMessage executeWithTimeout(

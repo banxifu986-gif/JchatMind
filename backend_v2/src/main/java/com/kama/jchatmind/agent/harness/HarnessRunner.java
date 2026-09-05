@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -40,6 +41,29 @@ public class HarnessRunner {
             int stepNumber,
             List<AssistantMessage.ToolCall> toolCalls
     ) {
+        return beforeExecution(userId, agentId, sessionId, stepNumber, toolCalls, null, null);
+    }
+
+    public HarnessResult beforeExecution(
+            String userId,
+            String agentId,
+            String sessionId,
+            int stepNumber,
+            List<AssistantMessage.ToolCall> toolCalls,
+            Set<String> allowedToolNames
+    ) {
+        return beforeExecution(userId, agentId, sessionId, stepNumber, toolCalls, allowedToolNames, null);
+    }
+
+    public HarnessResult beforeExecution(
+            String userId,
+            String agentId,
+            String sessionId,
+            int stepNumber,
+            List<AssistantMessage.ToolCall> toolCalls,
+            Set<String> allowedToolNames,
+            Set<String> blockedToolCallIds
+    ) {
         HarnessResult result = new HarnessResult();
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             HarnessContext context = HarnessContext.builder()
@@ -52,10 +76,29 @@ public class HarnessRunner {
                     .stepNumber(stepNumber)
                     .build();
             result.addContext(context);
+            if (blockedToolCallIds != null && blockedToolCallIds.contains(toolCall.id())) {
+                result.setDecision(
+                        toolCall.id(),
+                        HarnessDecision.rejected(
+                                "[TOOL_DUPLICATE] 工具 %s 使用相同参数重复调用".formatted(toolCall.name())
+                        )
+                );
+            } else if (allowedToolNames != null && !allowedToolNames.contains(toolCall.name())) {
+                result.setDecision(
+                        toolCall.id(),
+                        HarnessDecision.rejected(
+                                "[TOOL_NOT_ALLOWED] 工具 %s 不在当前回合允许集合内".formatted(toolCall.name())
+                        )
+                );
+            }
         }
 
         for (List<HarnessContext> contexts : result.getGroupedContexts().values()) {
             for (HarnessContext context : contexts) {
+                HarnessDecision decision = result.getDecision(context.getToolCallId());
+                if (decision != null && decision.getStatus() != HarnessDecision.Status.ALLOW) {
+                    continue;
+                }
                 interceptorChain.executeBefore(context, result);
             }
         }

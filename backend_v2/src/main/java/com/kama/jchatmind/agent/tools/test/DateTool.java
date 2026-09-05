@@ -21,7 +21,7 @@ public class DateTool implements Tool {
 
     @Override
     public ToolType getType() {
-        return ToolType.FIXED;
+        return ToolType.OPTIONAL;
     }
 
     @org.springframework.ai.tool.annotation.Tool(name = "getDate", description = "获取当前的日期")

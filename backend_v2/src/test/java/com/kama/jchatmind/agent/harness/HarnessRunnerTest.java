@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -63,6 +64,46 @@ class HarnessRunnerTest {
         );
 
         assertEquals(HarnessDecision.Status.CIRCUIT_OPEN, result.getDecision("call-1").getStatus());
+    }
+
+    @Test
+    void shouldRejectToolOutsideCurrentTurnAllowlistBeforeApproval() {
+        HarnessRunner runner = newHarnessRunner();
+
+        HarnessResult result = runner.beforeExecution(
+                "user-1",
+                "agent-1",
+                "session-1",
+                1,
+                List.of(new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{}")),
+                Set.of("KnowledgeTool")
+        );
+
+        assertEquals(HarnessDecision.Status.REJECTED, result.getDecision("call-1").getStatus());
+        assertTrue(result.getDecision("call-1").getMessage().contains("TOOL_NOT_ALLOWED"));
+        assertTrue(runner.getPendingApprovals("session-1").isEmpty());
+    }
+
+    @Test
+    void shouldRejectDuplicateToolCallBeforeApproval() {
+        HarnessRunner runner = newHarnessRunner();
+
+        HarnessResult result = runner.beforeExecution(
+                "user-1",
+                "agent-1",
+                "session-1",
+                1,
+                List.of(
+                        new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{}"),
+                        new AssistantMessage.ToolCall("call-2", "function", "sendEmail", "{}")
+                ),
+                Set.of("sendEmail"),
+                Set.of("call-2")
+        );
+
+        assertEquals(HarnessDecision.Status.PENDING_APPROVAL, result.getDecision("call-1").getStatus());
+        assertEquals(HarnessDecision.Status.REJECTED, result.getDecision("call-2").getStatus());
+        assertTrue(result.getDecision("call-2").getMessage().contains("TOOL_DUPLICATE"));
     }
 
     @Test

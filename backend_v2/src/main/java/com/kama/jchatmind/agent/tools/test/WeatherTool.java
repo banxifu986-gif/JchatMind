@@ -19,7 +19,7 @@ public class WeatherTool implements Tool {
 
     @Override
     public ToolType getType() {
-        return ToolType.FIXED;
+        return ToolType.OPTIONAL;
     }
 
     @org.springframework.ai.tool.annotation.Tool(name = "weather", description = "获取天气")
