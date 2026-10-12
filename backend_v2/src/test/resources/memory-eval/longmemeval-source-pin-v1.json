@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "longmemeval-s-cleaned-2025-09",
+  "source": {
+    "repositoryUrl": "https://github.com/xiaowu0162/LongMemEval",
+    "datasetUrl": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    "fileUrl": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json",
+    "fileName": "longmemeval_s_cleaned.json",
+    "revision": "98d7416c24c778c2fee6e6f3006e7a073259d48f",
+    "license": "MIT",
+    "licenseEvidenceUrl": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    "sizeBytes": 277383467,
+    "sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "recordCount": 500,
+    "officialTrainTestSplit": false,
+    "observedSchema": {
+      "abstentionCount": 30,
+      "questionTypeCounts": {
+        "single-session-user": 70,
+        "single-session-assistant": 56,
+        "single-session-preference": 30,
+        "multi-session": 133,
+        "knowledge-update": 78,
+        "temporal-reasoning": 133
+      },
+      "repeatedSessionIdOccurrences": 13,
+      "repeatedSessionIdDateDifferences": 13,
+      "repeatedSessionIdPayloadDifferences": 0,
+      "repeatedSessionHandling": "preserve every aligned array occurrence and its timestamp; do not deduplicate by session_id"
+    },
+    "localPath": "target/memory-eval/longmemeval-30-v1/source/longmemeval_s_cleaned.json"
+  },
+  "officialEvaluator": {
+    "repositoryUrl": "https://github.com/xiaowu0162/LongMemEval",
+    "filePath": "src/evaluation/evaluate_qa.py",
+    "revision": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+    "fileUrl": "https://raw.githubusercontent.com/xiaowu0162/LongMemEval/9e0b455f4ef0e2ab8f2e582289761153549043fc/src/evaluation/evaluate_qa.py",
+    "sizeBytes": 7436,
+    "sha256": "ecce9c4c79dc89d99534ac17b383a5cbb5b9f0c69ee98adaf0684742e3d95251",
+    "localPath": "target/memory-eval/longmemeval-30-v1/source/evaluate_qa.py",
+    "status": "pinned_not_executed"
+  },
+  "projectSubset": {
+    "datasetId": "longmemeval-30-v1",
+    "status": "candidate",
+    "caseCount": 30,
+    "selectionSeed": 20261009,
+    "selectionAlgorithm": "sort each disjoint category by SHA-256 of seed, NUL, and question_id; take the first requested count",
+    "categories": [
+      {
+        "id": "information_extraction",
+        "questionTypes": [
+          "single-session-user",
+          "single-session-assistant",
+          "single-session-preference"
+        ],
+        "countPerQuestionType": 2,
+        "count": 6
+      },
+      {
+        "id": "multi_session_reasoning",
+        "questionTypes": ["multi-session"],
+        "countPerQuestionType": 6,
+        "count": 6
+      },
+      {
+        "id": "knowledge_update",
+        "questionTypes": ["knowledge-update"],
+        "countPerQuestionType": 6,
+        "count": 6
+      },
+      {
+        "id": "temporal_reasoning",
+        "questionTypes": ["temporal-reasoning"],
+        "countPerQuestionType": 6,
+        "count": 6
+      },
+      {
+        "id": "abstention",
+        "questionIdSuffix": "_abs",
+        "excludeFromOtherCategories": true,
+        "count": 6
+      }
+    ],
+    "reviewStatus": "pending"
+  }
+}
