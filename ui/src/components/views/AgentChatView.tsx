@@ -14,15 +14,15 @@ import {
   getPendingApprovals,
   getChatSession,
   rejectHarnessRequest,
+  ChatSseHttpError,
+  subscribeChatSessionEvents,
   type PendingApprovalVO,
 } from "../../api/api.ts";
 import { useAgents } from "../../hooks/useAgents.ts";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
 import { useUser } from "../../hooks/useUser.ts";
 import EmptyAgentChatView from "./agentChatView/EmptyAgentChatView.tsx";
-import type { ChatMessageVO, SseMessage, SseMessageType } from "../../types";
-
-const SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL;
+import type { ChatMessageVO, SseMessageType } from "../../types";
 
 interface AgentChatViewProps {
   sessionTraceCache?: Map<string, AgentExecutionTraceItem[]>;
@@ -39,6 +39,8 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   const initProcessedRef = useRef(false);
   const seenMessageIdsRef = useRef<Set<string>>(new Set());
   const streamingSessionIdRef = useRef<string | undefined>(undefined);
+  const lastEventIdRef = useRef<number | undefined>(undefined);
+  const lastEventSessionIdRef = useRef<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
@@ -109,6 +111,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
 
     const sessionResp = await getChatSession(chatSessionId);
     setAgentId(sessionResp.chatSession.agentId);
+    return resp.chatMessages;
   }, [chatSessionId]);
 
   const refreshPendingApproval = useCallback(async () => {
@@ -235,91 +238,136 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
     if (!chatSessionId) {
       return;
     }
-    const es = new EventSource(`${SSE_BASE_URL}/connect/${chatSessionId}`);
-    es.onerror = (error) => {
-      console.error("SSE error:", error);
-    };
-
-    es.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data) as SseMessage;
-      if (message.type === "AI_GENERATED_CONTENT") {
-        const isFinalAssistantMessage = message.payload.message.role === "assistant"
-          && !message.payload.message.metadata?.toolCalls?.length;
-        setStreamingContent("");
-        addMessage(message.payload.message);
-        if (isFinalAssistantMessage) {
-          setDisplayAgentStatus(false);
-          setAgentStatusText("");
-          setAgentStatusType(undefined);
-        }
-        return;
-      }
-      if (message.type === "AI_CONTENT_DELTA") {
-        if (message.payload.contentDelta) {
-          if (streamingSessionIdRef.current !== chatSessionId) {
-            streamingSessionIdRef.current = chatSessionId;
-            setStreamingContent(message.payload.contentDelta);
-          } else {
-            setStreamingContent((previousContent) => previousContent + message.payload.contentDelta);
-          }
-        }
-        return;
-      }
-      if (message.type === "AI_DONE") {
-        recordAgentTrace(
-          message.type,
-          message.payload.statusText || "任务完成",
-          message.payload.stepNumber,
-        );
-        setDisplayAgentStatus(false);
-        setAgentStatusText("");
-        setAgentStatusType(undefined);
-        setPendingApproval(null);
-        return;
-      }
-      if (message.type === "AI_ERROR") {
-        recordAgentTrace(
-          message.type,
-          message.payload.statusText || "Agent 执行失败，请稍后重试",
-          message.payload.stepNumber,
-        );
-        setPendingApproval(null);
-        setDisplayAgentStatus(true);
-        setAgentStatusText(message.payload.statusText || "Agent 执行失败，请稍后重试");
-        setAgentStatusType(message.type);
-        antdMessage.error(message.payload.statusText || "Agent 执行失败，请稍后重试");
-        return;
-      }
-      if (message.type === "TOOL_APPROVAL_REQUIRED") {
-        const payload = message.payload;
-        if (payload.approvalRequestId && payload.toolName) {
-          setPendingApproval({
-            id: payload.approvalRequestId,
-            sessionId: chatSessionId,
-            toolName: payload.toolName,
-            toolInput: payload.toolInput ?? "",
-            callCount: payload.callCount ?? 1,
-            status: "PENDING",
-            createdAt: Date.now(),
-            expiresAt: payload.expiresAt ?? 0,
+    if (lastEventSessionIdRef.current !== chatSessionId) {
+      lastEventSessionIdRef.current = chatSessionId;
+      lastEventIdRef.current = undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    const connect = async () => {
+      while (active && !controller.signal.aborted) {
+        try {
+          await subscribeChatSessionEvents(chatSessionId, (message, eventId) => {
+            if (eventId !== undefined) {
+              if (lastEventIdRef.current !== undefined && eventId <= lastEventIdRef.current) {
+                return;
+              }
+              lastEventIdRef.current = eventId;
+            }
+            if (message.type === "AI_GENERATED_CONTENT") {
+              const isFinalAssistantMessage = message.payload.message.role === "assistant"
+                && !message.payload.message.metadata?.toolCalls?.length;
+              setStreamingContent("");
+              addMessage(message.payload.message);
+              if (isFinalAssistantMessage) {
+                setDisplayAgentStatus(false);
+                setAgentStatusText("");
+                setAgentStatusType(undefined);
+              }
+              return;
+            }
+            if (message.type === "AI_CONTENT_DELTA") {
+              if (message.payload.contentDelta) {
+                if (streamingSessionIdRef.current !== chatSessionId) {
+                  streamingSessionIdRef.current = chatSessionId;
+                  setStreamingContent(message.payload.contentDelta);
+                } else {
+                  setStreamingContent((previousContent) => previousContent + message.payload.contentDelta);
+                }
+              }
+              return;
+            }
+            if (message.type === "AI_DONE") {
+              recordAgentTrace(
+                message.type,
+                message.payload.statusText || "任务完成",
+                message.payload.stepNumber,
+              );
+              setDisplayAgentStatus(false);
+              setAgentStatusText("");
+              setAgentStatusType(undefined);
+              setPendingApproval(null);
+              return;
+            }
+            if (message.type === "AI_ERROR") {
+              recordAgentTrace(
+                message.type,
+                message.payload.statusText || "Agent 执行失败，请稍后重试",
+                message.payload.stepNumber,
+              );
+              setPendingApproval(null);
+              setDisplayAgentStatus(true);
+              setAgentStatusText(message.payload.statusText || "Agent 执行失败，请稍后重试");
+              setAgentStatusType(message.type);
+              antdMessage.error(message.payload.statusText || "Agent 执行失败，请稍后重试");
+              return;
+            }
+            if (message.type === "TOOL_APPROVAL_REQUIRED") {
+              const payload = message.payload;
+              if (payload.approvalRequestId && payload.toolName) {
+                setPendingApproval({
+                  id: payload.approvalRequestId,
+                  sessionId: chatSessionId,
+                  toolName: payload.toolName,
+                  toolInput: payload.toolInput ?? "",
+                  callCount: payload.callCount ?? 1,
+                  status: "PENDING",
+                  createdAt: Date.now(),
+                  expiresAt: payload.expiresAt ?? 0,
+                });
+                refreshPendingApproval().then();
+              }
+            }
+            recordAgentTrace(
+              message.type,
+              message.payload.statusText,
+              message.payload.stepNumber,
+            );
+            setDisplayAgentStatus(true);
+            setAgentStatusText(message.payload.statusText);
+            setAgentStatusType(message.type);
+          }, controller.signal, lastEventIdRef.current, (eventId) => {
+            setStreamingContent("");
+            void getChatMessages().then((sessionMessages) => {
+              if (eventId !== undefined
+                && (lastEventIdRef.current === undefined || eventId > lastEventIdRef.current)) {
+                lastEventIdRef.current = eventId;
+              }
+              const latestMessage = sessionMessages?.at(-1);
+              if (latestMessage?.role === "assistant"
+                && !latestMessage.metadata?.toolCalls?.length) {
+                setDisplayAgentStatus(false);
+                setAgentStatusText("");
+                setAgentStatusType(undefined);
+              }
+            }).catch((error: unknown) => {
+              console.error("恢复聊天历史失败:", error);
+            });
+            void refreshPendingApproval();
           });
-          refreshPendingApproval().then();
+        } catch (error: unknown) {
+          if (!active || controller.signal.aborted) {
+            return;
+          }
+          if (error instanceof ChatSseHttpError && error.status >= 400 && error.status < 500) {
+            console.error("聊天 SSE 请求被拒绝:", error);
+            return;
+          }
+          console.error("SSE error:", error);
+        }
+
+        if (active && !controller.signal.aborted) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
         }
       }
-      recordAgentTrace(
-        message.type,
-        message.payload.statusText,
-        message.payload.stepNumber,
-      );
-      setDisplayAgentStatus(true);
-      setAgentStatusText(message.payload.statusText);
-      setAgentStatusType(message.type);
-    });
+    };
+    void connect();
 
     return () => {
-      es.close();
+      active = false;
+      controller.abort();
     };
-  }, [chatSessionId, recordAgentTrace, refreshPendingApproval]);
+  }, [chatSessionId, getChatMessages, recordAgentTrace, refreshPendingApproval]);
 
   const agentName = useMemo(() => {
     if (!agentId) return null;
