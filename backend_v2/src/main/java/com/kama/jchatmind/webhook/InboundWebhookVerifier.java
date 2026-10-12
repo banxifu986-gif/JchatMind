@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InboundWebhookVerifier {
 
     private static final Duration MAX_TIMESTAMP_OFFSET = Duration.ofMinutes(5);
+    private static final Duration EVENT_ID_RETENTION_GRACE = Duration.ofSeconds(1);
     private static final byte SIGNATURE_SCHEMA_VERSION = 1;
 
     private final Clock clock;
@@ -46,13 +47,16 @@ public class InboundWebhookVerifier {
         if (!event.sourceId().equals(source.sourceId())) {
             return WebhookVerificationResult.rejected(WebhookVerificationStatus.SOURCE_MISMATCH);
         }
-        if (Duration.between(event.timestamp(), Instant.now(clock)).abs().compareTo(MAX_TIMESTAMP_OFFSET) > 0) {
+        Instant now = Instant.now(clock);
+        if (Duration.between(event.timestamp(), now).abs().compareTo(MAX_TIMESTAMP_OFFSET) > 0) {
             return WebhookVerificationResult.rejected(WebhookVerificationStatus.TIMESTAMP_OUT_OF_WINDOW);
         }
         if (!hasValidSignature(event, signingKey)) {
             return WebhookVerificationResult.rejected(WebhookVerificationStatus.INVALID_SIGNATURE);
         }
-        if (!eventIdRegistry.reserve(event.sourceId(), event.eventId())) {
+        Duration retention = Duration.between(now, event.timestamp().plus(MAX_TIMESTAMP_OFFSET))
+                .plus(EVENT_ID_RETENTION_GRACE);
+        if (!eventIdRegistry.reserve(event.sourceId(), event.eventId(), retention)) {
             return WebhookVerificationResult.rejected(WebhookVerificationStatus.DUPLICATE_EVENT);
         }
         return WebhookVerificationResult.accepted();
@@ -144,7 +148,7 @@ enum WebhookVerificationStatus {
 }
 
 interface WebhookEventIdRegistry {
-    boolean reserve(String sourceId, String eventId);
+    boolean reserve(String sourceId, String eventId, Duration retention);
 }
 
 final class InMemoryWebhookEventIdRegistry implements WebhookEventIdRegistry {
@@ -152,7 +156,7 @@ final class InMemoryWebhookEventIdRegistry implements WebhookEventIdRegistry {
     private final Set<WebhookEventKey> reservedEventIds = ConcurrentHashMap.newKeySet();
 
     @Override
-    public boolean reserve(String sourceId, String eventId) {
+    public boolean reserve(String sourceId, String eventId, Duration retention) {
         return reservedEventIds.add(new WebhookEventKey(sourceId, eventId));
     }
 

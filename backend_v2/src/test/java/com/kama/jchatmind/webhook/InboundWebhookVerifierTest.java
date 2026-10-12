@@ -1,6 +1,9 @@
 package com.kama.jchatmind.webhook;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -12,8 +15,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class InboundWebhookVerifierTest {
 
@@ -85,6 +91,62 @@ class InboundWebhookVerifierTest {
         WebhookVerificationResult result = verifier.verify(event, SOURCE);
 
         assertThat(result.status()).isEqualTo(WebhookVerificationStatus.DUPLICATE_EVENT);
+    }
+
+    @Test
+    void shouldRejectAnEventIdAlreadyReservedByAnotherVerifierInstance() throws Exception {
+        assumeTrue(Boolean.getBoolean("g4.webhook.redis.l2"));
+        int port = Integer.getInteger("g4.webhook.redis.port", 0);
+        assumeTrue(port >= 49152 && port <= 65535);
+
+        LettuceConnectionFactory firstFactory = new LettuceConnectionFactory(
+                new RedisStandaloneConfiguration("127.0.0.1", port)
+        );
+        LettuceConnectionFactory secondFactory = new LettuceConnectionFactory(
+                new RedisStandaloneConfiguration("127.0.0.1", port)
+        );
+        firstFactory.afterPropertiesSet();
+        secondFactory.afterPropertiesSet();
+        StringRedisTemplate firstTemplate = new StringRedisTemplate(firstFactory);
+        StringRedisTemplate secondTemplate = new StringRedisTemplate(secondFactory);
+        firstTemplate.afterPropertiesSet();
+        secondTemplate.afterPropertiesSet();
+        String eventId = "event-shared-" + UUID.randomUUID();
+        Set<String> redisKeys = null;
+
+        try {
+            InboundWebhookVerifier firstInstance = new InboundWebhookVerifier(
+                    CLOCK,
+                    new RedisWebhookEventIdRegistry(firstTemplate)
+            );
+            InboundWebhookVerifier secondInstance = new InboundWebhookVerifier(
+                    CLOCK,
+                    new RedisWebhookEventIdRegistry(secondTemplate)
+            );
+            InboundWebhookEvent event = validEvent(eventId, NOW);
+
+            assertThat(firstInstance.verify(event, SOURCE).status()).isEqualTo(WebhookVerificationStatus.ACCEPTED);
+            assertThat(secondInstance.verify(event, SOURCE).status()).isEqualTo(WebhookVerificationStatus.DUPLICATE_EVENT);
+            assertThat(secondInstance.verify(validEvent(eventId + "-other", NOW), SOURCE).status())
+                    .isEqualTo(WebhookVerificationStatus.ACCEPTED);
+
+            redisKeys = firstTemplate.keys("jchatmind:webhook:*:event-id");
+            assertThat(redisKeys).hasSize(2);
+            for (String redisKey : redisKeys) {
+                assertThat(firstTemplate.getExpire(redisKey)).isBetween(1L, 301L);
+            }
+        } finally {
+            if (redisKeys != null && !redisKeys.isEmpty()) {
+                firstTemplate.delete(redisKeys);
+            } else {
+                Set<String> keys = firstTemplate.keys("jchatmind:webhook:*:event-id");
+                if (keys != null && !keys.isEmpty()) {
+                    firstTemplate.delete(keys);
+                }
+            }
+            firstFactory.destroy();
+            secondFactory.destroy();
+        }
     }
 
     @Test
