@@ -13,6 +13,7 @@ class RagEvaluationIsolationComposeContractTest {
     private static final Path COMPOSE_PATH = Path.of("..", "docker-compose.rag-eval.yml");
     private static final Path INIT_PATH = Path.of("..", "rag-eval", "init", "001-extensions.sql");
     private static final Path SCHEMA_PATH = Path.of("..", "rag-eval", "init", "002-evaluation-schema.sql");
+    private static final Path ASSET_SCHEMA_PATH = Path.of("..", "rag-eval", "init", "003-document-assets.sql");
     private static final Path UPLOAD_DIRECTORY = Path.of("..", "rag-eval", "uploads");
 
     @Test
@@ -20,11 +21,13 @@ class RagEvaluationIsolationComposeContractTest {
         assertTrue(Files.exists(COMPOSE_PATH));
         assertTrue(Files.exists(INIT_PATH));
         assertTrue(Files.exists(SCHEMA_PATH));
+        assertTrue(Files.exists(ASSET_SCHEMA_PATH));
         assertTrue(Files.isDirectory(UPLOAD_DIRECTORY));
 
         String compose = Files.readString(COMPOSE_PATH);
         String initialization = Files.readString(INIT_PATH);
         String schema = Files.readString(SCHEMA_PATH);
+        String assetSchema = Files.readString(ASSET_SCHEMA_PATH);
 
         assertTrue(compose.contains("container_name: jchatmind-rag-eval-postgres"));
         assertTrue(compose.contains("127.0.0.1:55432:5432"));
@@ -42,5 +45,10 @@ class RagEvaluationIsolationComposeContractTest {
         assertTrue(schema.contains("embedding VECTOR(1024) NOT NULL"));
         assertTrue(schema.contains("idx_chunk_bge_m3_title_bm25"));
         assertTrue(schema.contains("idx_chunk_bge_m3_content_bm25"));
+        assertTrue(assetSchema.contains("CREATE TABLE IF NOT EXISTS public.document_asset"));
+        assertTrue(assetSchema.contains("CREATE TABLE IF NOT EXISTS public.document_asset_chunk"));
+        assertTrue(assetSchema.contains("REFERENCES public.document_asset(asset_id, document_id)"));
+        assertTrue(assetSchema.contains("REFERENCES public.chunk_bge_m3(id, doc_id)"));
+        assertTrue(assetSchema.contains("asset_document_id = chunk_document_id"));
     }
 }

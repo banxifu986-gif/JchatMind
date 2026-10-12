@@ -1,0 +1,15 @@
+{
+  "datasetId": "g2-current-multimodal-v1",
+  "schemaVersion": "1",
+  "status": "candidate",
+  "caseFile": "../cases/g2-current-multimodal-v1.jsonl",
+  "caseSha256": "f0f2c0d2a1690b47c554e87014cdf2dfca36fdf7679d99de1661d132b17a8e1c",
+  "corpusFiles": [
+    "../../fixtures/g2-current-multimodal-v1.md"
+  ],
+  "corpusSha256": "92873759f7991ee2f60f41f78abad7087b6db68cfcb1ea52ee31b069358cd29c",
+  "chunkingVersion": "markdown-section-v1",
+  "embeddingModel": "bge-m3",
+  "embeddingInputVersion": "title-title-content-v1",
+  "defaultTopK": 5
+}
