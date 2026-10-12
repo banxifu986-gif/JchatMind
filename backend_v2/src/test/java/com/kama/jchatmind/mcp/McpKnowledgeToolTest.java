@@ -4,6 +4,7 @@ import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
+import com.kama.jchatmind.rag.RagRouteDecision;
 import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
@@ -16,6 +17,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -70,6 +72,54 @@ class McpKnowledgeToolTest {
             assertThat(response).contains("知识库: 用户 7 知识库").contains("仅属于用户 7 的内容");
             verify(knowledgeBaseAccessService).requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7");
             verify(ragService).retrieve(List.of("kb-own"), "查询", 3);
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldIntersectRouterSearchScopeWithOwnerAuthorizedScope() {
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        McpPrincipalAccessService principalAccessService = mock(McpPrincipalAccessService.class);
+        RagRouter ragRouter = mock(RagRouter.class);
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                principalAccessService,
+                ragRouter
+        );
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(caller);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-1", "kb-2"), "7"))
+                    .thenReturn(List.of("kb-1", "kb-2"));
+            when(ragRouter.decide("查询", List.of("kb-1", "kb-2"), true, false, true)).thenReturn(
+                    RagRouteDecision.builder()
+                            .route(RagRouteDecision.Route.PRIVATE_RAG)
+                            .searchScope(List.of("kb-2", "foreign-kb"))
+                            .topK(3)
+                            .reason("受限检索")
+                            .build()
+            );
+            when(ragService.retrieve(List.of("kb-1", "kb-2"), "查询", 3)).thenReturn(List.of());
+            when(ragService.retrieve(List.of("kb-2"), "查询", 3)).thenReturn(List.of());
+
+            tool.search("查询", List.of("kb-1", "kb-2"));
+
+            verify(ragService).retrieve(List.of("kb-2"), "查询", 3);
+            verify(ragService, never()).retrieve(List.of("kb-1", "kb-2"), "查询", 3);
+            verify(principalAccessService).recordKnowledgeQuery(
+                    caller,
+                    null,
+                    "ABSTAIN",
+                    List.of("kb-2"),
+                    "no_evidence"
+            );
         } finally {
             RequestContextHolder.resetRequestAttributes();
         }
@@ -298,6 +348,49 @@ class McpKnowledgeToolTest {
                     List.of("kb-own"),
                     "retrieved"
             );
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void shouldUseRouterIntersectionForAllMultimodalAssetQueries() {
+        String query = "请定位 PDF 第 2 页的表格";
+        RagService ragService = mock(RagService.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        RagRouter ragRouter = mock(RagRouter.class);
+        McpKnowledgeTool tool = new McpKnowledgeTool(
+                ragService,
+                mock(KnowledgeBaseMapper.class),
+                knowledgeBaseAccessService,
+                mock(McpPrincipalAccessService.class),
+                ragRouter
+        );
+        McpCallerIdentity caller = new McpCallerIdentity(11L, 7L);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(McpServerConfig.McpApiKeyFilter.CALLER_IDENTITY_ATTRIBUTE))
+                .thenReturn(caller);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            when(knowledgeBaseAccessService.requireAccessibleKnowledgeBaseIds(List.of("kb-1", "kb-2"), "7"))
+                    .thenReturn(List.of("kb-1", "kb-2"));
+            when(ragRouter.decide(query, List.of("kb-1", "kb-2"), true, false, true)).thenReturn(
+                    RagRouteDecision.builder()
+                            .route(RagRouteDecision.Route.MULTIMODAL_RAG)
+                            .searchScope(List.of("kb-2", "foreign-kb"))
+                            .topK(5)
+                            .reason("定位多模态资产")
+                            .build()
+            );
+
+            tool.search(query, List.of("kb-1", "kb-2"));
+
+            verify(ragService).retrieveMarkdownTableAssets(List.of("kb-2"), query, null, 5);
+            verify(ragService).retrievePdfPageAssets(List.of("kb-2"), query, null, 5);
+            verify(ragService).retrieve(List.of("kb-2"), query, 5);
+            verify(ragService, never()).retrieveMarkdownTableAssets(List.of("kb-1", "kb-2"), query, null, 5);
+            verify(ragService, never()).retrievePdfPageAssets(List.of("kb-1", "kb-2"), query, null, 5);
+            verify(ragService, never()).retrieve(List.of("kb-1", "kb-2"), query, 5);
         } finally {
             RequestContextHolder.resetRequestAttributes();
         }

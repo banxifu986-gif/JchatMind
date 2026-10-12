@@ -1,6 +1,7 @@
 package com.kama.jchatmind.agent.harness.proxy;
 
 import com.kama.jchatmind.agent.harness.HarnessContext;
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
 
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -50,6 +51,19 @@ public final class HarnessExecutionContextHolder {
     public static BatchMetadata getMetadata() {
         BoundContexts boundContexts = CONTEXTS.get();
         return boundContexts == null ? null : boundContexts.metadata();
+    }
+
+    public static IntentDecisionMetadata getIntentDecisionMetadata() {
+        BoundContexts boundContexts = CONTEXTS.get();
+        if (boundContexts == null) {
+            return null;
+        }
+        return boundContexts.groupedContexts().values().stream()
+                .flatMap(ArrayDeque::stream)
+                .map(HarnessContext::getIntentDecisionMetadata)
+                .filter(metadata -> metadata != null)
+                .findFirst()
+                .orElse(null);
     }
 
     public static void clear() {

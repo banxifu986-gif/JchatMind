@@ -6,6 +6,7 @@ import com.kama.jchatmind.agent.harness.approval.ApprovalStore;
 import com.kama.jchatmind.agent.harness.audit.AuditStore;
 import com.kama.jchatmind.agent.harness.audit.ToolCallRecord;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Component;
 
@@ -64,6 +65,28 @@ public class HarnessRunner {
             Set<String> allowedToolNames,
             Set<String> blockedToolCallIds
     ) {
+        return beforeExecution(
+                userId,
+                agentId,
+                sessionId,
+                stepNumber,
+                toolCalls,
+                allowedToolNames,
+                blockedToolCallIds,
+                null
+        );
+    }
+
+    public HarnessResult beforeExecution(
+            String userId,
+            String agentId,
+            String sessionId,
+            int stepNumber,
+            List<AssistantMessage.ToolCall> toolCalls,
+            Set<String> allowedToolNames,
+            Set<String> blockedToolCallIds,
+            IntentDecisionMetadata intentDecisionMetadata
+    ) {
         HarnessResult result = new HarnessResult();
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             HarnessContext context = HarnessContext.builder()
@@ -74,6 +97,7 @@ public class HarnessRunner {
                     .toolName(toolCall.name())
                     .toolInput(toolCall.arguments())
                     .stepNumber(stepNumber)
+                    .intentDecisionMetadata(intentDecisionMetadata)
                     .build();
             result.addContext(context);
             if (blockedToolCallIds != null && blockedToolCallIds.contains(toolCall.id())) {
@@ -162,6 +186,7 @@ public class HarnessRunner {
                 .success(false)
                 .outcome(outcome)
                 .errorMessage(decision.getMessage())
+                .intentDecisionMetadata(context.getIntentDecisionMetadata())
                 .durationMs(0)
                 .timestamp(Instant.now())
                 .stepNumber(context.getStepNumber())

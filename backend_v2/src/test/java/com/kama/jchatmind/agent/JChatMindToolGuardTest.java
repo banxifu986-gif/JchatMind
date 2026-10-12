@@ -1,7 +1,12 @@
 package com.kama.jchatmind.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.converter.ChatMessageConverter;
+import com.kama.jchatmind.intent.IntentFallbackRouter;
+import com.kama.jchatmind.intent.IntentPolicyEngine;
+import com.kama.jchatmind.intent.IntentRoutingProperties;
+import com.kama.jchatmind.intent.IntentRouter;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.response.CreateChatMessageResponse;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
@@ -66,6 +71,116 @@ class JChatMindToolGuardTest {
                 messageService,
                 messageConverter,
                 mock(HarnessRunner.class)
+        );
+
+        agent.run();
+
+        ArgumentCaptor<ToolCallback[]> callbacks = ArgumentCaptor.forClass(ToolCallback[].class);
+        verify(requestSpec).toolCallbacks(callbacks.capture());
+        assertThat(callbacks.getValue())
+                .extracting(callback -> callback.getToolDefinition().name())
+                .containsExactly("KnowledgeTool");
+    }
+
+    @Test
+    void shouldUsePreviousUserQueryToRouteContextualFollowUp() {
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        SseService sseService = mock(SseService.class);
+        ChatMessageFacadeService messageService = mock(ChatMessageFacadeService.class);
+        ChatMessageConverter messageConverter = mock(ChatMessageConverter.class);
+        CreateChatMessageResponse savedMessage = mock(CreateChatMessageResponse.class);
+
+        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
+        when(requestSpec.system(any(String.class))).thenReturn(requestSpec);
+        when(requestSpec.toolCallbacks(any(ToolCallback[].class))).thenReturn(requestSpec);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+        when(streamResponseSpec.chatResponse()).thenReturn(Flux.just(chatResponse("继续说明")));
+        when(messageService.createChatMessage(any(ChatMessageDTO.class), eq("user-1")))
+                .thenReturn(savedMessage);
+        when(savedMessage.getChatMessageId()).thenReturn("assistant-message-follow-up");
+
+        JChatMind agent = new JChatMind(
+                "user-1",
+                "agent-1",
+                "test agent",
+                "",
+                "",
+                chatClient,
+                10,
+                List.of(
+                        new UserMessage("请查询项目的发布规范"),
+                        new AssistantMessage("发布规范要求先完成验证。"),
+                        new UserMessage("为什么？")
+                ),
+                List.of(callback("KnowledgeTool"), callback("sendEmail")),
+                List.of(),
+                "session-follow-up",
+                sseService,
+                messageService,
+                messageConverter,
+                mock(HarnessRunner.class)
+        );
+
+        agent.run();
+
+        ArgumentCaptor<ToolCallback[]> callbacks = ArgumentCaptor.forClass(ToolCallback[].class);
+        verify(requestSpec).toolCallbacks(callbacks.capture());
+        assertThat(callbacks.getValue())
+                .extracting(callback -> callback.getToolDefinition().name())
+                .containsExactly("KnowledgeTool");
+    }
+
+    @Test
+    void shouldUseInjectedFallbackPolicyForAmbiguousRequest() {
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        SseService sseService = mock(SseService.class);
+        ChatMessageFacadeService messageService = mock(ChatMessageFacadeService.class);
+        ChatMessageConverter messageConverter = mock(ChatMessageConverter.class);
+        CreateChatMessageResponse savedMessage = mock(CreateChatMessageResponse.class);
+
+        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
+        when(requestSpec.system(any(String.class))).thenReturn(requestSpec);
+        when(requestSpec.toolCallbacks(any(ToolCallback[].class))).thenReturn(requestSpec);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+        when(streamResponseSpec.chatResponse()).thenReturn(Flux.just(chatResponse("答复")));
+        when(messageService.createChatMessage(any(ChatMessageDTO.class), eq("user-1")))
+                .thenReturn(savedMessage);
+        when(savedMessage.getChatMessageId()).thenReturn("assistant-message-2");
+
+        IntentFallbackRouter fallbackRouter = new IntentFallbackRouter(
+                new IntentRouter(),
+                new ObjectMapper(),
+                query -> "{\"businessIntent\":\"KNOWLEDGE_QA\",\"confidence\":0.91,\"margin\":0.6}",
+                new IntentRoutingProperties(),
+                false,
+                null
+        );
+        ToolSelectionPolicy injectedPolicy = new ToolSelectionPolicy(
+                fallbackRouter,
+                new IntentPolicyEngine()
+        );
+
+        JChatMind agent = new JChatMind(
+                "user-1",
+                "agent-1",
+                "test agent",
+                "",
+                "",
+                chatClient,
+                10,
+                List.of(new UserMessage("帮我处理一下这个")),
+                List.of(callback("KnowledgeTool"), callback("sendEmail")),
+                List.of(),
+                "session-1",
+                sseService,
+                messageService,
+                messageConverter,
+                mock(HarnessRunner.class),
+                injectedPolicy
         );
 
         agent.run();

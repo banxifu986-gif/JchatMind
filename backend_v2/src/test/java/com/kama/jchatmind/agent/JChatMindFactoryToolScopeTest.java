@@ -6,6 +6,8 @@ import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.converter.AgentConverter;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
+import com.kama.jchatmind.intent.IntentDecisionSource;
+import com.kama.jchatmind.intent.IntentRoutingProperties;
 import com.kama.jchatmind.mapper.AgentMapper;
 import com.kama.jchatmind.model.dto.AgentDTO;
 import com.kama.jchatmind.model.entity.Agent;
@@ -52,11 +54,29 @@ class JChatMindFactoryToolScopeTest {
                 .containsExactly("externalLookup");
     }
 
+    @Test
+    void shouldUseConfiguredIntentFallbackOnlyWhenEnabled() throws Exception {
+        IntentRoutingProperties properties = new IntentRoutingProperties();
+        properties.setLlmEnabled(true);
+
+        JChatMind runtime = factory(List.of(), properties).create("user-1", "agent-1", "session-1");
+
+        assertThat(toolSelectionPolicy(runtime).decide("帮我处理一下这个").decisionSource())
+                .isEqualTo(IntentDecisionSource.LLM_FALLBACK);
+    }
+
     private JChatMind createRuntime(List<String> allowedTools) throws Exception {
         return factory(allowedTools).create("user-1", "agent-1", "session-1");
     }
 
     private JChatMindFactory factory(List<String> allowedTools) throws Exception {
+        return factory(allowedTools, new IntentRoutingProperties());
+    }
+
+    private JChatMindFactory factory(
+            List<String> allowedTools,
+            IntentRoutingProperties intentRoutingProperties
+    ) throws Exception {
         AgentMapper agentMapper = mock(AgentMapper.class);
         AgentConverter agentConverter = mock(AgentConverter.class);
         Agent agent = Agent.builder().id("agent-1").userId("user-1").model("deepseek-chat").build();
@@ -78,8 +98,21 @@ class JChatMindFactoryToolScopeTest {
         when(toolFacadeService.getOptionalTools()).thenReturn(List.of());
 
         ToolCallbackProvider externalProvider = () -> new ToolCallback[]{callback("externalLookup")};
+        ChatClient chatClient = mock(ChatClient.class);
+        if (intentRoutingProperties.isLlmEnabled()) {
+            ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+            ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
+            when(chatClient.prompt()).thenReturn(requestSpec);
+            when(requestSpec.system(anyString())).thenReturn(requestSpec);
+            when(requestSpec.user(anyString())).thenReturn(requestSpec);
+            when(requestSpec.call()).thenReturn(responseSpec);
+            when(responseSpec.content()).thenReturn(
+                    "{\"businessIntent\":\"KNOWLEDGE_QA\",\"confidence\":0.91,\"margin\":0.6}"
+            );
+        }
+
         return new JChatMindFactory(
-                new ChatClientRegistry(Map.of("deepseek-chat", mock(ChatClient.class))),
+                new ChatClientRegistry(Map.of("deepseek-chat", chatClient)),
                 mock(SseService.class),
                 agentMapper,
                 agentConverter,
@@ -92,8 +125,15 @@ class JChatMindFactoryToolScopeTest {
                 memoryService,
                 externalProvider,
                 mock(HarnessRunner.class),
-                mock(HarnessInterceptorChain.class)
+                mock(HarnessInterceptorChain.class),
+                intentRoutingProperties
         );
+    }
+
+    private ToolSelectionPolicy toolSelectionPolicy(JChatMind runtime) throws Exception {
+        Field field = JChatMind.class.getDeclaredField("toolSelectionPolicy");
+        field.setAccessible(true);
+        return (ToolSelectionPolicy) field.get(runtime);
     }
 
     @SuppressWarnings("unchecked")

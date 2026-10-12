@@ -97,12 +97,23 @@ public class McpKnowledgeTool {
                 );
                 return route.reason();
             }
+            List<String> routeScope = intersectRouteSearchScope(route.searchScope(), accessibleKbIds);
+            if (routeScope.isEmpty()) {
+                mcpPrincipalAccessService.recordKnowledgeQuery(
+                        caller,
+                        resolveCorrelationId(),
+                        "ABSTAIN",
+                        accessibleKbIds,
+                        "empty_router_scope"
+                );
+                return "当前授权知识范围内没有可检索的知识库。";
+            }
             List<RagRetrievalResult> markdownTableAssetResults = List.of();
             List<RagRetrievalResult> pdfPageAssetResults = List.of();
             if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
                 try {
                     markdownTableAssetResults = ragService.retrieveMarkdownTableAssets(
-                            accessibleKbIds,
+                            routeScope,
                             query,
                             null,
                             route.topK()
@@ -111,12 +122,12 @@ public class McpKnowledgeTool {
                     markdownTableAssetResults = List.of();
                 }
                 try {
-                    pdfPageAssetResults = ragService.retrievePdfPageAssets(accessibleKbIds, query, null, route.topK());
+                    pdfPageAssetResults = ragService.retrievePdfPageAssets(routeScope, query, null, route.topK());
                 } catch (RuntimeException e) {
                     pdfPageAssetResults = List.of();
                 }
             }
-            List<RagRetrievalResult> results = ragService.retrieve(accessibleKbIds, query, route.topK());
+            List<RagRetrievalResult> results = ragService.retrieve(routeScope, query, route.topK());
             if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
                 results = mergeMultimodalResults(
                         markdownTableAssetResults,
@@ -130,7 +141,7 @@ public class McpKnowledgeTool {
                         caller,
                         resolveCorrelationId(),
                         "ABSTAIN",
-                        accessibleKbIds,
+                        routeScope,
                         "no_evidence"
                 );
                 return "当前授权知识范围内没有足够证据，无法可靠回答。";
@@ -139,10 +150,10 @@ public class McpKnowledgeTool {
                     caller,
                     resolveCorrelationId(),
                     "ALLOW",
-                    accessibleKbIds,
+                    routeScope,
                     "retrieved"
             );
-            return formatResults(results, buildKbNameMap(accessibleKbIds));
+            return formatResults(results, buildKbNameMap(routeScope));
         } catch (BizException e) {
             mcpPrincipalAccessService.recordKnowledgeQuery(
                     caller,
@@ -153,6 +164,18 @@ public class McpKnowledgeTool {
             );
             return PRIVATE_KNOWLEDGE_ACCESS_DENIED;
         }
+    }
+
+    private List<String> intersectRouteSearchScope(List<String> routeSearchScope, List<String> accessibleKbIds) {
+        if (CollectionUtils.isEmpty(routeSearchScope)) {
+            return List.of();
+        }
+        return routeSearchScope.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(accessibleKbIds::contains)
+                .distinct()
+                .toList();
     }
 
     private List<RagRetrievalResult> mergeMultimodalResults(

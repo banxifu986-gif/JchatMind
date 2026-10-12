@@ -3,6 +3,8 @@ package com.kama.jchatmind.agent.tools;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.rag.RagRouteDecision;
+import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -46,6 +49,40 @@ class KnowledgeToolsScopeTest {
 
         assertThat(result).contains("没有足够证据");
         verify(ragService).retrieve(List.of("kb-2"), "问题", null, 3);
+    }
+
+    @Test
+    void shouldIntersectRouterSearchScopeWithAgentAuthorizedScope() {
+        RagService ragService = mock(RagService.class);
+        ChatSessionFacadeService sessionService = mock(ChatSessionFacadeService.class);
+        RagRouter ragRouter = mock(RagRouter.class);
+        when(sessionService.getRetrievalContext("session-1", "7")).thenReturn(
+                RagRetrievalContext.builder().kbId("kb-1").sourceName("旧文档").build()
+        );
+        when(ragRouter.decide("问题", List.of("kb-1", "kb-2"), true, false, true)).thenReturn(
+                RagRouteDecision.builder()
+                        .route(RagRouteDecision.Route.PRIVATE_RAG)
+                        .searchScope(List.of("kb-2", "foreign-kb"))
+                        .topK(3)
+                        .reason("受限检索")
+                        .build()
+        );
+        when(ragService.retrieve(List.of("kb-1", "kb-2"), "问题", null, 3)).thenReturn(List.of());
+        when(ragService.retrieve(List.of("kb-2"), "问题", null, 3)).thenReturn(List.of());
+
+        KnowledgeTools tool = new KnowledgeTools(
+                ragService,
+                sessionService,
+                ragRouter
+        ).fork("7", "session-1", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build(),
+                KnowledgeBaseDTO.builder().id("kb-2").build()
+        ));
+
+        tool.retrieveKnowledge("问题", null);
+
+        verify(ragService).retrieve(List.of("kb-2"), "问题", null, 3);
+        verify(ragService, never()).retrieve(List.of("kb-1", "kb-2"), "问题", null, 3);
     }
 
     @Test
@@ -317,6 +354,38 @@ class KnowledgeToolsScopeTest {
         tool.knowledgeQuery("请定位 PDF 第 2 页的表格", null);
 
         verify(ragService).retrieve(List.of("kb-1"), "请定位 PDF 第 2 页的表格", null, 5);
+    }
+
+    @Test
+    void shouldUseRouterIntersectionForAllMultimodalAssetQueries() {
+        String query = "请定位 PDF 第 2 页的表格";
+        RagService ragService = mock(RagService.class);
+        RagRouter ragRouter = mock(RagRouter.class);
+        when(ragRouter.decide(query, List.of("kb-1", "kb-2"), true, false, true)).thenReturn(
+                RagRouteDecision.builder()
+                        .route(RagRouteDecision.Route.MULTIMODAL_RAG)
+                        .searchScope(List.of("kb-2", "foreign-kb"))
+                        .topK(5)
+                        .reason("定位多模态资产")
+                        .build()
+        );
+        KnowledgeTools tool = new KnowledgeTools(
+                ragService,
+                mock(ChatSessionFacadeService.class),
+                ragRouter
+        ).fork("7", "session-1", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build(),
+                KnowledgeBaseDTO.builder().id("kb-2").build()
+        ));
+
+        tool.retrieveKnowledge(query, null);
+
+        verify(ragService).retrieveMarkdownTableAssets(List.of("kb-2"), query, null, 5);
+        verify(ragService).retrievePdfPageAssets(List.of("kb-2"), query, null, 5);
+        verify(ragService).retrieve(List.of("kb-2"), query, null, 5);
+        verify(ragService, never()).retrieveMarkdownTableAssets(List.of("kb-1", "kb-2"), query, null, 5);
+        verify(ragService, never()).retrievePdfPageAssets(List.of("kb-1", "kb-2"), query, null, 5);
+        verify(ragService, never()).retrieve(List.of("kb-1", "kb-2"), query, null, 5);
     }
 
     @Test

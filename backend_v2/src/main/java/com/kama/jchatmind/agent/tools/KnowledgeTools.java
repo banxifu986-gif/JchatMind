@@ -100,7 +100,6 @@ public class KnowledgeTools implements Tool {
         if (effectiveKbIds.isEmpty()) {
             return KnowledgeQueryResult.empty("未找到可检索的知识库，请检查当前 Agent 是否已配置可访问知识库，或传入的 kbIds 是否都在授权范围内。");
         }
-        retrievalContext = alignRetrievalContext(retrievalContext, kbIds, effectiveKbIds);
         RagRouteDecision route = ragRouter.decide(query, effectiveKbIds, true, false, true);
         if (route.route() == RagRouteDecision.Route.ABSTAIN
                 || route.route() == RagRouteDecision.Route.CLARIFY) {
@@ -109,12 +108,17 @@ public class KnowledgeTools implements Tool {
         if (route.route() == RagRouteDecision.Route.DIRECT) {
             return KnowledgeQueryResult.empty(route.reason());
         }
+        List<String> routeScope = intersectRouteSearchScope(route.searchScope(), effectiveKbIds);
+        if (routeScope.isEmpty()) {
+            return KnowledgeQueryResult.empty("当前授权知识范围内没有可检索的知识库。");
+        }
+        retrievalContext = alignRetrievalContext(retrievalContext, kbIds, routeScope);
         List<RagRetrievalResult> markdownTableAssetResults = List.of();
         List<RagRetrievalResult> pdfPageAssetResults = List.of();
         if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
             try {
                 markdownTableAssetResults = ragService.retrieveMarkdownTableAssets(
-                        effectiveKbIds,
+                        routeScope,
                         query,
                         retrievalContext,
                         route.topK()
@@ -123,12 +127,12 @@ public class KnowledgeTools implements Tool {
                 markdownTableAssetResults = List.of();
             }
             try {
-                pdfPageAssetResults = ragService.retrievePdfPageAssets(effectiveKbIds, query, retrievalContext, route.topK());
+                pdfPageAssetResults = ragService.retrievePdfPageAssets(routeScope, query, retrievalContext, route.topK());
             } catch (RuntimeException e) {
                 pdfPageAssetResults = List.of();
             }
         }
-        List<RagRetrievalResult> results = ragService.retrieve(effectiveKbIds, query, retrievalContext, route.topK());
+        List<RagRetrievalResult> results = ragService.retrieve(routeScope, query, retrievalContext, route.topK());
         if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
             results = mergeMultimodalResults(
                     markdownTableAssetResults,
@@ -287,6 +291,18 @@ public class KnowledgeTools implements Tool {
                 .filter(StringUtils::hasText)
                 .map(String::trim)
                 .filter(allowedKbMap::containsKey)
+                .distinct()
+                .toList();
+    }
+
+    private List<String> intersectRouteSearchScope(List<String> routeSearchScope, List<String> effectiveKbIds) {
+        if (CollectionUtils.isEmpty(routeSearchScope)) {
+            return List.of();
+        }
+        return routeSearchScope.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(effectiveKbIds::contains)
                 .distinct()
                 .toList();
     }

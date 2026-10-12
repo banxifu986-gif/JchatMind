@@ -8,6 +8,8 @@ import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.agent.harness.approval.ApprovalRequest;
 import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.converter.ChatMessageConverter;
+import com.kama.jchatmind.intent.IntentDecision;
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import com.kama.jchatmind.message.SseMessage;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
@@ -44,6 +46,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -82,12 +85,15 @@ public class JChatMind {
     private HarnessRunner harnessRunner;
     private int currentStepNumber;
     private String conversationSummary;
-    private final ToolSelectionPolicy toolSelectionPolicy = new ToolSelectionPolicy();
+    private ToolSelectionPolicy toolSelectionPolicy;
+    private String currentTraceId;
+    private IntentDecisionMetadata currentIntentDecisionMetadata;
     private final Set<String> executedToolCallSignatures = new HashSet<>();
     private Set<String> currentTurnAllowedToolNames = Set.of();
 
     public JChatMind() {
         this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
+        this.toolSelectionPolicy = new ToolSelectionPolicy();
     }
 
     public JChatMind(
@@ -139,6 +145,47 @@ public class JChatMind {
                 .internalToolExecutionEnabled(false)
                 .build();
         this.toolCallingManager = ToolCallingManager.builder().build();
+        this.toolSelectionPolicy = new ToolSelectionPolicy();
+    }
+
+    public JChatMind(
+            String userId,
+            String agentId,
+            String name,
+            String description,
+            String systemPrompt,
+            ChatClient chatClient,
+            Integer maxMessages,
+            List<Message> memory,
+            List<ToolCallback> availableTools,
+            List<KnowledgeBaseDTO> availableKbs,
+            String chatSessionId,
+            SseService sseService,
+            ChatMessageFacadeService chatMessageFacadeService,
+            ChatMessageConverter chatMessageConverter,
+            HarnessRunner harnessRunner,
+            ToolSelectionPolicy toolSelectionPolicy
+    ) {
+        this(
+                userId,
+                agentId,
+                name,
+                description,
+                systemPrompt,
+                chatClient,
+                maxMessages,
+                memory,
+                availableTools,
+                availableKbs,
+                chatSessionId,
+                sseService,
+                chatMessageFacadeService,
+                chatMessageConverter,
+                harnessRunner
+        );
+        this.toolSelectionPolicy = toolSelectionPolicy == null
+                ? new ToolSelectionPolicy()
+                : toolSelectionPolicy;
     }
 
     private void logToolCalls(List<AssistantMessage.ToolCall> toolCalls) {
@@ -212,10 +259,24 @@ public class JChatMind {
         this.agentState = AgentState.THINKING;
         sendStatus(SseMessage.Type.AI_THINKING, "思考中...", currentStepNumber);
         compressMemoryIfNeeded();
-        List<ToolCallback> turnTools = toolSelectionPolicy.select(availableTools, latestUserQuery());
-        currentTurnAllowedToolNames = turnTools.stream()
+        String decisionCorrelationId = UUID.randomUUID().toString();
+        IntentDecision intentDecision = toolSelectionPolicy.decide(
+                latestUserQuery(),
+                previousUserQuery(),
+                currentTraceId,
+                decisionCorrelationId
+        );
+        List<ToolCallback> turnTools = toolSelectionPolicy.select(availableTools, intentDecision);
+        List<String> selectedToolNames = turnTools.stream()
                 .map(tool -> tool.getToolDefinition().name())
-                .collect(Collectors.toUnmodifiableSet());
+                .toList();
+        currentTurnAllowedToolNames = Set.copyOf(selectedToolNames);
+        currentIntentDecisionMetadata = IntentDecisionMetadata.from(
+                currentTraceId,
+                decisionCorrelationId,
+                intentDecision,
+                selectedToolNames
+        );
         String thinkPrompt = buildThinkPrompt();
 
         Prompt prompt = Prompt.builder()
@@ -287,6 +348,16 @@ public class JChatMind {
                 .filter(StringUtils::hasText)
                 .reduce((first, second) -> second)
                 .orElse("");
+    }
+
+    private String previousUserQuery() {
+        List<String> userQueries = this.chatMemory.get(this.chatSessionId).stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .map(UserMessage::getText)
+                .filter(StringUtils::hasText)
+                .toList();
+        return userQueries.size() < 2 ? "" : userQueries.get(userQueries.size() - 2);
     }
 
     private void appendContentDelta(ChatResponse response, StringBuilder fullContent) {
@@ -519,7 +590,8 @@ public class JChatMind {
                 currentStepNumber,
                 toolCalls,
                 currentTurnAllowedToolNames,
-                duplicateToolCallIds
+                duplicateToolCallIds,
+                currentIntentDecisionMetadata
         );
         if (harnessResult.hasPendingApprovals()) {
             sendApprovalEvents(harnessResult);
@@ -669,6 +741,7 @@ public class JChatMind {
         if (agentState != AgentState.IDLE) {
             throw new IllegalStateException("Agent is not idle");
         }
+        currentTraceId = UUID.randomUUID().toString();
 
         try {
             this.agentState = AgentState.PLANNING;

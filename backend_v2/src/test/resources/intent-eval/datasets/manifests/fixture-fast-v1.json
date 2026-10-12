@@ -1,0 +1,8 @@
+{
+  "datasetId": "intent-fixture-fast-v1",
+  "schemaVersion": "1",
+  "caseFile": "../cases/fixture-fast-v1.jsonl",
+  "caseSha256": "6f20aeb15103f579fe8f01243ba594ff241f2e5371c76890b87e9f9f69c30db1",
+  "status": "frozen",
+  "fixtureOnly": true
+}

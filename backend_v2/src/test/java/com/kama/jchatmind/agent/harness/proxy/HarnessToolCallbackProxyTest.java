@@ -5,6 +5,8 @@ import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor;
 import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessResult;
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
+import com.kama.jchatmind.intent.IntentRouter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
@@ -32,9 +34,24 @@ class HarnessToolCallbackProxyTest {
         AtomicReference<HarnessContext> captured = new AtomicReference<>();
         HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of(new RecordingInterceptor(captured)));
         HarnessToolCallbackProxy proxy = new HarnessToolCallbackProxy(new StubToolCallback(), chain);
+        IntentDecisionMetadata intentMetadata = IntentDecisionMetadata.from(
+                "trace-1",
+                "intent-decision-1",
+                new IntentRouter().decide("请帮我发送邮件给负责人"),
+                List.of("sendEmail")
+        );
+        HarnessContext unmatchedContext = HarnessContext.builder()
+                .sessionId("session-1")
+                .agentId("agent-1")
+                .userId("user-1")
+                .toolName("differentTool")
+                .toolInput("different-input")
+                .stepNumber(2)
+                .intentDecisionMetadata(intentMetadata)
+                .build();
 
         HarnessExecutionContextHolder.bind(
-                List.of(),
+                List.of(unmatchedContext),
                 new HarnessExecutionContextHolder.BatchMetadata("session-1", "agent-1", "user-1", 2)
         );
 
@@ -45,6 +62,7 @@ class HarnessToolCallbackProxyTest {
         assertEquals("agent-1", context.getAgentId());
         assertEquals("user-1", context.getUserId());
         assertEquals(2, context.getStepNumber());
+        assertEquals(intentMetadata, context.getIntentDecisionMetadata());
         assertTrue(Boolean.TRUE.equals(context.getAttributes().get(HarnessConstants.ATTRIBUTE_CONTEXT_BINDING_FALLBACK)));
     }
 

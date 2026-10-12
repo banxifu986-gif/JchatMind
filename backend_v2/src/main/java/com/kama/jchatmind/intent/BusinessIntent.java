@@ -1,0 +1,19 @@
+package com.kama.jchatmind.intent;
+
+public enum BusinessIntent {
+    DIRECT_CHAT,
+    GENERAL_EXPLANATION,
+    KNOWLEDGE_QA,
+    KNOWLEDGE_FOLLOW_UP,
+    KNOWLEDGE_NAVIGATION,
+    EXTERNAL_LOOKUP,
+    DATABASE_QUERY,
+    WEATHER_QUERY,
+    DATE_OR_CITY_QUERY,
+    FILE_READ,
+    FILE_MUTATION,
+    SEND_EMAIL,
+    COMPOSITE,
+    CLARIFY,
+    ABSTAIN
+}

@@ -334,7 +334,7 @@ public class G1ModelDrivenSessionScopeRuntimeL2TestConfig {
     public SseService sseService() {
         return new SseService() {
             @Override
-            public SseEmitter connect(String chatSessionId) {
+            public SseEmitter connect(String chatSessionId, Long lastEventId) {
                 return new SseEmitter();
             }
 

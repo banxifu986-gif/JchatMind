@@ -1,0 +1,15 @@
+{
+  "datasetId": "intent-candidate-v1",
+  "schemaVersion": "4",
+  "caseFile": "../seeds/intent-candidate-seeds-v1.jsonl",
+  "caseSha256": "377f663438bc5e2479ce0829b99fc38ac6598e3fb10e3e525911564cee46e9c2",
+  "status": "candidate",
+  "fixtureOnly": false,
+  "sourceDatasetId": "intent-candidate-seeds-v1",
+  "generatorVersion": "seed-paraphrase-expansion-v4",
+  "expectedCaseCount": 300,
+  "splitCounts": {
+    "dev": 200,
+    "test": 100
+  }
+}

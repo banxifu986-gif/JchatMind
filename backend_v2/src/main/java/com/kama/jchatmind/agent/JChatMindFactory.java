@@ -1,5 +1,6 @@
 package com.kama.jchatmind.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
@@ -11,6 +12,12 @@ import com.kama.jchatmind.converter.AgentConverter;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.converter.KnowledgeBaseConverter;
 import com.kama.jchatmind.exception.BizException;
+import com.kama.jchatmind.intent.ChatClientIntentModelClient;
+import com.kama.jchatmind.intent.IntentFallbackRouter;
+import com.kama.jchatmind.intent.IntentDecisionTelemetry;
+import com.kama.jchatmind.intent.IntentPolicyEngine;
+import com.kama.jchatmind.intent.IntentRoutingProperties;
+import com.kama.jchatmind.intent.IntentRouter;
 import com.kama.jchatmind.mapper.AgentMapper;
 import com.kama.jchatmind.model.dto.AgentDTO;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
@@ -31,6 +38,7 @@ import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -57,10 +65,54 @@ public class JChatMindFactory {
     private final ToolCallbackProvider externalToolCallbackProvider;
     private final HarnessRunner harnessRunner;
     private final HarnessInterceptorChain harnessInterceptorChain;
+    private final IntentRoutingProperties intentRoutingProperties;
+    private final IntentDecisionTelemetry intentDecisionTelemetry;
 
     private AgentDTO agentConfig;
 
+    @Autowired
     public JChatMindFactory(
+            ChatClientRegistry chatClientRegistry,
+            SseService sseService,
+            AgentMapper agentMapper,
+            AgentConverter agentConverter,
+            KnowledgeBaseConverter knowledgeBaseConverter,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            AgentKnowledgeBaseBindingService agentKnowledgeBaseBindingService,
+            ToolFacadeService toolFacadeService,
+            ChatMessageFacadeService chatMessageFacadeService,
+            ChatMessageConverter chatMessageConverter,
+            UserMemoryFacadeService userMemoryFacadeService,
+            @Qualifier("externalToolCallbackProvider")
+            ToolCallbackProvider externalToolCallbackProvider,
+            HarnessRunner harnessRunner,
+            HarnessInterceptorChain harnessInterceptorChain,
+            IntentRoutingProperties intentRoutingProperties,
+            IntentDecisionTelemetry intentDecisionTelemetry
+    ) {
+        this.chatClientRegistry = chatClientRegistry;
+        this.sseService = sseService;
+        this.agentMapper = agentMapper;
+        this.agentConverter = agentConverter;
+        this.knowledgeBaseConverter = knowledgeBaseConverter;
+        this.knowledgeBaseAccessService = knowledgeBaseAccessService;
+        this.agentKnowledgeBaseBindingService = agentKnowledgeBaseBindingService;
+        this.toolFacadeService = toolFacadeService;
+        this.chatMessageFacadeService = chatMessageFacadeService;
+        this.chatMessageConverter = chatMessageConverter;
+        this.userMemoryFacadeService = userMemoryFacadeService;
+        this.externalToolCallbackProvider = externalToolCallbackProvider;
+        this.harnessRunner = harnessRunner;
+        this.harnessInterceptorChain = harnessInterceptorChain;
+        this.intentRoutingProperties = intentRoutingProperties == null
+                ? new IntentRoutingProperties()
+                : intentRoutingProperties;
+        this.intentDecisionTelemetry = intentDecisionTelemetry == null
+                ? IntentDecisionTelemetry.noop()
+                : intentDecisionTelemetry;
+    }
+
+    JChatMindFactory(
             ChatClientRegistry chatClientRegistry,
             SseService sseService,
             AgentMapper agentMapper,
@@ -77,20 +129,62 @@ public class JChatMindFactory {
             HarnessRunner harnessRunner,
             HarnessInterceptorChain harnessInterceptorChain
     ) {
-        this.chatClientRegistry = chatClientRegistry;
-        this.sseService = sseService;
-        this.agentMapper = agentMapper;
-        this.agentConverter = agentConverter;
-        this.knowledgeBaseConverter = knowledgeBaseConverter;
-        this.knowledgeBaseAccessService = knowledgeBaseAccessService;
-        this.agentKnowledgeBaseBindingService = agentKnowledgeBaseBindingService;
-        this.toolFacadeService = toolFacadeService;
-        this.chatMessageFacadeService = chatMessageFacadeService;
-        this.chatMessageConverter = chatMessageConverter;
-        this.userMemoryFacadeService = userMemoryFacadeService;
-        this.externalToolCallbackProvider = externalToolCallbackProvider;
-        this.harnessRunner = harnessRunner;
-        this.harnessInterceptorChain = harnessInterceptorChain;
+        this(
+                chatClientRegistry,
+                sseService,
+                agentMapper,
+                agentConverter,
+                knowledgeBaseConverter,
+                knowledgeBaseAccessService,
+                agentKnowledgeBaseBindingService,
+                toolFacadeService,
+                chatMessageFacadeService,
+                chatMessageConverter,
+                userMemoryFacadeService,
+                externalToolCallbackProvider,
+                harnessRunner,
+                harnessInterceptorChain,
+                new IntentRoutingProperties(),
+                IntentDecisionTelemetry.noop()
+        );
+    }
+
+    JChatMindFactory(
+            ChatClientRegistry chatClientRegistry,
+            SseService sseService,
+            AgentMapper agentMapper,
+            AgentConverter agentConverter,
+            KnowledgeBaseConverter knowledgeBaseConverter,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            AgentKnowledgeBaseBindingService agentKnowledgeBaseBindingService,
+            ToolFacadeService toolFacadeService,
+            ChatMessageFacadeService chatMessageFacadeService,
+            ChatMessageConverter chatMessageConverter,
+            UserMemoryFacadeService userMemoryFacadeService,
+            @Qualifier("externalToolCallbackProvider")
+            ToolCallbackProvider externalToolCallbackProvider,
+            HarnessRunner harnessRunner,
+            HarnessInterceptorChain harnessInterceptorChain,
+            IntentRoutingProperties intentRoutingProperties
+    ) {
+        this(
+                chatClientRegistry,
+                sseService,
+                agentMapper,
+                agentConverter,
+                knowledgeBaseConverter,
+                knowledgeBaseAccessService,
+                agentKnowledgeBaseBindingService,
+                toolFacadeService,
+                chatMessageFacadeService,
+                chatMessageConverter,
+                userMemoryFacadeService,
+                externalToolCallbackProvider,
+                harnessRunner,
+                harnessInterceptorChain,
+                intentRoutingProperties,
+                IntentDecisionTelemetry.noop()
+        );
     }
 
     private Agent loadAgent(String userId, String agentId) {
@@ -313,6 +407,7 @@ public class JChatMindFactory {
         if (Objects.isNull(chatClient)) {
             throw new IllegalStateException("未找到对应的 ChatClient: " + agent.getModel());
         }
+        ToolSelectionPolicy toolSelectionPolicy = buildToolSelectionPolicy();
         return new JChatMind(
                 userId,
                 agent.getId(),
@@ -328,8 +423,33 @@ public class JChatMindFactory {
                 sseService,
                 chatMessageFacadeService,
                 chatMessageConverter,
-                harnessRunner
+                harnessRunner,
+                toolSelectionPolicy
         );
+    }
+
+    private ToolSelectionPolicy buildToolSelectionPolicy() {
+        if ((!intentRoutingProperties.isLlmEnabled()
+                && !intentRoutingProperties.isShadowEnabled())
+                || !StringUtils.hasText(intentRoutingProperties.getModel())) {
+            return new ToolSelectionPolicy();
+        }
+
+        ChatClient intentChatClient = chatClientRegistry.get(intentRoutingProperties.getModel());
+        if (intentChatClient == null) {
+            log.warn("未找到意图分类模型 {}，继续使用规则意图路由", intentRoutingProperties.getModel());
+            return new ToolSelectionPolicy();
+        }
+
+        IntentFallbackRouter fallbackRouter = new IntentFallbackRouter(
+                new IntentRouter(),
+                new ObjectMapper(),
+                new ChatClientIntentModelClient(intentChatClient),
+                intentRoutingProperties,
+                intentRoutingProperties.isShadowEnabled(),
+                intentDecisionTelemetry
+        );
+        return new ToolSelectionPolicy(fallbackRouter, new IntentPolicyEngine());
     }
 
     public JChatMind create(String userId, String agentId, String chatSessionId) {

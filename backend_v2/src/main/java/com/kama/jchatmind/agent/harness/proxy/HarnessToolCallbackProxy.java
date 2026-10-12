@@ -62,6 +62,7 @@ public class HarnessToolCallbackProxy implements ToolCallback {
                 .toolName(delegate.getToolDefinition().name())
                 .toolInput(toolInput)
                 .stepNumber(metadata == null ? 0 : metadata.stepNumber())
+                .intentDecisionMetadata(HarnessExecutionContextHolder.getIntentDecisionMetadata())
                 .build();
         fallbackContext.getAttributes().put(HarnessConstants.ATTRIBUTE_CONTEXT_BINDING_FALLBACK, true);
         return fallbackContext;

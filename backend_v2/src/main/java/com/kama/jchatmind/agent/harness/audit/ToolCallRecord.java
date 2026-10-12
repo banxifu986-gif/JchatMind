@@ -1,5 +1,6 @@
 package com.kama.jchatmind.agent.harness.audit;
 
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import lombok.Builder;
 import lombok.Data;
 
@@ -30,4 +31,5 @@ public class ToolCallRecord {
     private long durationMs;
     private Instant timestamp;
     private int stepNumber;
+    private IntentDecisionMetadata intentDecisionMetadata;
 }

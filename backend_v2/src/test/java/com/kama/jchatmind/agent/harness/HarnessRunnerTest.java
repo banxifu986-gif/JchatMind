@@ -2,12 +2,16 @@ package com.kama.jchatmind.agent.harness;
 
 import com.kama.jchatmind.agent.harness.approval.InMemoryApprovalStore;
 import com.kama.jchatmind.agent.harness.audit.InMemoryAuditStore;
+import com.kama.jchatmind.agent.harness.audit.ToolCallRecord;
 import com.kama.jchatmind.agent.harness.circuit.InMemoryCircuitBreakerRegistry;
 import com.kama.jchatmind.agent.harness.interceptor.AuditTrailInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.CircuitBreakerInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
 import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
+import com.kama.jchatmind.intent.BusinessIntent;
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
+import com.kama.jchatmind.intent.IntentRouter;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 
@@ -137,6 +141,59 @@ class HarnessRunnerTest {
 
         assertEquals(HarnessDecision.Status.EXPIRED, result.getDecision("call-1").getStatus());
         assertTrue(runner.getPendingApprovals("session-1").isEmpty());
+    }
+
+    @Test
+    void shouldCarryIntentDecisionIntoRejectedToolAuditRecord() {
+        HarnessProperties properties = defaultProperties();
+        InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
+        InMemoryAuditStore auditStore = new InMemoryAuditStore(properties);
+        AuditTrailInterceptor auditInterceptor = new AuditTrailInterceptor(properties, auditStore);
+        HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of(auditInterceptor));
+        HarnessRunner runner = new HarnessRunner(properties, chain, approvalStore, auditStore);
+        IntentDecisionMetadata metadata = IntentDecisionMetadata.from(
+                "trace-1",
+                "intent-decision-1",
+                new IntentRouter().decide("请查询项目的发布规范"),
+                List.of("KnowledgeTool")
+        );
+
+        HarnessResult allowedResult = runner.beforeExecution(
+                "user-1",
+                "agent-1",
+                "session-1",
+                1,
+                List.of(new AssistantMessage.ToolCall("call-allowed", "function", "KnowledgeTool", "{}")),
+                Set.of("KnowledgeTool"),
+                Set.of(),
+                metadata
+        );
+        HarnessContext allowedContext = allowedResult.getContext("call-allowed");
+        auditInterceptor.afterExecution(allowedContext, "search result");
+
+        HarnessResult rejectedResult = runner.beforeExecution(
+                "user-1",
+                "agent-1",
+                "session-1",
+                1,
+                List.of(new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{}")),
+                Set.of("KnowledgeTool"),
+                Set.of(),
+                metadata
+        );
+        HarnessContext rejectedContext = rejectedResult.getContext("call-1");
+        runner.recordSyntheticOutcome(rejectedContext, rejectedResult.getDecision("call-1"));
+
+        List<ToolCallRecord> records = auditStore.getBySession("session-1");
+        assertEquals(metadata, allowedContext.getIntentDecisionMetadata());
+        assertEquals(metadata, records.get(0).getIntentDecisionMetadata());
+        assertEquals(ToolCallRecord.Outcome.SUCCESS, records.get(0).getOutcome());
+        assertEquals("trace-1", records.get(1).getIntentDecisionMetadata().traceId());
+        assertEquals("intent-decision-1", records.get(1).getIntentDecisionMetadata().correlationId());
+        assertEquals(BusinessIntent.KNOWLEDGE_QA, records.get(1).getIntentDecisionMetadata().businessIntent());
+        assertEquals(List.of("KnowledgeTool"), records.get(1).getIntentDecisionMetadata().selectedToolNames());
+        assertEquals("sendEmail", records.get(1).getToolName());
+        assertEquals(ToolCallRecord.Outcome.REJECTED, records.get(1).getOutcome());
     }
 
     private HarnessRunner newHarnessRunner() {

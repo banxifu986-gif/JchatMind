@@ -1,5 +1,6 @@
 package com.kama.jchatmind.agent.harness;
 
+import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import lombok.Builder;
 import lombok.Data;
 
@@ -16,6 +17,7 @@ public class HarnessContext {
     private String toolName;
     private String toolInput;
     private int stepNumber;
+    private IntentDecisionMetadata intentDecisionMetadata;
 
     @Builder.Default
     private Map<String, Object> attributes = new ConcurrentHashMap<>();

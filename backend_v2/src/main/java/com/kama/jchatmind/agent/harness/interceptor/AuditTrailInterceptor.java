@@ -49,6 +49,7 @@ public class AuditTrailInterceptor implements HarnessInterceptor {
                 .durationMs(durationMs(context))
                 .timestamp(Instant.now())
                 .stepNumber(context.getStepNumber())
+                .intentDecisionMetadata(context.getIntentDecisionMetadata())
                 .build());
     }
 
@@ -70,6 +71,7 @@ public class AuditTrailInterceptor implements HarnessInterceptor {
                 .durationMs(durationMs(context))
                 .timestamp(Instant.now())
                 .stepNumber(context.getStepNumber())
+                .intentDecisionMetadata(context.getIntentDecisionMetadata())
                 .build());
     }
 
