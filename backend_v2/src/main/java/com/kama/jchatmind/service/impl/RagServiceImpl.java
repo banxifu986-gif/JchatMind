@@ -67,6 +67,7 @@ public class RagServiceImpl implements RagService {
     private final boolean rerankDebug;
     private final boolean disableQueryExpansion;
     private final boolean disableRerank;
+    private final boolean embeddingCacheEnabled;
     private final Map<String, float[]> embeddingCache;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -92,6 +93,7 @@ public class RagServiceImpl implements RagService {
         this.rerankDebug = rerankDebug;
         this.disableQueryExpansion = disableQueryExpansion;
         this.disableRerank = disableRerank;
+        this.embeddingCacheEnabled = embeddingCacheMaxEntries > 0;
         this.embeddingCache = createEmbeddingCache(embeddingCacheMaxEntries);
     }
 
@@ -116,8 +118,9 @@ public class RagServiceImpl implements RagService {
 
     private float[] doEmbed(String text) {
         String cacheKey = StringUtils.hasText(text) ? text.trim() : text;
-        if (!CollectionUtils.isEmpty(embeddingCache) && embeddingCache.containsKey(cacheKey)) {
-            return embeddingCache.get(cacheKey).clone();
+        float[] cachedEmbedding = embeddingCacheEnabled ? embeddingCache.get(cacheKey) : null;
+        if (cachedEmbedding != null) {
+            return cachedEmbedding.clone();
         }
 
         Map<String, Object> body = new HashMap<>();
@@ -136,7 +139,7 @@ public class RagServiceImpl implements RagService {
         Assert.notNull(resp.getEmbeddings().get(0), "Embedding vector cannot be null");
 
         float[] embedding = resp.getEmbeddings().get(0);
-        if (!CollectionUtils.isEmpty(embeddingCache)) {
+        if (embeddingCacheEnabled) {
             embeddingCache.put(cacheKey, embedding.clone());
         }
         return embedding;
