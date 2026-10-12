@@ -2,6 +2,7 @@ package com.kama.jchatmind.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.EnableMBeanExport;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.context.request.RequestAttributes;
@@ -11,6 +12,7 @@ import java.util.concurrent.Executor;
 
 @Configuration
 @EnableAsync
+@EnableMBeanExport
 public class AsyncConfig {
 
     @Bean
@@ -23,7 +25,17 @@ public class AsyncConfig {
         return createExecutor(2, 4, 50, "agent-event-");
     }
 
-    private Executor createExecutor(int corePoolSize, int maxPoolSize, int queueCapacity, String threadNamePrefix) {
+    @Bean
+    public ThreadPoolTaskExecutor workflowTaskExecutor() {
+        return createExecutor(2, 4, 20, "workflow-step-");
+    }
+
+    private ThreadPoolTaskExecutor createExecutor(
+            int corePoolSize,
+            int maxPoolSize,
+            int queueCapacity,
+            String threadNamePrefix
+    ) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(corePoolSize);
         executor.setMaxPoolSize(maxPoolSize);

@@ -20,6 +20,7 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -81,6 +82,7 @@ class ChatMessageEventFlowIntegrationTest {
             context.getBeanFactory().registerSingleton("requestScopeData", requestScopeData);
             context.registerBean(JChatMindFactory.class, () -> jChatMindFactory);
             context.registerBean(UserMemoryFacadeService.class, () -> userMemoryFacadeService);
+            context.registerBean("agentTaskExecutor", Executor.class, () -> Runnable::run);
             context.registerBean(ChatSessionExecutionCoordinator.class);
             context.registerBean(MemoryExtractionFailureRegistry.class);
             context.registerBean(ChatEventListener.class);

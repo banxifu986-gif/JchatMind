@@ -1,6 +1,7 @@
 package com.kama.jchatmind.workflow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.config.AsyncConfig;
 import com.kama.jchatmind.agent.harness.HarnessProperties;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.agent.harness.approval.InMemoryApprovalStore;
@@ -11,9 +12,22 @@ import com.kama.jchatmind.agent.harness.interceptor.CircuitBreakerInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
 import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -161,6 +175,133 @@ class WorkflowPlanExecutorTest {
     }
 
     @Test
+    void shouldInterruptTimedOutStepAndStopLaterSteps() throws Exception {
+        InMemoryAuditStore auditStore = new InMemoryAuditStore(harnessProperties());
+        AnnotationConfigApplicationContext taskExecutorContext =
+                new AnnotationConfigApplicationContext(AsyncConfig.class);
+        ThreadPoolTaskExecutor workflowTaskExecutor = taskExecutorContext.getBean(
+                "workflowTaskExecutor",
+                ThreadPoolTaskExecutor.class
+        );
+        WorkflowPlanExecutor executor = newExecutor(
+                auditStore,
+                new InMemoryCircuitBreakerRegistry(harnessProperties()),
+                harnessProperties(),
+                false,
+                workflowTaskExecutor
+        );
+        CountDownLatch firstStepStarted = new CountDownLatch(1);
+        CountDownLatch firstStepInterrupted = new CountDownLatch(1);
+        CountDownLatch releaseFirstStep = new CountDownLatch(1);
+        CountDownLatch executionFinished = new CountDownLatch(1);
+        AtomicReference<WorkflowExecutionResult> executionResult = new AtomicReference<>();
+        AtomicReference<Throwable> executionFailure = new AtomicReference<>();
+        List<String> executedStepIds = new ArrayList<>();
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        WorkflowPlan plan = new WorkflowPlan(
+                2,
+                1,
+                List.of(
+                        step("slow-step", "KnowledgeTool", "slow", "可中断的读取"),
+                        step("later-step", "KnowledgeTool", "later", "不得运行的后续读取")
+                )
+        );
+
+        try {
+            assertThat(workflowTaskExecutor.getCorePoolSize()).isEqualTo(2);
+            assertThat(workflowTaskExecutor.getMaxPoolSize()).isEqualTo(4);
+            assertThat(workflowTaskExecutor.getThreadPoolExecutor().getQueue().remainingCapacity()).isEqualTo(20);
+            caller.submit(() -> {
+                try {
+                    RequestContextHolder.setRequestAttributes(
+                            new ServletRequestAttributes(new MockHttpServletRequest())
+                    );
+                    try {
+                        executionResult.set(executor.execute(
+                                "user-1",
+                                "workflow-agent-1",
+                                "session-timeout",
+                                plan,
+                                List.of("KnowledgeTool"),
+                                step -> {
+                                    executedStepIds.add(step.id());
+                                    if (step.id().equals("slow-step")) {
+                                        firstStepStarted.countDown();
+                                        try {
+                                            releaseFirstStep.await();
+                                            return "completed";
+                                        } catch (InterruptedException exception) {
+                                            firstStepInterrupted.countDown();
+                                            Thread.currentThread().interrupt();
+                                            throw new IllegalStateException(exception);
+                                        }
+                                    }
+                                    return "unexpected";
+                                }
+                        ));
+                    } finally {
+                        RequestContextHolder.resetRequestAttributes();
+                    }
+                } catch (Throwable exception) {
+                    executionFailure.set(exception);
+                } finally {
+                    executionFinished.countDown();
+                }
+            });
+
+            assertThat(firstStepStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            boolean completedWithinTimeout = executionFinished.await(1500, TimeUnit.MILLISECONDS);
+            releaseFirstStep.countDown();
+            assertThat(executionFinished.await(2, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(completedWithinTimeout).isTrue();
+            assertThat(executionFailure.get()).isNull();
+            assertThat(firstStepInterrupted.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(executedStepIds).containsExactly("slow-step");
+            assertThat(executionResult.get().steps()).singleElement()
+                    .satisfies(result -> assertThat(result.status().name()).isEqualTo("TIMED_OUT"));
+        } finally {
+            releaseFirstStep.countDown();
+            caller.shutdownNow();
+            taskExecutorContext.close();
+        }
+    }
+
+    @Test
+    void shouldFailClosedWhenWorkflowExecutorRejectsPlan() {
+        InMemoryAuditStore auditStore = new InMemoryAuditStore(harnessProperties());
+        AtomicBoolean businessExecutorCalled = new AtomicBoolean();
+        Executor rejectingExecutor = task -> {
+            throw new RejectedExecutionException("workflow pool is full");
+        };
+        WorkflowPlanExecutor executor = newExecutor(
+                auditStore,
+                new InMemoryCircuitBreakerRegistry(harnessProperties()),
+                harnessProperties(),
+                false,
+                rejectingExecutor
+        );
+
+        WorkflowExecutionResult result = executor.execute(
+                "user-1",
+                "workflow-agent-1",
+                "session-rejected",
+                new WorkflowPlan(1, 30, List.of(step("read-design", "KnowledgeTool", "design", "采用 Redis"))),
+                List.of("KnowledgeTool"),
+                step -> {
+                    businessExecutorCalled.set(true);
+                    return "unexpected";
+                }
+        );
+
+        assertThat(result.completed()).isFalse();
+        assertThat(result.steps()).isEmpty();
+        assertThat(result.violations()).contains("工作流执行线程池繁忙");
+        assertThat(businessExecutorCalled).isFalse();
+        assertThat(auditStore.getBySession("session-rejected")).isEmpty();
+    }
+
+    @Test
     void shouldStopWorkflowBeforeBusinessExecutionWhenHarnessApprovalExpires() {
         HarnessProperties properties = harnessProperties();
         properties.getHumanApproval().setEnabled(true);
@@ -244,6 +385,16 @@ class WorkflowPlanExecutorTest {
             HarnessProperties properties,
             boolean approvalEnabled
     ) {
+        return newExecutor(auditStore, circuitRegistry, properties, approvalEnabled, Runnable::run);
+    }
+
+    private WorkflowPlanExecutor newExecutor(
+            InMemoryAuditStore auditStore,
+            InMemoryCircuitBreakerRegistry circuitRegistry,
+            HarnessProperties properties,
+            boolean approvalEnabled,
+            Executor workflowTaskExecutor
+    ) {
         InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
         List<com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor> interceptors = new ArrayList<>();
         interceptors.add(new CircuitBreakerInterceptor(properties, circuitRegistry));
@@ -253,7 +404,13 @@ class WorkflowPlanExecutorTest {
         interceptors.add(new AuditTrailInterceptor(properties, auditStore));
         HarnessInterceptorChain interceptorChain = new HarnessInterceptorChain(interceptors);
         HarnessRunner harnessRunner = new HarnessRunner(properties, interceptorChain, approvalStore, auditStore);
-        return new WorkflowPlanExecutor(new WorkflowPlanVerifier(), harnessRunner, interceptorChain, new ObjectMapper());
+        return new WorkflowPlanExecutor(
+                new WorkflowPlanVerifier(),
+                harnessRunner,
+                interceptorChain,
+                new ObjectMapper(),
+                workflowTaskExecutor
+        );
     }
 
     private WorkflowStep step(String id, String toolName, String factKey, String claim) {

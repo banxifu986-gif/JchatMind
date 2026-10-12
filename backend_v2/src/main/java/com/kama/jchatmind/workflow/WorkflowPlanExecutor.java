@@ -9,6 +9,7 @@ import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
 import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.agent.harness.proxy.HarnessToolCallbackProxy;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -22,6 +23,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 public class WorkflowPlanExecutor {
@@ -30,17 +39,20 @@ public class WorkflowPlanExecutor {
     private final HarnessRunner harnessRunner;
     private final HarnessInterceptorChain harnessInterceptorChain;
     private final ObjectMapper objectMapper;
+    private final Executor workflowTaskExecutor;
 
     public WorkflowPlanExecutor(
             WorkflowPlanVerifier workflowPlanVerifier,
             HarnessRunner harnessRunner,
             HarnessInterceptorChain harnessInterceptorChain,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Qualifier("workflowTaskExecutor") Executor workflowTaskExecutor
     ) {
         this.workflowPlanVerifier = workflowPlanVerifier;
         this.harnessRunner = harnessRunner;
         this.harnessInterceptorChain = harnessInterceptorChain;
         this.objectMapper = objectMapper;
+        this.workflowTaskExecutor = workflowTaskExecutor;
     }
 
     public WorkflowExecutionResult execute(
@@ -56,10 +68,76 @@ public class WorkflowPlanExecutor {
             return WorkflowExecutionResult.rejected(verification.violations());
         }
 
-        List<WorkflowStepExecution> executions = new ArrayList<>();
+        List<WorkflowStepExecution> executions = new CopyOnWriteArrayList<>();
+        AtomicReference<String> runningStepId = new AtomicReference<>();
+        FutureTask<WorkflowExecutionResult> execution = new FutureTask<>(() -> executeVerifiedPlan(
+                userId,
+                agentId,
+                sessionId,
+                plan,
+                allowedTools,
+                workflowToolExecutor,
+                executions,
+                runningStepId
+        ));
+        try {
+            workflowTaskExecutor.execute(execution);
+            return execution.get(plan.timeoutSeconds(), TimeUnit.SECONDS);
+        } catch (RejectedExecutionException exception) {
+            return WorkflowExecutionResult.rejected(List.of("工作流执行线程池繁忙"));
+        } catch (TimeoutException exception) {
+            if (!execution.cancel(true)) {
+                return completedResult(execution);
+            }
+            return WorkflowExecutionResult.timedOut(executions, runningStepId.get());
+        } catch (InterruptedException exception) {
+            execution.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("工作流执行被中断", exception);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("工作流执行失败", cause);
+        }
+    }
+
+    private WorkflowExecutionResult completedResult(FutureTask<WorkflowExecutionResult> execution) {
+        try {
+            return execution.get();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("工作流执行被中断", exception);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("工作流执行失败", cause);
+        }
+    }
+
+    private WorkflowExecutionResult executeVerifiedPlan(
+            String userId,
+            String agentId,
+            String sessionId,
+            WorkflowPlan plan,
+            List<String> allowedTools,
+            WorkflowToolExecutor workflowToolExecutor,
+            List<WorkflowStepExecution> executions,
+            AtomicReference<String> runningStepId
+    ) {
         List<WorkflowStep> steps = plan.steps() == null ? List.of() : plan.steps();
         for (int index = 0; index < steps.size(); index++) {
             WorkflowStep step = steps.get(index);
+            runningStepId.set(step.id());
             WorkflowStepExecution execution = executeStep(
                     userId,
                     agentId,
@@ -69,6 +147,7 @@ public class WorkflowPlanExecutor {
                     workflowToolExecutor
             );
             executions.add(execution);
+            runningStepId.compareAndSet(step.id(), null);
             if (execution.status() != WorkflowStepExecutionStatus.SUCCEEDED) {
                 return WorkflowExecutionResult.halted(executions);
             }
@@ -167,7 +246,11 @@ public class WorkflowPlanExecutor {
 
         @Override
         public String call(String toolInput) {
-            output = workflowToolExecutor.execute(step);
+            String result = workflowToolExecutor.execute(step);
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("工作流步骤执行线程已中断");
+            }
+            output = result;
             return output;
         }
 
@@ -196,6 +279,18 @@ record WorkflowExecutionResult(
         return new WorkflowExecutionResult(false, List.copyOf(steps), List.of());
     }
 
+    static WorkflowExecutionResult timedOut(List<WorkflowStepExecution> steps, String runningStepId) {
+        List<WorkflowStepExecution> timedOutSteps = new ArrayList<>(steps);
+        if (runningStepId != null && timedOutSteps.stream().noneMatch(step -> step.stepId().equals(runningStepId))) {
+            timedOutSteps.add(new WorkflowStepExecution(
+                    runningStepId,
+                    WorkflowStepExecutionStatus.TIMED_OUT,
+                    "工作流执行超时"
+            ));
+        }
+        return new WorkflowExecutionResult(false, List.copyOf(timedOutSteps), List.of("工作流执行超时"));
+    }
+
     static WorkflowExecutionResult rejected(List<String> violations) {
         return new WorkflowExecutionResult(false, List.of(), List.copyOf(violations));
     }
@@ -207,5 +302,6 @@ record WorkflowStepExecution(String stepId, WorkflowStepExecutionStatus status, 
 enum WorkflowStepExecutionStatus {
     SUCCEEDED,
     BLOCKED,
-    FAILED
+    FAILED,
+    TIMED_OUT
 }

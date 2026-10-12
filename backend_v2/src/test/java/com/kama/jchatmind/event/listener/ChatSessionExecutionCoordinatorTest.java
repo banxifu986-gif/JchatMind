@@ -18,6 +18,45 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ChatSessionExecutionCoordinatorTest {
 
     @Test
+    void shouldRunReservedSameSessionTasksInReservationOrder() throws Exception {
+        ChatSessionExecutionCoordinator coordinator = new ChatSessionExecutionCoordinator();
+        ChatSessionExecutionCoordinator.ExecutionTicket first = coordinator.reserve("session-1");
+        ChatSessionExecutionCoordinator.ExecutionTicket second = coordinator.reserve("session-1");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        List<String> executionOrder = Collections.synchronizedList(new ArrayList<>());
+
+        try {
+            Future<?> secondTask = executor.submit(() -> coordinator.execute(second, () -> {
+                executionOrder.add("second");
+                secondStarted.countDown();
+            }));
+
+            assertThat(secondStarted.await(300, TimeUnit.MILLISECONDS)).isFalse();
+
+            coordinator.execute(first, () -> executionOrder.add("first"));
+            secondTask.get(1, TimeUnit.SECONDS);
+
+            assertThat(executionOrder).containsExactly("first", "second");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void shouldSkipCancelledReservationAndUnblockFollowingTask() {
+        ChatSessionExecutionCoordinator coordinator = new ChatSessionExecutionCoordinator();
+        ChatSessionExecutionCoordinator.ExecutionTicket rejected = coordinator.reserve("session-1");
+        ChatSessionExecutionCoordinator.ExecutionTicket accepted = coordinator.reserve("session-1");
+        AtomicBoolean acceptedTaskRan = new AtomicBoolean();
+
+        coordinator.cancel(rejected);
+        coordinator.execute(accepted, () -> acceptedTaskRan.set(true));
+
+        assertThat(acceptedTaskRan).isTrue();
+    }
+
+    @Test
     void shouldNotRunSameSessionTasksConcurrently() throws Exception {
         ChatSessionExecutionCoordinator coordinator = new ChatSessionExecutionCoordinator();
         ExecutorService executor = Executors.newFixedThreadPool(2);
