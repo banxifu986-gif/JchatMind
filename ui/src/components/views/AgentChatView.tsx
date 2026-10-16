@@ -22,6 +22,7 @@ import { useAgents } from "../../hooks/useAgents.ts";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
 import { useUser } from "../../hooks/useUser.ts";
 import EmptyAgentChatView from "./agentChatView/EmptyAgentChatView.tsx";
+import { mergeChatHistoryWithLiveMessages } from "../../utils/chatHistory.ts";
 import type { ChatMessageVO, SseMessageType } from "../../types";
 
 interface AgentChatViewProps {
@@ -41,6 +42,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   const streamingSessionIdRef = useRef<string | undefined>(undefined);
   const lastEventIdRef = useRef<number | undefined>(undefined);
   const lastEventSessionIdRef = useRef<string | undefined>(undefined);
+  const historyRecoveryMessagesRef = useRef<ChatMessageVO[] | null>(null);
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
@@ -64,6 +66,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   }, [agentTrace, chatSessionId, sessionTraceCache]);
 
   const addMessage = (message: ChatMessageVO) => {
+    historyRecoveryMessagesRef.current?.push(message);
     if (seenMessageIdsRef.current.has(message.id)) return;
     seenMessageIdsRef.current.add(message.id);
     setMessages((prevMessages) => [...prevMessages, message]);
@@ -101,17 +104,19 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
     });
   }, []);
 
-  const getChatMessages = useCallback(async () => {
+  const getChatMessages = useCallback(async (liveMessagesDuringRecovery?: ChatMessageVO[]) => {
     if (!chatSessionId) {
       return;
     }
     const resp = await getChatMessagesBySessionId(chatSessionId);
-    seenMessageIdsRef.current = new Set(resp.chatMessages.map((m) => m.id));
-    setMessages(resp.chatMessages);
-
     const sessionResp = await getChatSession(chatSessionId);
+    const sessionMessages = liveMessagesDuringRecovery
+      ? mergeChatHistoryWithLiveMessages(resp.chatMessages, liveMessagesDuringRecovery)
+      : resp.chatMessages;
+    seenMessageIdsRef.current = new Set(sessionMessages.map((message) => message.id));
+    setMessages(sessionMessages);
     setAgentId(sessionResp.chatSession.agentId);
-    return resp.chatMessages;
+    return sessionMessages;
   }, [chatSessionId]);
 
   const refreshPendingApproval = useCallback(async () => {
@@ -327,8 +332,13 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
             setAgentStatusText(message.payload.statusText);
             setAgentStatusType(message.type);
           }, controller.signal, lastEventIdRef.current, (eventId) => {
+            if (eventId !== undefined) {
+              lastEventIdRef.current = eventId;
+            }
+            const recoveryMessages: ChatMessageVO[] = [];
+            historyRecoveryMessagesRef.current = recoveryMessages;
             setStreamingContent("");
-            void getChatMessages().then((sessionMessages) => {
+            void getChatMessages(recoveryMessages).then((sessionMessages) => {
               if (eventId !== undefined
                 && (lastEventIdRef.current === undefined || eventId > lastEventIdRef.current)) {
                 lastEventIdRef.current = eventId;
@@ -342,6 +352,10 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
               }
             }).catch((error: unknown) => {
               console.error("恢复聊天历史失败:", error);
+            }).finally(() => {
+              if (historyRecoveryMessagesRef.current === recoveryMessages) {
+                historyRecoveryMessagesRef.current = null;
+              }
             });
             void refreshPendingApproval();
           });
