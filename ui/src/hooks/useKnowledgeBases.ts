@@ -7,9 +7,16 @@ import {
   getKnowledgeBases,
 } from "../api/api.ts";
 import type { KnowledgeBase } from "../types";
+import { useUser } from "./useUser.ts";
 
 export function useKnowledgeBases() {
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const { isLogin, user } = useUser();
+  const [knowledgeBaseState, setKnowledgeBaseState] = useState<{
+    userId: number | null;
+    knowledgeBases: KnowledgeBase[];
+  }>({ userId: null, knowledgeBases: [] });
+  const knowledgeBases = isLogin && knowledgeBaseState.userId === user?.userId
+    ? knowledgeBaseState.knowledgeBases : [];
 
   const refreshKnowledgeBases = useCallback(async () => {
     const resp = await getKnowledgeBases();
@@ -19,20 +26,26 @@ export function useKnowledgeBases() {
       name: kb.name,
       description: kb.description || "",
     }));
-    setKnowledgeBases(converted);
-  }, []);
+    setKnowledgeBaseState({ userId: user?.userId ?? null, knowledgeBases: converted });
+  }, [user?.userId]);
 
   useEffect(() => {
+    if (!isLogin) {
+      return;
+    }
+    let active = true;
     void getKnowledgeBases().then((resp) => {
+      if (!active) return;
       // 将 KnowledgeBaseVO 转换为 KnowledgeBase 类型
       const converted = resp.knowledgeBases.map((kb) => ({
         knowledgeBaseId: kb.id,
         name: kb.name,
         description: kb.description || "",
       }));
-      setKnowledgeBases(converted);
+      setKnowledgeBaseState({ userId: user?.userId ?? null, knowledgeBases: converted });
     });
-  }, []);
+    return () => { active = false; };
+  }, [isLogin, user?.userId]);
 
   async function createKnowledgeBaseHandle(
     request: CreateKnowledgeBaseRequest,

@@ -8,20 +8,26 @@ import { useUser } from "../hooks/useUser.ts";
 import type { ChatSessionVO } from "../api/api.ts";
 
 export function ChatSessionsProvider({ children }: { children: React.ReactNode }) {
-  const [chatSessions, setChatSessions] = useState<ChatSessionVO[]>([]);
+  const [sessionState, setSessionState] = useState<{
+    userId: number | null;
+    sessions: ChatSessionVO[];
+  }>({ userId: null, sessions: [] });
   const [loading, setLoading] = useState(false);
-  const { isLogin } = useUser();
+  const { isLogin, user } = useUser();
+  const userId = user?.userId ?? null;
+  const chatSessions = isLogin && sessionState.userId === userId
+    ? sessionState.sessions : [];
 
   const fetchChatSessions = useCallback(async () => {
-    if (!isLogin) return;
+    if (!isLogin || userId === null) return;
     setLoading(true);
     try {
       const resp = await getChatSessions();
-      setChatSessions(resp.chatSessions);
+      setSessionState({ userId, sessions: resp.chatSessions });
     } finally {
       setLoading(false);
     }
-  }, [isLogin]);
+  }, [isLogin, userId]);
 
   useEffect(() => {
     fetchChatSessions();
@@ -36,7 +42,7 @@ export function ChatSessionsProvider({ children }: { children: React.ReactNode }
     <ChatSessionsContext.Provider
       value={{
         chatSessions,
-        loading,
+        loading: isLogin && loading,
         refreshChatSessions: fetchChatSessions,
         deleteChatSession: deleteChatSessionHandle,
       }}
