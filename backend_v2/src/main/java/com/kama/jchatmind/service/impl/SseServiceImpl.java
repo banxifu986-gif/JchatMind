@@ -128,7 +128,14 @@ public class SseServiceImpl implements SseService {
     }
 
     private void applyEvent(SessionState state, RedisChatSseEventStore.Event event, boolean broadcast) {
-        if (event.sequence() <= state.latestSequence) {
+        if (event.sequence() < state.latestSequence) {
+            RedisChatSseEventStore.Snapshot snapshot = eventStore.readSnapshot(event.sessionId());
+            if (snapshot.latestSequence() < state.latestSequence) {
+                reconcileSnapshot(state, event.sessionId(), snapshot, broadcast);
+            }
+            return;
+        }
+        if (event.sequence() == state.latestSequence) {
             return;
         }
         if (event.sequence() > state.latestSequence + 1) {
@@ -152,6 +159,21 @@ public class SseServiceImpl implements SseService {
             RedisChatSseEventStore.Snapshot snapshot,
             boolean broadcast
     ) {
+        if (snapshot.latestSequence() < state.latestSequence) {
+            if (broadcast && !state.clients.isEmpty()) {
+                for (SseEmitter emitter : new ArrayList<>(state.clients)) {
+                    if (!sendReplayGap(chatSessionId, emitter, snapshot.latestSequence())) {
+                        state.clients.remove(emitter);
+                    }
+                }
+            }
+            state.history.clear();
+            for (RedisChatSseEventStore.Event event : snapshot.events()) {
+                appendHistory(state, toReplayEvent(event));
+            }
+            state.latestSequence = snapshot.latestSequence();
+            return;
+        }
         if (snapshot.latestSequence() <= state.latestSequence) {
             return;
         }
