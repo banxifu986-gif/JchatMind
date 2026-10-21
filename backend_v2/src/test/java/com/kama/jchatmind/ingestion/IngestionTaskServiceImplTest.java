@@ -14,10 +14,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
@@ -25,6 +27,41 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class IngestionTaskServiceImplTest {
+
+    @Test
+    void shouldCreateWebhookOutboxEventInsideSuccessfulTerminalTransition() throws Exception {
+        IngestionTaskMapper taskMapper = mock(IngestionTaskMapper.class);
+        IngestionTask task = IngestionTask.builder()
+                .id("00000000-0000-0000-0000-000000000001")
+                .ownerId(7L)
+                .kbId("00000000-0000-0000-0000-000000000002")
+                .documentId("00000000-0000-0000-0000-000000000003")
+                .idempotencyKey("webhook:event-hash")
+                .status("RUNNING")
+                .attemptCount(1)
+                .maxAttempts(3)
+                .build();
+        when(taskMapper.updateStatusIfCurrent(
+                task.getId(), "RUNNING", "SUCCEEDED", 1, null
+        )).thenReturn(1);
+        ServiceFixture fixture = service(
+                taskMapper,
+                mock(DocumentMapper.class),
+                mock(KnowledgeBaseAccessService.class)
+        );
+
+        fixture.service().getClass().getMethod("completeClaimedTask", IngestionTask.class)
+                .invoke(fixture.service(), task);
+
+        verify(taskMapper).insertWebhookDeliveryEvent(
+                eq(task.getId()),
+                eq("INGESTION_SUCCEEDED"),
+                any(UUID.class),
+                any(String.class),
+                any(String.class)
+        );
+        assertThat(task.getStatus()).isEqualTo("SUCCEEDED");
+    }
 
     @Test
     void shouldCreateQueuedTaskForOwnedKnowledgeBaseAndDocument() {
@@ -50,6 +87,33 @@ class IngestionTaskServiceImplTest {
                     assertThat(invocation.getMethod().getName()).isEqualTo("publish");
                     assertThat(invocation.getArguments()).containsExactly(task.getId());
                 });
+    }
+
+    @Test
+    void shouldSubmitWebhookTaskForConfiguredOwnerWithoutRequestLoginContext() {
+        IngestionTaskMapper taskMapper = mock(IngestionTaskMapper.class);
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
+        when(knowledgeBaseAccessService.requireAccessibleKnowledgeBase("kb-1", "7"))
+                .thenReturn(KnowledgeBase.builder().id("kb-1").ownerId("7").build());
+        when(documentMapper.selectById("doc-1"))
+                .thenReturn(Document.builder().id("doc-1").kbId("kb-1").build());
+        when(taskMapper.insert(any(IngestionTask.class))).thenReturn(1);
+        ServiceFixture fixture = service(taskMapper, documentMapper, knowledgeBaseAccessService, null);
+
+        IngestionTask task = submitForOwner(
+                fixture.service(),
+                7L,
+                "kb-1",
+                "doc-1",
+                "webhook-event-key"
+        );
+
+        assertThat(task.getOwnerId()).isEqualTo(7L);
+        assertThat(task.getKbId()).isEqualTo("kb-1");
+        assertThat(task.getDocumentId()).isEqualTo("doc-1");
+        verify(knowledgeBaseAccessService).requireAccessibleKnowledgeBase("kb-1", "7");
+        verify(taskMapper).insert(task);
     }
 
     @Test
@@ -241,11 +305,20 @@ class IngestionTaskServiceImplTest {
             DocumentMapper documentMapper,
             KnowledgeBaseAccessService knowledgeBaseAccessService
     ) {
+        return service(taskMapper, documentMapper, knowledgeBaseAccessService, 7L);
+    }
+
+    private ServiceFixture service(
+            IngestionTaskMapper taskMapper,
+            DocumentMapper documentMapper,
+            KnowledgeBaseAccessService knowledgeBaseAccessService,
+            Long userId
+    ) {
         try {
             Class<?> publisherType = Class.forName("com.kama.jchatmind.ingestion.IngestionTaskPublisher");
             Class<?> serviceType = Class.forName("com.kama.jchatmind.service.impl.IngestionTaskServiceImpl");
             RequestScopeData requestScopeData = new RequestScopeData();
-            requestScopeData.setUserId(7L);
+            requestScopeData.setUserId(userId);
             Object publisher = mock(publisherType);
             Object service = serviceType.getConstructor(
                     IngestionTaskMapper.class,
@@ -265,6 +338,28 @@ class IngestionTaskServiceImplTest {
             return new ServiceFixture(service, publisher);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("G1 摄入任务服务尚未实现", e);
+        }
+    }
+
+    private IngestionTask submitForOwner(
+            Object service,
+            Long ownerId,
+            String kbId,
+            String documentId,
+            String idempotencyKey
+    ) {
+        try {
+            Method submit = service.getClass().getMethod(
+                    "submitDocumentIngestionForOwner", Long.class, String.class, String.class, String.class
+            );
+            return (IngestionTask) submit.invoke(service, ownerId, kbId, documentId, idempotencyKey);
+        } catch (InvocationTargetException e) {
+            if (e.getCause() instanceof RuntimeException exception) {
+                throw exception;
+            }
+            throw new AssertionError(e.getCause());
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Webhook 摄入任务提交入口尚未实现", e);
         }
     }
 

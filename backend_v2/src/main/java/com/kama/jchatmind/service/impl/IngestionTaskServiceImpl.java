@@ -9,6 +9,7 @@ import com.kama.jchatmind.mapper.IngestionTaskMapper;
 import com.kama.jchatmind.model.entity.Document;
 import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
+import com.kama.jchatmind.webhook.WebhookDeliveryEventPayloadFactory;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +36,17 @@ public class IngestionTaskServiceImpl {
 
     @Transactional
     public IngestionTask submitDocumentIngestion(String kbId, String documentId, String idempotencyKey) {
-        Long ownerId = requireUserId();
+        return submitDocumentIngestionForOwner(requireUserId(), kbId, documentId, idempotencyKey);
+    }
+
+    @Transactional
+    public IngestionTask submitDocumentIngestionForOwner(
+            Long ownerId,
+            String kbId,
+            String documentId,
+            String idempotencyKey
+    ) {
+        requireOwnerId(ownerId);
         requireText(kbId, "知识库不能为空");
         requireText(documentId, "文档不能为空");
         requireText(idempotencyKey, "幂等键不能为空");
@@ -240,7 +251,31 @@ public class IngestionTaskServiceImpl {
         task.setStatus(nextStatus.name());
         task.setAttemptCount(nextAttemptCount);
         task.setErrorSummary(errorSummary);
+        enqueueWebhookDeliveryEvent(task, nextStatus);
         return true;
+    }
+
+    private void enqueueWebhookDeliveryEvent(
+            IngestionTask task,
+            IngestionTaskStateMachine.Status status
+    ) {
+        String eventType = switch (status) {
+            case SUCCEEDED -> "INGESTION_SUCCEEDED";
+            case FAILED, DEAD_LETTER -> "INGESTION_FAILED";
+            default -> null;
+        };
+        if (eventType == null) {
+            return;
+        }
+        WebhookDeliveryEventPayloadFactory.Payload payload =
+                WebhookDeliveryEventPayloadFactory.create(task, eventType);
+        ingestionTaskMapper.insertWebhookDeliveryEvent(
+                task.getId(),
+                eventType,
+                payload.callbackEventId(),
+                payload.json(),
+                payload.sha256()
+        );
     }
 
     private void publishAfterCommit(String taskId) {
@@ -270,6 +305,12 @@ public class IngestionTaskServiceImpl {
             throw new BizException("用户未登录");
         }
         return userId;
+    }
+
+    private void requireOwnerId(Long ownerId) {
+        if (ownerId == null || ownerId <= 0) {
+            throw new BizException("无权访问知识库");
+        }
     }
 
     private void requireText(String value, String message) {

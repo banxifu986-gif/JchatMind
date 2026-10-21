@@ -1,16 +1,10 @@
 package com.kama.jchatmind.webhook;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -18,7 +12,6 @@ public class InboundWebhookVerifier {
 
     private static final Duration MAX_TIMESTAMP_OFFSET = Duration.ofMinutes(5);
     private static final Duration EVENT_ID_RETENTION_GRACE = Duration.ofSeconds(1);
-    private static final byte SIGNATURE_SCHEMA_VERSION = 1;
 
     private final Clock clock;
     private final WebhookEventIdRegistry eventIdRegistry;
@@ -29,6 +22,17 @@ public class InboundWebhookVerifier {
     }
 
     public WebhookVerificationResult verify(InboundWebhookEvent event, WebhookSource source) {
+        WebhookVerificationResult result = verifySignature(event, source);
+        if (result.status() != WebhookVerificationStatus.ACCEPTED) {
+            return result;
+        }
+        if (!reserveVerifiedEventId(event)) {
+            return WebhookVerificationResult.rejected(WebhookVerificationStatus.DUPLICATE_EVENT);
+        }
+        return result;
+    }
+
+    WebhookVerificationResult verifySignature(InboundWebhookEvent event, WebhookSource source) {
         if (event == null || source == null) {
             return WebhookVerificationResult.rejected(WebhookVerificationStatus.INVALID_REQUEST);
         }
@@ -54,53 +58,41 @@ public class InboundWebhookVerifier {
         if (!hasValidSignature(event, signingKey)) {
             return WebhookVerificationResult.rejected(WebhookVerificationStatus.INVALID_SIGNATURE);
         }
-        Duration retention = Duration.between(now, event.timestamp().plus(MAX_TIMESTAMP_OFFSET))
-                .plus(EVENT_ID_RETENTION_GRACE);
-        if (!eventIdRegistry.reserve(event.sourceId(), event.eventId(), retention)) {
-            return WebhookVerificationResult.rejected(WebhookVerificationStatus.DUPLICATE_EVENT);
-        }
         return WebhookVerificationResult.accepted();
     }
 
+    boolean reserveVerifiedEventId(InboundWebhookEvent event) {
+        if (event == null
+                || !hasText(event.sourceId())
+                || !hasText(event.eventId())
+                || event.timestamp() == null
+                || event.timestamp().getNano() != 0) {
+            return false;
+        }
+        Instant now = Instant.now(clock);
+        Duration retention = Duration.between(now, event.timestamp().plus(MAX_TIMESTAMP_OFFSET))
+                .plus(EVENT_ID_RETENTION_GRACE);
+        if (retention.isNegative() || retention.isZero()) {
+            return true;
+        }
+        if (!eventIdRegistry.reserve(event.sourceId(), event.eventId(), retention)) {
+            return false;
+        }
+        return true;
+    }
+
     private boolean hasValidSignature(InboundWebhookEvent event, byte[] signingKey) {
-        byte[] signatureInput = signatureInput(event);
-        String expectedSignature = calculateSignature(signatureInput, signingKey);
+        String expectedSignature = WebhookSignature.sign(
+                event.sourceId(),
+                event.eventId(),
+                event.timestamp(),
+                event.payload(),
+                signingKey
+        );
         return MessageDigest.isEqual(
                 expectedSignature.getBytes(StandardCharsets.US_ASCII),
                 event.signature().getBytes(StandardCharsets.US_ASCII)
         );
-    }
-
-    private byte[] signatureInput(InboundWebhookEvent event) {
-        byte[] sourceId = event.sourceId().getBytes(StandardCharsets.UTF_8);
-        byte[] eventId = event.eventId().getBytes(StandardCharsets.UTF_8);
-        byte[] payload = event.payload().getBytes(StandardCharsets.UTF_8);
-        ByteBuffer buffer = ByteBuffer.allocate(
-                        Byte.BYTES + Integer.BYTES + sourceId.length + Integer.BYTES + eventId.length
-                                + Long.BYTES + Integer.BYTES + payload.length
-                )
-                .order(ByteOrder.BIG_ENDIAN);
-        buffer.put(SIGNATURE_SCHEMA_VERSION);
-        putLengthPrefixedText(buffer, sourceId);
-        putLengthPrefixedText(buffer, eventId);
-        buffer.putLong(event.timestamp().getEpochSecond());
-        putLengthPrefixedText(buffer, payload);
-        return buffer.array();
-    }
-
-    private void putLengthPrefixedText(ByteBuffer buffer, byte[] value) {
-        buffer.putInt(value.length);
-        buffer.put(value);
-    }
-
-    private String calculateSignature(byte[] signatureInput, byte[] signingKey) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(signingKey, "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(signatureInput));
-        } catch (GeneralSecurityException exception) {
-            throw new IllegalStateException("无法初始化 Webhook 签名验证器", exception);
-        }
     }
 
     private boolean hasText(String value) {

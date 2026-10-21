@@ -36,6 +36,10 @@ public class RedisWebhookEventIdRegistry implements WebhookEventIdRegistry {
     }
 
     private String redisKey(String sourceId, String eventId) {
+        return KEY_PREFIX + eventIdentityHash(sourceId, eventId) + KEY_SUFFIX;
+    }
+
+    static String eventIdentityHash(String sourceId, String eventId) {
         byte[] source = sourceId.getBytes(StandardCharsets.UTF_8);
         byte[] event = eventId.getBytes(StandardCharsets.UTF_8);
         ByteBuffer keyMaterial = ByteBuffer.allocate(Integer.BYTES + source.length + Integer.BYTES + event.length)
@@ -45,8 +49,7 @@ public class RedisWebhookEventIdRegistry implements WebhookEventIdRegistry {
         keyMaterial.putInt(event.length);
         keyMaterial.put(event);
         try {
-            String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(keyMaterial.array()));
-            return KEY_PREFIX + hash + KEY_SUFFIX;
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(keyMaterial.array()));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("Unable to create webhook event key", exception);
         }

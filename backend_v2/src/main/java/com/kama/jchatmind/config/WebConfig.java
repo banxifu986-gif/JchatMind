@@ -21,6 +21,7 @@ public class WebConfig implements WebMvcConfigurer {
                     "/api/users/register",
                     "/api/users",
                     "/api/email/verify-code",
+                    "/api/webhooks/inbound/**",
                     "/health",
                     "/error"
                 );

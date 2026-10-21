@@ -72,4 +72,20 @@
         WHERE task_id = CAST(#{taskId} AS uuid)
           AND status = #{currentStatus}
     </update>
+    <insert id="insertWebhookDeliveryEvent">
+        INSERT INTO webhook_delivery_outbox (
+            outbox_id, callback_event_id, source_id, event_type, aggregate_id,
+            event_payload, payload_sha256
+        )
+        SELECT CAST(#{callbackEventId} AS UUID),
+               CAST(#{callbackEventId} AS UUID),
+               source_id,
+               #{eventType},
+               CAST(#{taskId} AS UUID),
+               #{eventPayload},
+               #{payloadSha256}
+        FROM webhook_inbox_event
+        WHERE task_id = CAST(#{taskId} AS UUID)
+        ON CONFLICT (source_id, aggregate_id, event_type) DO NOTHING
+    </insert>
 </mapper>
