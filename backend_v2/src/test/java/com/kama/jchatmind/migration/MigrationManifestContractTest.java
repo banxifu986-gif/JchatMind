@@ -35,7 +35,9 @@ class MigrationManifestContractTest {
             "sql/ingestion/2026-08-22-create-document-asset.sql",
             "sql/knowledge-base/2026-08-22-add-vchord-bm25-index.sql",
             "sql/mcp/2026-08-18-create-mcp-principal-access.sql",
-            "sql/knowledge-base/2026-08-25-create-knowledge-base-deletion-task.sql"
+            "sql/knowledge-base/2026-08-25-create-knowledge-base-deletion-task.sql",
+            "sql/workflow/2026-10-21-create-workflow-execution-audit.sql",
+            "sql/webhook/2026-10-21-create-webhook-delivery-outbox.sql"
     );
 
     @Test

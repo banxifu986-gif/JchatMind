@@ -1,8 +1,8 @@
 {
   "manifestVersion": "1",
-  "schemaVersion": "2026-08-30",
+  "schemaVersion": "2026-10-21-g4",
   "catalogContract": "sql/migrations/catalog-contract.json",
-  "catalogContractSha256": "fc227ffd8cb84d5e55abe93389f684282eb2bc92d47a4feedb7b9bff5f0055a4",
+  "catalogContractSha256": "3bc4c6d5fb97862d1993be15fa55cfe5503f2d36052d2db0cbaf032f00a17443",
   "baseline": {
     "required": true,
     "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",
@@ -141,6 +141,22 @@
       "sha256": "dc6565590d0999efd7400275a0f00e009a38bea95c1059bf8395bd2fe4202072",
       "transactional": true,
       "requires": ["auth.create-user-table", "ingestion.create-task"]
+    },
+    {
+      "order": 170,
+      "id": "workflow.create-execution-audit",
+      "path": "sql/workflow/2026-10-21-create-workflow-execution-audit.sql",
+      "sha256": "21d3641e6c665c15a18f93c79032c62b9b9e2b33e56f8f20d76763cda7e882a3",
+      "transactional": true,
+      "requires": ["auth.create-user-table"]
+    },
+    {
+      "order": 180,
+      "id": "webhook.create-delivery-outbox",
+      "path": "sql/webhook/2026-10-21-create-webhook-delivery-outbox.sql",
+      "sha256": "dd4158bcf1a87dc00080d687724509afbd7d0d16dd7a6ab6ca83fdebc194ba2d",
+      "transactional": true,
+      "requires": ["ingestion.create-task"]
     }
   ]
 }

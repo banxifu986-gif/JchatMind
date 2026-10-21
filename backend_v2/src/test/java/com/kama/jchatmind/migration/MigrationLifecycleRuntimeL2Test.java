@@ -90,8 +90,8 @@ class MigrationLifecycleRuntimeL2Test {
                     Map.entry("executionMode", "isolated_postgresql_runtime"),
                     Map.entry("testClass", MigrationLifecycleRuntimeL2Test.class.getName()),
                     Map.entry("manifestPath", "sql/migrations/manifest.json"),
-                    Map.entry("schemaVersion", "2026-08-30"),
-                    Map.entry("migrationCount", 16),
+                    Map.entry("schemaVersion", "2026-10-21-g4"),
+                    Map.entry("migrationCount", 18),
                     Map.entry("containerImage", IMAGE),
                     Map.entry("containerName", CONTAINER),
                     Map.entry("result", executionResult),
@@ -137,8 +137,8 @@ class MigrationLifecycleRuntimeL2Test {
 
             assertThat(release.status()).isEqualTo(SchemaMigrationReleaseEntry.ReleaseStatus.SUCCEEDED);
             assertThat(result.cleanInstall()).isTrue();
-            assertThat(result.schemaVersion()).isEqualTo("2026-08-30");
-            assertThat(result.appliedMigrationIds()).hasSize(16);
+            assertThat(result.schemaVersion()).isEqualTo("2026-10-21-g4");
+            assertThat(result.appliedMigrationIds()).hasSize(18);
             assertThat(catalog.verified())
                     .withFailMessage("迁移后 catalog 对账失败: missing=%s, forbidden=%s",
                             catalog.missingObjects(), catalog.forbiddenObjects())
@@ -146,10 +146,10 @@ class MigrationLifecycleRuntimeL2Test {
             catalogVerified = true;
             catalogFingerprint = catalog.observedFingerprint();
             assertThat(queryForLong(dataSource,
-                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(17);
+                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(19);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger WHERE status = 'APPLIED'"))
-                    .isEqualTo(17);
+                    .isEqualTo(19);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM pg_catalog.pg_constraint "
                             + "WHERE conrelid = 'public.jchatmind_schema_migration_ledger'::regclass "
@@ -224,11 +224,11 @@ class MigrationLifecycleRuntimeL2Test {
             assertThat(prefix.cleanInstall()).isTrue();
             assertThat(prefix.appliedMigrationIds()).hasSize(8);
             assertThat(upgrade.cleanInstall()).isFalse();
-            assertThat(upgrade.appliedMigrationIds()).hasSize(8);
+            assertThat(upgrade.appliedMigrationIds()).hasSize(10);
             assertThat(replay.appliedMigrationIds()).isEmpty();
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger"))
-                    .isEqualTo(17);
+                    .isEqualTo(19);
             executionResult = "passed";
         } finally {
             dropDatabase(database);
