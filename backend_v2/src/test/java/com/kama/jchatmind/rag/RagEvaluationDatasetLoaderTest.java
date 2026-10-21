@@ -43,6 +43,32 @@ class RagEvaluationDatasetLoaderTest {
     }
 
     @Test
+    void rejectsFrozenManifestMissingRequiredMetadata() {
+        String caseSha256 = "a".repeat(64);
+        List<RagEvaluationDatasetManifest> invalidManifests = List.of(
+                new RagEvaluationDatasetManifest(null, "1", "cases.jsonl", caseSha256,
+                        List.of("corpus.md"), caseSha256, "chunk-v1", "embed-v1", "input-v1", 10, "frozen"),
+                new RagEvaluationDatasetManifest("fixture-fast-v1", "2", "cases.jsonl", caseSha256,
+                        List.of("corpus.md"), caseSha256, "chunk-v1", "embed-v1", "input-v1", 10, "frozen"),
+                new RagEvaluationDatasetManifest("fixture-fast-v1", "1", null, caseSha256,
+                        List.of("corpus.md"), caseSha256, "chunk-v1", "embed-v1", "input-v1", 10, "frozen"),
+                new RagEvaluationDatasetManifest("fixture-fast-v1", "1", "cases.jsonl", null,
+                        List.of("corpus.md"), caseSha256, "chunk-v1", "embed-v1", "input-v1", 10, "frozen"),
+                new RagEvaluationDatasetManifest("fixture-fast-v1", "1", "cases.jsonl", caseSha256,
+                        List.of("corpus.md"), caseSha256, "chunk-v1", "embed-v1", "input-v1", 0, "frozen"),
+                new RagEvaluationDatasetManifest("fixture-fast-v1", "1", "cases.jsonl", caseSha256,
+                        List.of("corpus.md"), caseSha256, "chunk-v1", "embed-v1", "input-v1", 10, "candidate")
+        );
+
+        for (RagEvaluationDatasetManifest manifest : invalidManifests) {
+            assertThrows(IllegalStateException.class, () -> RagEvaluationDatasetLoader.validateManifest(
+                    manifest,
+                    "synthetic-manifest.json"
+            ));
+        }
+    }
+
+    @Test
     void rejectsInvalidFrozenCasesBeforeTheyEnterRegressionDataset() {
         RagEvaluationCase abstentionCaseWithGold = new RagEvaluationCase(
                 "invalid-1", "fixture-fast-v1", "无答案", "no_answer", "easy", List.of(),

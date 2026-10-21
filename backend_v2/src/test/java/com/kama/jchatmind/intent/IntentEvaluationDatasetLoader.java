@@ -123,7 +123,7 @@ final class IntentEvaluationDatasetLoader {
         return cases;
     }
 
-    private static void validateManifest(IntentEvaluationDatasetManifest manifest, String manifestPath) {
+    static void validateManifest(IntentEvaluationDatasetManifest manifest, String manifestPath) {
         if (manifest == null || !StringUtils.hasText(manifest.datasetId())
                 || manifest.caseSha256() == null || !manifest.caseSha256().matches("[0-9a-f]{64}")) {
             throw new IllegalStateException("intent 评测 manifest missing required fields: " + manifestPath);

@@ -58,7 +58,7 @@ final class RagEvaluationDatasetLoader {
         return cases;
     }
 
-    private static void validateManifest(RagEvaluationDatasetManifest manifest, String manifestPath) {
+    static void validateManifest(RagEvaluationDatasetManifest manifest, String manifestPath) {
         if (!StringUtils.hasText(manifest.datasetId()) || !"1".equals(manifest.schemaVersion())
                 || !"frozen".equals(manifest.status()) || !StringUtils.hasText(manifest.caseFile())
                 || !StringUtils.hasText(manifest.caseSha256()) || manifest.defaultTopK() <= 0) {

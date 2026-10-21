@@ -27,6 +27,26 @@ class IntentEvaluationDatasetLoaderTest {
     }
 
     @Test
+    void shouldRejectFrozenManifestMissingRequiredFields() {
+        List<IntentEvaluationDatasetManifest> invalidManifests = List.of(
+                new IntentEvaluationDatasetManifest(null, "1", "cases.jsonl", "a".repeat(64), "frozen",
+                        true, null, null, null, null),
+                new IntentEvaluationDatasetManifest("intent-fixture-fast-v1", "2", "cases.jsonl",
+                        "a".repeat(64), "frozen", true, null, null, null, null),
+                new IntentEvaluationDatasetManifest("intent-fixture-fast-v1", "1", null, "a".repeat(64),
+                        "frozen", true, null, null, null, null),
+                new IntentEvaluationDatasetManifest("intent-fixture-fast-v1", "1", "cases.jsonl", null,
+                        "frozen", true, null, null, null, null),
+                new IntentEvaluationDatasetManifest("intent-fixture-fast-v1", "1", "cases.jsonl",
+                        "a".repeat(64), "candidate", true, null, null, null, null)
+        );
+
+        invalidManifests.forEach(manifest -> assertThatThrownBy(
+                () -> IntentEvaluationDatasetLoader.validateManifest(manifest, "synthetic-manifest.json")
+        ).isInstanceOf(IllegalStateException.class));
+    }
+
+    @Test
     void shouldRejectDuplicateCaseIds() {
         IntentEvaluationCase item = new IntentEvaluationCase(
                 "duplicate-1",
