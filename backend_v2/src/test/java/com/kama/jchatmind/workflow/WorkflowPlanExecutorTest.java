@@ -10,7 +10,9 @@ import com.kama.jchatmind.agent.harness.circuit.InMemoryCircuitBreakerRegistry;
 import com.kama.jchatmind.agent.harness.interceptor.AuditTrailInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.CircuitBreakerInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
+import com.kama.jchatmind.webhook.WebhookApprovalOutboxService;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -30,8 +32,60 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class WorkflowPlanExecutorTest {
+
+    @Test
+    void shouldPropagateExplicitWebhookSourceIdIntoHarnessApprovalContext() {
+        HarnessProperties properties = harnessProperties();
+        InMemoryAuditStore auditStore = new InMemoryAuditStore(properties);
+        InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
+        AtomicReference<String> observedSourceId = new AtomicReference<>();
+        HarnessInterceptor sourceCapture = new HarnessInterceptor() {
+            @Override
+            public void beforeExecution(
+                    com.kama.jchatmind.agent.harness.HarnessContext context,
+                    com.kama.jchatmind.agent.harness.HarnessResult result
+            ) {
+                observedSourceId.set(context.getWebhookSourceId());
+            }
+
+            @Override
+            public void afterExecution(com.kama.jchatmind.agent.harness.HarnessContext context, String toolResult) {
+            }
+
+            @Override
+            public void onError(com.kama.jchatmind.agent.harness.HarnessContext context, Exception exception) {
+            }
+
+            @Override
+            public int getOrder() {
+                return 1;
+            }
+        };
+        HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of(sourceCapture));
+        WorkflowPlanExecutor executor = new WorkflowPlanExecutor(
+                new WorkflowPlanVerifier(),
+                new HarnessRunner(properties, chain, approvalStore, auditStore),
+                chain,
+                new ObjectMapper(),
+                Runnable::run
+        );
+
+        WorkflowExecutionResult result = executor.executeForWebhookSource(
+                "7",
+                "agent-1",
+                "session-1",
+                "build-system",
+                new WorkflowPlan(1, 10, List.of(step("step-1", "KnowledgeTool", "fact", "claim"))),
+                List.of("KnowledgeTool"),
+                step -> "evidence"
+        );
+
+        assertThat(result.completed()).isTrue();
+        assertThat(observedSourceId.get()).isEqualTo("build-system");
+    }
 
     @Test
     void shouldExecuteVerifiedPlanStepsInDeclaredOrderThroughHarness() {
@@ -399,7 +453,9 @@ class WorkflowPlanExecutorTest {
         List<com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor> interceptors = new ArrayList<>();
         interceptors.add(new CircuitBreakerInterceptor(properties, circuitRegistry));
         if (approvalEnabled) {
-            interceptors.add(new HumanApprovalInterceptor(properties, approvalStore));
+            interceptors.add(new HumanApprovalInterceptor(
+                    properties, approvalStore, mock(WebhookApprovalOutboxService.class)
+            ));
         }
         interceptors.add(new AuditTrailInterceptor(properties, auditStore));
         HarnessInterceptorChain interceptorChain = new HarnessInterceptorChain(interceptors);

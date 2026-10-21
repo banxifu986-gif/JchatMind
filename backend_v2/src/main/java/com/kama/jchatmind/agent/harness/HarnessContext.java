@@ -13,6 +13,7 @@ public class HarnessContext {
     private String sessionId;
     private String agentId;
     private String userId;
+    private String webhookSourceId;
     private String toolCallId;
     private String toolName;
     private String toolInput;

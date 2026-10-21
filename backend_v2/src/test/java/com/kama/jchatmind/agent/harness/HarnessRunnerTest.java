@@ -9,6 +9,7 @@ import com.kama.jchatmind.agent.harness.interceptor.CircuitBreakerInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
 import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
+import com.kama.jchatmind.webhook.WebhookApprovalOutboxService;
 import com.kama.jchatmind.intent.BusinessIntent;
 import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import com.kama.jchatmind.intent.IntentRouter;
@@ -21,6 +22,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class HarnessRunnerTest {
 
@@ -54,7 +56,7 @@ class HarnessRunnerTest {
 
         HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of(
                 new CircuitBreakerInterceptor(properties, circuitRegistry),
-                new HumanApprovalInterceptor(properties, approvalStore),
+                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
                 new AuditTrailInterceptor(properties, auditStore)
         ));
         HarnessRunner runner = new HarnessRunner(properties, chain, approvalStore, auditStore);
@@ -208,7 +210,7 @@ class HarnessRunnerTest {
         InMemoryCircuitBreakerRegistry circuitRegistry = new InMemoryCircuitBreakerRegistry(properties);
         List<HarnessInterceptor> interceptors = List.of(
                 new CircuitBreakerInterceptor(properties, circuitRegistry),
-                new HumanApprovalInterceptor(properties, approvalStore),
+                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
                 new AuditTrailInterceptor(properties, auditStore)
         );
         HarnessInterceptorChain chain = new HarnessInterceptorChain(interceptors);

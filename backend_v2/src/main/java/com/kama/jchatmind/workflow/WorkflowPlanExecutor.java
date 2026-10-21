@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
@@ -63,6 +64,46 @@ public class WorkflowPlanExecutor {
             List<String> allowedTools,
             WorkflowToolExecutor workflowToolExecutor
     ) {
+        return executeInternal(
+                userId,
+                agentId,
+                sessionId,
+                null,
+                plan,
+                allowedTools,
+                workflowToolExecutor
+        );
+    }
+
+    public WorkflowExecutionResult executeForWebhookSource(
+            String userId,
+            String agentId,
+            String sessionId,
+            String webhookSourceId,
+            WorkflowPlan plan,
+            List<String> allowedTools,
+            WorkflowToolExecutor workflowToolExecutor
+    ) {
+        return executeInternal(
+                userId,
+                agentId,
+                sessionId,
+                webhookSourceId,
+                plan,
+                allowedTools,
+                workflowToolExecutor
+        );
+    }
+
+    private WorkflowExecutionResult executeInternal(
+            String userId,
+            String agentId,
+            String sessionId,
+            String webhookSourceId,
+            WorkflowPlan plan,
+            List<String> allowedTools,
+            WorkflowToolExecutor workflowToolExecutor
+    ) {
         WorkflowVerificationResult verification = workflowPlanVerifier.verify(plan, allowedTools);
         if (!verification.accepted()) {
             return WorkflowExecutionResult.rejected(verification.violations());
@@ -74,6 +115,7 @@ public class WorkflowPlanExecutor {
                 userId,
                 agentId,
                 sessionId,
+                webhookSourceId,
                 plan,
                 allowedTools,
                 workflowToolExecutor,
@@ -128,6 +170,7 @@ public class WorkflowPlanExecutor {
             String userId,
             String agentId,
             String sessionId,
+            String webhookSourceId,
             WorkflowPlan plan,
             List<String> allowedTools,
             WorkflowToolExecutor workflowToolExecutor,
@@ -142,8 +185,10 @@ public class WorkflowPlanExecutor {
                     userId,
                     agentId,
                     sessionId,
+                    webhookSourceId,
                     index + 1,
                     step,
+                    allowedTools,
                     workflowToolExecutor
             );
             executions.add(execution);
@@ -159,19 +204,31 @@ public class WorkflowPlanExecutor {
             String userId,
             String agentId,
             String sessionId,
+            String webhookSourceId,
             int stepNumber,
             WorkflowStep step,
+            List<String> allowedTools,
             WorkflowToolExecutor workflowToolExecutor
     ) {
         String toolInput = serializeInput(step);
         String toolCallId = UUID.randomUUID().toString();
-        HarnessResult harnessResult = harnessRunner.beforeExecution(
-                userId,
-                agentId,
-                sessionId,
-                stepNumber,
-                List.of(new AssistantMessage.ToolCall(toolCallId, "function", step.toolName(), toolInput))
-        );
+        HarnessResult harnessResult = webhookSourceId == null
+                ? harnessRunner.beforeExecution(
+                        userId,
+                        agentId,
+                        sessionId,
+                        stepNumber,
+                        List.of(new AssistantMessage.ToolCall(toolCallId, "function", step.toolName(), toolInput))
+                )
+                : harnessRunner.beforeExecutionForWebhookSource(
+                        userId,
+                        agentId,
+                        sessionId,
+                        stepNumber,
+                        List.of(new AssistantMessage.ToolCall(toolCallId, "function", step.toolName(), toolInput)),
+                        Set.copyOf(allowedTools),
+                        webhookSourceId
+                );
         harnessRunner.awaitApprovals(harnessResult);
         HarnessDecision decision = harnessResult.getDecision(toolCallId);
         HarnessContext context = harnessResult.getContext(toolCallId);

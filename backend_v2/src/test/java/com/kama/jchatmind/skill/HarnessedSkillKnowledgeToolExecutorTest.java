@@ -12,6 +12,7 @@ import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
 import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
 import com.kama.jchatmind.agent.tools.KnowledgeTools;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.webhook.WebhookApprovalOutboxService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -72,7 +73,9 @@ class HarnessedSkillKnowledgeToolExecutorTest {
         InMemoryCircuitBreakerRegistry circuitRegistry = new InMemoryCircuitBreakerRegistry(properties);
         HarnessInterceptorChain interceptorChain = new HarnessInterceptorChain(List.of(
                 new CircuitBreakerInterceptor(properties, circuitRegistry),
-                new HumanApprovalInterceptor(properties, approvalStore),
+                new HumanApprovalInterceptor(
+                        properties, approvalStore, mock(WebhookApprovalOutboxService.class)
+                ),
                 new AuditTrailInterceptor(properties, auditStore)
         ));
         HarnessRunner harnessRunner = new HarnessRunner(properties, interceptorChain, approvalStore, auditStore);

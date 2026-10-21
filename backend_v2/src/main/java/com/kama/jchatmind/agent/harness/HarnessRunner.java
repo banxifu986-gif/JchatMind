@@ -87,12 +87,59 @@ public class HarnessRunner {
             Set<String> blockedToolCallIds,
             IntentDecisionMetadata intentDecisionMetadata
     ) {
+        return beforeExecutionInternal(
+                userId,
+                agentId,
+                sessionId,
+                stepNumber,
+                toolCalls,
+                allowedToolNames,
+                blockedToolCallIds,
+                intentDecisionMetadata,
+                null
+        );
+    }
+
+    public HarnessResult beforeExecutionForWebhookSource(
+            String userId,
+            String agentId,
+            String sessionId,
+            int stepNumber,
+            List<AssistantMessage.ToolCall> toolCalls,
+            Set<String> allowedToolNames,
+            String webhookSourceId
+    ) {
+        return beforeExecutionInternal(
+                userId,
+                agentId,
+                sessionId,
+                stepNumber,
+                toolCalls,
+                allowedToolNames,
+                null,
+                null,
+                webhookSourceId
+        );
+    }
+
+    private HarnessResult beforeExecutionInternal(
+            String userId,
+            String agentId,
+            String sessionId,
+            int stepNumber,
+            List<AssistantMessage.ToolCall> toolCalls,
+            Set<String> allowedToolNames,
+            Set<String> blockedToolCallIds,
+            IntentDecisionMetadata intentDecisionMetadata,
+            String webhookSourceId
+    ) {
         HarnessResult result = new HarnessResult();
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             HarnessContext context = HarnessContext.builder()
                     .sessionId(sessionId)
                     .agentId(agentId)
                     .userId(userId)
+                    .webhookSourceId(webhookSourceId)
                     .toolCallId(toolCall.id())
                     .toolName(toolCall.name())
                     .toolInput(toolCall.arguments())

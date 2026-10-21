@@ -7,6 +7,7 @@ import com.kama.jchatmind.agent.harness.HarnessProperties;
 import com.kama.jchatmind.agent.harness.HarnessResult;
 import com.kama.jchatmind.agent.harness.approval.ApprovalRequest;
 import com.kama.jchatmind.agent.harness.approval.ApprovalStore;
+import com.kama.jchatmind.webhook.WebhookApprovalOutboxService;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -18,10 +19,16 @@ public class HumanApprovalInterceptor implements HarnessInterceptor {
 
     private final HarnessProperties harnessProperties;
     private final ApprovalStore approvalStore;
+    private final WebhookApprovalOutboxService webhookApprovalOutboxService;
 
-    public HumanApprovalInterceptor(HarnessProperties harnessProperties, ApprovalStore approvalStore) {
+    public HumanApprovalInterceptor(
+            HarnessProperties harnessProperties,
+            ApprovalStore approvalStore,
+            WebhookApprovalOutboxService webhookApprovalOutboxService
+    ) {
         this.harnessProperties = harnessProperties;
         this.approvalStore = approvalStore;
+        this.webhookApprovalOutboxService = webhookApprovalOutboxService;
     }
 
     @Override
@@ -63,6 +70,14 @@ public class HumanApprovalInterceptor implements HarnessInterceptor {
                 groupedContexts.size(),
                 harnessProperties.getHumanApproval().getTimeoutSeconds()
         );
+        if (context.getWebhookSourceId() != null) {
+            webhookApprovalOutboxService.enqueue(
+                    context.getWebhookSourceId(),
+                    Long.valueOf(context.getUserId()),
+                    request.getId(),
+                    context.getSessionId()
+            );
+        }
         context.getAttributes().put(HarnessConstants.ATTRIBUTE_APPROVAL_REQUEST_ID, request.getId());
         for (HarnessContext groupedContext : groupedContexts) {
             groupedContext.getAttributes().put(HarnessConstants.ATTRIBUTE_APPROVAL_REQUEST_ID, request.getId());
