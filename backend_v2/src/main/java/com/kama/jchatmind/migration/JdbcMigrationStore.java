@@ -340,7 +340,8 @@ public final class JdbcMigrationStore implements SchemaMigrationExecutor.Migrati
 
     private void markApplied(String id) {
         String sql = "UPDATE " + LEDGER_TABLE_REFERENCE
-                + " SET status = 'APPLIED', completed_at = CURRENT_TIMESTAMP WHERE migration_id = ?";
+                + " SET status = 'APPLIED', completed_at = GREATEST(CURRENT_TIMESTAMP, started_at) "
+                + "WHERE migration_id = ?";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             connection.setAutoCommit(false);

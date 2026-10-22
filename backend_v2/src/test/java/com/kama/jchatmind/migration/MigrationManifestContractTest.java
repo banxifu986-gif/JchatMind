@@ -37,7 +37,11 @@ class MigrationManifestContractTest {
             "sql/mcp/2026-08-18-create-mcp-principal-access.sql",
             "sql/knowledge-base/2026-08-25-create-knowledge-base-deletion-task.sql",
             "sql/workflow/2026-10-21-create-workflow-execution-audit.sql",
-            "sql/webhook/2026-10-21-create-webhook-delivery-outbox.sql"
+            "sql/webhook/2026-10-21-create-webhook-delivery-outbox.sql",
+            "sql/knowledge-base/2026-10-21-create-rag-index-revision.sql",
+            "sql/chat/2026-10-21-create-agent-execution-queue.sql",
+            "sql/skill/2026-10-22-create-builtin-skill-task.sql",
+            "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql"
     );
 
     @Test
@@ -93,6 +97,93 @@ class MigrationManifestContractTest {
         assertThat(Files.exists(Path.of("..", catalogContract))).isTrue();
         assertThat(root.path("catalogContractSha256").asText())
                 .isEqualTo(sha256(Path.of("..", catalogContract)));
+    }
+
+    @Test
+    void shouldDeclareAnIdempotentBuiltinSkillTaskLedgerAfterTheAgentQueue() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = null;
+        for (JsonNode candidate : root.path("migrations")) {
+            if (candidate.path("id").asText().equals("skill.create-builtin-execution-task")) {
+                migration = candidate;
+                break;
+            }
+        }
+        String path = "sql/skill/2026-10-22-create-builtin-skill-task.sql";
+        assertThat(migration).isNotNull();
+        assertThat(migration.path("id").asText()).isEqualTo("skill.create-builtin-execution-task");
+        assertThat(migration.path("order").asInt()).isEqualTo(210);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("transactional").asBoolean()).isTrue();
+        assertThat(migration.path("requires").toString()).contains("chat.create-agent-execution-queue");
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+
+        String catalogPath = root.path("catalogContract").asText();
+        JsonNode catalog;
+        try (InputStream input = Files.newInputStream(Path.of("..", catalogPath))) {
+            catalog = new ObjectMapper().readTree(input);
+        }
+        assertThat(catalog.path("requiredTables").toString()).contains("builtin_skill_execution_task");
+        assertThat(catalog.path("requiredColumns").path("builtin_skill_execution_task").toString())
+                .contains("idempotency_key", "input_snapshot", "result_json", "attempt_count");
+        assertThat(catalog.path("requiredConstraints").toString())
+                .contains("uq_builtin_skill_task_requester_idempotency", "chk_builtin_skill_task_status");
+        assertThat(catalog.path("requiredIndexes").toString())
+                .contains("idx_builtin_skill_task_dispatch", "idx_builtin_skill_task_requester_created_at");
+
+        String sql = Files.readString(Path.of("..", path));
+        assertThat(sql)
+                .contains("CREATE TABLE builtin_skill_execution_task")
+                .contains("requester_user_id")
+                .contains("skill_version")
+                .contains("idempotency_key")
+                .contains("input_snapshot")
+                .contains("result_json")
+                .contains("progress")
+                .contains("attempt_count")
+                .contains("failure_type")
+                .contains("UNIQUE (requester_user_id, idempotency_key)")
+                .contains("'PENDING'")
+                .contains("'RUNNING'")
+                .contains("'RETRYING'")
+                .contains("'SUCCEEDED'")
+                .contains("'FAILED'")
+                .contains("'DEAD_LETTER'");
+    }
+
+    @Test
+    void shouldDeclareARunningLeaseRecoveryIndexAfterTheBuiltinSkillTaskLedger() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = root.path("migrations").get(root.path("migrations").size() - 1);
+        String path = "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql";
+        assertThat(migration.path("id").asText()).isEqualTo("skill.add-builtin-execution-task-lease-index");
+        assertThat(migration.path("order").asInt()).isEqualTo(220);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("transactional").asBoolean()).isTrue();
+        assertThat(migration.path("requires").toString()).contains("skill.create-builtin-execution-task");
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+
+        JsonNode catalog;
+        String catalogPath = root.path("catalogContract").asText();
+        try (InputStream input = Files.newInputStream(Path.of("..", catalogPath))) {
+            catalog = new ObjectMapper().readTree(input);
+        }
+        assertThat(catalog.path("requiredIndexes").toString())
+                .contains("idx_builtin_skill_task_running_lease");
+
+        String sql = Files.readString(Path.of("..", path));
+        assertThat(sql)
+                .contains("CREATE INDEX idx_builtin_skill_task_running_lease")
+                .contains("ON builtin_skill_execution_task (lease_expires_at, task_id)")
+                .contains("WHERE status = 'RUNNING' AND lease_expires_at IS NOT NULL");
     }
 
     private String sha256(Path path) throws Exception {

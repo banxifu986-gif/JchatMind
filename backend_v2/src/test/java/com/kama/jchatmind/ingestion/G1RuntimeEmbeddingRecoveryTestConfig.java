@@ -263,6 +263,16 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
         ) {
             return recovered.retrieveMarkdownTableAssets(kbIds, query, context, limit);
         }
+
+        @Override
+        public java.util.Map<String, Long> indexRevisions(List<String> kbIds) {
+            return recovered.indexRevisions(kbIds);
+        }
+
+        @Override
+        public String retrievalConfigurationFingerprint() {
+            return recovered.retrievalConfigurationFingerprint();
+        }
     }
 
     static class EmbeddingRecoveryProbe {

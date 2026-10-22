@@ -3,6 +3,16 @@ package com.kama.jchatmind.migration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
+import com.kama.jchatmind.model.dto.RagKbIndexRevision;
+import com.kama.jchatmind.typehandler.PgVectorTypeHandler;
+import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSession;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -14,6 +24,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -90,8 +101,8 @@ class MigrationLifecycleRuntimeL2Test {
                     Map.entry("executionMode", "isolated_postgresql_runtime"),
                     Map.entry("testClass", MigrationLifecycleRuntimeL2Test.class.getName()),
                     Map.entry("manifestPath", "sql/migrations/manifest.json"),
-                    Map.entry("schemaVersion", "2026-10-21-g4"),
-                    Map.entry("migrationCount", 18),
+                    Map.entry("schemaVersion", "2026-10-22-g8"),
+                    Map.entry("migrationCount", 22),
                     Map.entry("containerImage", IMAGE),
                     Map.entry("containerName", CONTAINER),
                     Map.entry("result", executionResult),
@@ -137,8 +148,8 @@ class MigrationLifecycleRuntimeL2Test {
 
             assertThat(release.status()).isEqualTo(SchemaMigrationReleaseEntry.ReleaseStatus.SUCCEEDED);
             assertThat(result.cleanInstall()).isTrue();
-            assertThat(result.schemaVersion()).isEqualTo("2026-10-21-g4");
-            assertThat(result.appliedMigrationIds()).hasSize(18);
+            assertThat(result.schemaVersion()).isEqualTo("2026-10-22-g8");
+            assertThat(result.appliedMigrationIds()).hasSize(22);
             assertThat(catalog.verified())
                     .withFailMessage("迁移后 catalog 对账失败: missing=%s, forbidden=%s",
                             catalog.missingObjects(), catalog.forbiddenObjects())
@@ -146,10 +157,13 @@ class MigrationLifecycleRuntimeL2Test {
             catalogVerified = true;
             catalogFingerprint = catalog.observedFingerprint();
             assertThat(queryForLong(dataSource,
-                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(19);
+                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(23);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger WHERE status = 'APPLIED'"))
-                    .isEqualTo(19);
+                    .isEqualTo(23);
+            assertThat(queryForLong(dataSource,
+                    "SELECT COUNT(*) FROM public.builtin_skill_execution_task")).isZero();
+            verifyRagIndexRevisionTriggers(dataSource);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM pg_catalog.pg_constraint "
                             + "WHERE conrelid = 'public.jchatmind_schema_migration_ledger'::regclass "
@@ -224,11 +238,11 @@ class MigrationLifecycleRuntimeL2Test {
             assertThat(prefix.cleanInstall()).isTrue();
             assertThat(prefix.appliedMigrationIds()).hasSize(8);
             assertThat(upgrade.cleanInstall()).isFalse();
-            assertThat(upgrade.appliedMigrationIds()).hasSize(10);
+            assertThat(upgrade.appliedMigrationIds()).hasSize(14);
             assertThat(replay.appliedMigrationIds()).isEmpty();
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger"))
-                    .isEqualTo(19);
+                    .isEqualTo(23);
             executionResult = "passed";
         } finally {
             dropDatabase(database);
@@ -283,6 +297,51 @@ class MigrationLifecycleRuntimeL2Test {
             dropDatabase(database);
             Files.deleteIfExists(brokenManifest);
             Files.deleteIfExists(brokenSql);
+        }
+    }
+
+    @Test
+    @Order(4)
+    void shouldKeepCompletedAtAfterStartedAtIfClockMovesBackward() throws Exception {
+        String database = createDatabase();
+        Path futureStartedSql = Files.createTempFile(
+                PROJECT_ROOT.resolve("sql/migrations"), "migration-l2-clock-skew-", ".sql"
+        );
+        Path clockSkewManifest = Files.createTempFile("jchatmind-clock-skew-manifest-", ".json");
+        String migrationId = "migration-l2.force-future-started-at";
+        try {
+            Files.writeString(futureStartedSql,
+                    "UPDATE public.jchatmind_schema_migration_ledger "
+                            + "SET started_at = CURRENT_TIMESTAMP + INTERVAL '1 minute' "
+                            + "WHERE migration_id = '" + migrationId + "';",
+                    StandardCharsets.UTF_8);
+            ObjectMapper objectMapper = new ObjectMapper();
+            ObjectNode manifest = (ObjectNode) objectMapper.readTree(Files.readString(MANIFEST, StandardCharsets.UTF_8));
+            manifest.put("schemaVersion", "migration-l2-clock-skew-v1");
+            var migrations = manifest.withArray("migrations");
+            migrations.removeAll();
+            ObjectNode migration = migrations.addObject();
+            migration.put("order", 10);
+            migration.put("id", migrationId);
+            migration.put("path", PROJECT_ROOT.relativize(futureStartedSql).toString().replace('\\', '/'));
+            migration.put("sha256", sha256(Files.readAllBytes(futureStartedSql)));
+            migration.put("transactional", true);
+            migration.putArray("requires").add("baseline.application-schema");
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(clockSkewManifest.toFile(), manifest);
+
+            DataSource dataSource = dataSource(database);
+            SchemaMigrationExecutor.MigrationRunResult firstRun = runner(dataSource, clockSkewManifest).migrate();
+            assertThat(firstRun.appliedMigrationIds()).containsExactly(migrationId);
+
+            SchemaMigrationExecutor.MigrationRunResult replay = runner(dataSource, clockSkewManifest).migrate();
+            assertThat(replay.appliedMigrationIds()).isEmpty();
+            assertThat(queryForLong(dataSource,
+                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger "
+                            + "WHERE completed_at < started_at")).isZero();
+        } finally {
+            dropDatabase(database);
+            Files.deleteIfExists(clockSkewManifest);
+            Files.deleteIfExists(futureStartedSql);
         }
     }
 
@@ -354,6 +413,112 @@ class MigrationLifecycleRuntimeL2Test {
         }
     }
 
+    private static List<RagKbIndexRevision> selectKbIndexRevisions(DataSource dataSource, List<String> kbIds)
+            throws IOException {
+        String resource = "mapper/ChunkBgeM3Mapper.xml";
+        Configuration configuration = new Configuration(new Environment(
+                "rag-index-revision-l2",
+                new JdbcTransactionFactory(),
+                dataSource
+        ));
+        configuration.getTypeHandlerRegistry().register(float[].class, PgVectorTypeHandler.class);
+        try (InputStream input = org.apache.ibatis.io.Resources.getResourceAsStream(resource)) {
+            new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+        SqlSessionFactory sessionFactory = new SqlSessionFactoryBuilder().build(configuration);
+        try (SqlSession session = sessionFactory.openSession()) {
+            return session.getMapper(ChunkBgeM3Mapper.class).selectKbIndexRevisions(kbIds);
+        }
+    }
+
+    private static void verifyRagIndexRevisionTriggers(DataSource dataSource) throws Exception {
+        String account = "rag-index-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        execute(dataSource, "INSERT INTO jchatmind_user (account, username, password) VALUES ('"
+                + account + "', 'RAG index test', 'test-hash')");
+        long ownerId = queryForLong(dataSource,
+                "SELECT user_id FROM jchatmind_user WHERE account = '" + account + "'");
+        String firstKbId = UUID.randomUUID().toString();
+        String secondKbId = UUID.randomUUID().toString();
+        String firstDocumentId = UUID.randomUUID().toString();
+        String secondDocumentId = UUID.randomUUID().toString();
+        String firstChunkId = UUID.randomUUID().toString();
+
+        execute(dataSource, "INSERT INTO knowledge_base (id, name, owner_id) VALUES ('"
+                + firstKbId + "'::uuid, 'RAG index test 1', " + ownerId + ")");
+        execute(dataSource, "INSERT INTO knowledge_base (id, name, owner_id) VALUES ('"
+                + secondKbId + "'::uuid, 'RAG index test 2', " + ownerId + ")");
+        execute(dataSource, "INSERT INTO document (id, kb_id, filename) VALUES ('"
+                + firstDocumentId + "'::uuid, '" + firstKbId + "'::uuid, 'first.md')");
+        execute(dataSource, "INSERT INTO document (id, kb_id, filename) VALUES ('"
+                + secondDocumentId + "'::uuid, '" + secondKbId + "'::uuid, 'second.md')");
+        execute(dataSource, "INSERT INTO chunk_bge_m3 (id, kb_id, doc_id, content) VALUES ('"
+                + firstChunkId + "'::uuid, '" + firstKbId + "'::uuid, '" + firstDocumentId
+                + "'::uuid, 'first')");
+
+        long firstRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(firstRevision).isEqualTo(1);
+        List<RagKbIndexRevision> mappedRevisions = selectKbIndexRevisions(
+                dataSource,
+                List.of(firstKbId, secondKbId)
+        );
+        assertThat(mappedRevisions).singleElement().satisfies(revision -> {
+            assertThat(revision.getKbId()).isEqualTo(firstKbId);
+            assertThat(revision.getRevision()).isEqualTo(firstRevision);
+        });
+
+        execute(dataSource, "UPDATE document SET filename = 'renamed.md' WHERE id = '"
+                + firstDocumentId + "'::uuid");
+        long documentRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(documentRevision).isGreaterThan(firstRevision);
+
+        execute(dataSource, "UPDATE chunk_bge_m3 SET content = 'updated' WHERE id = '"
+                + firstChunkId + "'::uuid");
+        long updatedRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(updatedRevision).isGreaterThan(documentRevision);
+
+        String assetId = UUID.randomUUID().toString();
+        execute(dataSource, "INSERT INTO document_asset "
+                + "(asset_id, document_id, asset_type, asset_key, content_hash, parser_version) VALUES ('"
+                + assetId + "'::uuid, '" + firstDocumentId
+                + "'::uuid, 'PDF_PAGE_TEXT', 'page-1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'test')");
+        long assetRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(assetRevision).isGreaterThan(updatedRevision);
+
+        execute(dataSource, "INSERT INTO document_asset_chunk "
+                + "(asset_id, chunk_id, asset_document_id, chunk_document_id) VALUES ('"
+                + assetId + "'::uuid, '" + firstChunkId + "'::uuid, '" + firstDocumentId + "'::uuid, '"
+                + firstDocumentId + "'::uuid)");
+        long relationRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(relationRevision).isGreaterThan(assetRevision);
+
+        execute(dataSource, "UPDATE document_asset SET status = 'READY' WHERE asset_id = '"
+                + assetId + "'::uuid");
+        long assetStatusRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(assetStatusRevision).isGreaterThan(relationRevision);
+
+        execute(dataSource, "DELETE FROM document_asset_chunk WHERE asset_id = '" + assetId + "'::uuid");
+        long relationDeleteRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(relationDeleteRevision).isGreaterThan(assetStatusRevision);
+
+        execute(dataSource, "DELETE FROM chunk_bge_m3 WHERE id = '" + firstChunkId + "'::uuid");
+        long deletedRevision = queryForLong(dataSource, "SELECT revision FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'");
+        assertThat(deletedRevision).isGreaterThan(relationDeleteRevision);
+
+        execute(dataSource, "DELETE FROM knowledge_base WHERE id = '" + firstKbId + "'::uuid");
+        assertThat(queryForLong(dataSource, "SELECT COUNT(*) FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + firstKbId + "'")).isZero();
+        assertThat(queryForLong(dataSource, "SELECT COUNT(*) FROM public.rag_kb_index_revision "
+                + "WHERE kb_id = '" + secondKbId + "'")).isZero();
+    }
+
     private static void waitForPostgres() throws Exception {
         long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         SQLException lastFailure = null;
@@ -419,6 +584,26 @@ class MigrationLifecycleRuntimeL2Test {
                 allowed_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
                 allowed_kbs JSONB NOT NULL DEFAULT '[]'::jsonb,
                 chat_options JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE chat_session (
+                id UUID PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                agent_id UUID,
+                title TEXT,
+                metadata JSONB,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE chat_message (
+                id UUID PRIMARY KEY,
+                session_id UUID NOT NULL REFERENCES chat_session(id) ON DELETE CASCADE,
+                role VARCHAR(32) NOT NULL,
+                content TEXT,
+                metadata JSONB,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );

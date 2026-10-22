@@ -195,6 +195,16 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
             ) {
                 throw new UnsupportedOperationException("事务 L2 不覆盖检索");
             }
+
+            @Override
+            public java.util.Map<String, Long> indexRevisions(List<String> kbIds) {
+                return java.util.Map.of();
+            }
+
+            @Override
+            public String retrievalConfigurationFingerprint() {
+                return "transaction-test";
+            }
         };
     }
 
