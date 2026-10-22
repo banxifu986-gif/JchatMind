@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.BuiltinSkillTaskMapper">
+
+    <resultMap id="BuiltinSkillExecutionTaskResultMap"
+               type="com.kama.jchatmind.model.entity.BuiltinSkillExecutionTask">
+        <id property="taskId" column="task_id" jdbcType="VARCHAR"/>
+        <result property="requesterUserId" column="requester_user_id" jdbcType="BIGINT"/>
+        <result property="taskType" column="task_type" jdbcType="VARCHAR"/>
+        <result property="agentId" column="agent_id" jdbcType="VARCHAR"/>
+        <result property="sessionId" column="session_id" jdbcType="VARCHAR"/>
+        <result property="skillId" column="skill_id" jdbcType="VARCHAR"/>
+        <result property="skillVersion" column="skill_version" jdbcType="VARCHAR"/>
+        <result property="idempotencyKey" column="idempotency_key" jdbcType="VARCHAR"/>
+        <result property="requestSha256" column="request_sha256" jdbcType="VARCHAR"/>
+        <result property="inputSnapshot" column="input_snapshot" jdbcType="VARCHAR"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
+        <result property="progress" column="progress" jdbcType="SMALLINT"/>
+        <result property="attemptCount" column="attempt_count" jdbcType="INTEGER"/>
+        <result property="maxAttempts" column="max_attempts" jdbcType="INTEGER"/>
+        <result property="dispatchAttemptCount" column="dispatch_attempt_count" jdbcType="INTEGER"/>
+        <result property="errorSummary" column="error_summary" jdbcType="VARCHAR"/>
+        <result property="failureType" column="failure_type" jdbcType="VARCHAR"/>
+        <result property="resultJson" column="result_json" jdbcType="VARCHAR"/>
+        <result property="resultReference" column="result_reference" jdbcType="VARCHAR"/>
+        <result property="nextAttemptAt" column="next_attempt_at" jdbcType="TIMESTAMP"/>
+        <result property="lastDispatchedAt" column="last_dispatched_at" jdbcType="TIMESTAMP"/>
+        <result property="leaseExpiresAt" column="lease_expires_at" jdbcType="TIMESTAMP"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+        <result property="startedAt" column="started_at" jdbcType="TIMESTAMP"/>
+        <result property="completedAt" column="completed_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="ResultColumns">
+        task_id, requester_user_id, task_type, agent_id, session_id, skill_id, skill_version,
+        idempotency_key, request_sha256, input_snapshot::text AS input_snapshot, status,
+        progress, attempt_count, max_attempts, dispatch_attempt_count, error_summary,
+        failure_type, result_json::text AS result_json, result_reference, next_attempt_at,
+        last_dispatched_at, lease_expires_at, created_at, updated_at, started_at, completed_at
+    </sql>
+
+    <insert id="insertIfAbsent" parameterType="com.kama.jchatmind.model.entity.BuiltinSkillExecutionTask">
+        INSERT INTO builtin_skill_execution_task (
+            task_id, requester_user_id, task_type, agent_id, session_id, skill_id, skill_version,
+            idempotency_key, request_sha256, input_snapshot, status, progress, attempt_count,
+            max_attempts, result_reference
+        ) VALUES (
+            CAST(#{taskId} AS uuid), #{requesterUserId}, #{taskType}, CAST(#{agentId} AS uuid),
+            CAST(#{sessionId} AS uuid), #{skillId}, #{skillVersion}, #{idempotencyKey}, #{requestSha256},
+            CAST(#{inputSnapshot} AS jsonb), #{status}, #{progress}, #{attemptCount}, #{maxAttempts},
+            #{resultReference}
+        )
+        ON CONFLICT (requester_user_id, idempotency_key) DO NOTHING
+    </insert>
+
+    <select id="selectByRequesterAndIdempotencyKey" resultMap="BuiltinSkillExecutionTaskResultMap">
+        SELECT <include refid="ResultColumns"/>
+        FROM builtin_skill_execution_task
+        WHERE requester_user_id = #{requesterUserId}
+          AND idempotency_key = #{idempotencyKey}
+    </select>
+
+    <select id="selectByIdAndRequester" resultMap="BuiltinSkillExecutionTaskResultMap">
+        SELECT <include refid="ResultColumns"/>
+        FROM builtin_skill_execution_task
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND requester_user_id = #{requesterUserId}
+    </select>
+
+    <select id="selectByTaskId" resultMap="BuiltinSkillExecutionTaskResultMap">
+        SELECT <include refid="ResultColumns"/>
+        FROM builtin_skill_execution_task
+        WHERE task_id = CAST(#{taskId} AS uuid)
+    </select>
+
+    <select id="selectDispatchableTaskIds" resultType="java.lang.String">
+        SELECT task_id::text
+        FROM builtin_skill_execution_task
+        WHERE status IN ('PENDING', 'RETRYING')
+          AND next_attempt_at &lt;= CURRENT_TIMESTAMP
+          AND (lease_expires_at IS NULL OR lease_expires_at &lt;= CURRENT_TIMESTAMP)
+        ORDER BY next_attempt_at, created_at, task_id
+        LIMIT #{limit}
+    </select>
+
+    <update id="acquireDispatchLease">
+        UPDATE builtin_skill_execution_task
+        SET dispatch_attempt_count = dispatch_attempt_count + 1,
+            last_dispatched_at = CURRENT_TIMESTAMP,
+            lease_expires_at = CURRENT_TIMESTAMP + make_interval(secs =&gt; #{leaseSeconds}),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status IN ('PENDING', 'RETRYING')
+          AND next_attempt_at &lt;= CURRENT_TIMESTAMP
+          AND (lease_expires_at IS NULL OR lease_expires_at &lt;= CURRENT_TIMESTAMP)
+    </update>
+
+    <update id="claimExecutionTask">
+        UPDATE builtin_skill_execution_task
+        SET status = 'RUNNING',
+            progress = 5,
+            attempt_count = attempt_count + 1,
+            started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+            lease_expires_at = CURRENT_TIMESTAMP + make_interval(secs =&gt; #{leaseSeconds}),
+            error_summary = NULL,
+            failure_type = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status IN ('PENDING', 'RETRYING')
+          AND attempt_count &lt; max_attempts
+          AND next_attempt_at &lt;= CURRENT_TIMESTAMP
+    </update>
+
+    <update id="completeExecutionTask">
+        UPDATE builtin_skill_execution_task
+        SET status = 'SUCCEEDED',
+            progress = 100,
+            result_json = CAST(#{resultJson} AS jsonb),
+            error_summary = NULL,
+            failure_type = NULL,
+            lease_expires_at = NULL,
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status = 'RUNNING'
+          AND attempt_count = #{attemptCount}
+    </update>
+
+    <update id="retryExecutionTask">
+        UPDATE builtin_skill_execution_task
+        SET status = 'RETRYING',
+            failure_type = #{failureType},
+            error_summary = #{errorSummary},
+            next_attempt_at = CURRENT_TIMESTAMP + make_interval(secs =&gt; #{retryDelaySeconds}),
+            lease_expires_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status = 'RUNNING'
+          AND attempt_count = #{attemptCount}
+          AND attempt_count &lt; max_attempts
+    </update>
+
+    <update id="deadLetterExecutionTask">
+        UPDATE builtin_skill_execution_task
+        SET status = 'DEAD_LETTER',
+            failure_type = #{failureType},
+            error_summary = #{errorSummary},
+            lease_expires_at = NULL,
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status = 'RUNNING'
+          AND attempt_count = #{attemptCount}
+          AND attempt_count &gt;= max_attempts
+    </update>
+
+    <update id="failExecutionTask">
+        UPDATE builtin_skill_execution_task
+        SET status = 'FAILED',
+            failure_type = #{failureType},
+            error_summary = #{errorSummary},
+            lease_expires_at = NULL,
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND status = 'RUNNING'
+          AND attempt_count = #{attemptCount}
+    </update>
+
+    <update id="recoverExpiredExecutionTasks">
+        UPDATE builtin_skill_execution_task
+        SET status = CASE
+                WHEN attempt_count &gt;= max_attempts THEN 'DEAD_LETTER'
+                ELSE 'RETRYING'
+            END,
+            failure_type = 'ExecutionLeaseExpired',
+            error_summary = 'Skill 执行租约超时',
+            next_attempt_at = CURRENT_TIMESTAMP + make_interval(secs =&gt; #{retryDelaySeconds}),
+            lease_expires_at = NULL,
+            completed_at = CASE
+                WHEN attempt_count &gt;= max_attempts THEN CURRENT_TIMESTAMP
+                ELSE NULL
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'RUNNING'
+          AND lease_expires_at &lt;= CURRENT_TIMESTAMP
+    </update>
+</mapper>

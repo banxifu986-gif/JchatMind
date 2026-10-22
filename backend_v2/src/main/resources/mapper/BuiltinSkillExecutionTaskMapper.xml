@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.BuiltinSkillExecutionTaskMapper">
+
+    <resultMap id="BuiltinSkillExecutionTaskResultMap"
+               type="com.kama.jchatmind.model.entity.BuiltinSkillExecutionTask">
+        <id property="taskId" column="task_id" jdbcType="VARCHAR"/>
+        <result property="requesterUserId" column="requester_user_id" jdbcType="BIGINT"/>
+        <result property="taskType" column="task_type" jdbcType="VARCHAR"/>
+        <result property="agentId" column="agent_id" jdbcType="VARCHAR"/>
+        <result property="sessionId" column="session_id" jdbcType="VARCHAR"/>
+        <result property="skillId" column="skill_id" jdbcType="VARCHAR"/>
+        <result property="skillVersion" column="skill_version" jdbcType="VARCHAR"/>
+        <result property="idempotencyKey" column="idempotency_key" jdbcType="VARCHAR"/>
+        <result property="requestSha256" column="request_sha256" jdbcType="VARCHAR"/>
+        <result property="inputSnapshot" column="input_snapshot" jdbcType="VARCHAR"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
+        <result property="progress" column="progress" jdbcType="SMALLINT"/>
+        <result property="attemptCount" column="attempt_count" jdbcType="INTEGER"/>
+        <result property="maxAttempts" column="max_attempts" jdbcType="INTEGER"/>
+        <result property="dispatchAttemptCount" column="dispatch_attempt_count" jdbcType="INTEGER"/>
+        <result property="errorSummary" column="error_summary" jdbcType="VARCHAR"/>
+        <result property="failureType" column="failure_type" jdbcType="VARCHAR"/>
+        <result property="resultJson" column="result_json" jdbcType="VARCHAR"/>
+        <result property="resultReference" column="result_reference" jdbcType="VARCHAR"/>
+        <result property="nextAttemptAt" column="next_attempt_at" jdbcType="TIMESTAMP"/>
+        <result property="lastDispatchedAt" column="last_dispatched_at" jdbcType="TIMESTAMP"/>
+        <result property="leaseExpiresAt" column="lease_expires_at" jdbcType="TIMESTAMP"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+        <result property="startedAt" column="started_at" jdbcType="TIMESTAMP"/>
+        <result property="completedAt" column="completed_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="ResultColumns">
+        task_id, requester_user_id, task_type, agent_id, session_id, skill_id, skill_version,
+        idempotency_key, request_sha256, input_snapshot::text AS input_snapshot, status,
+        progress, attempt_count, max_attempts, dispatch_attempt_count, error_summary,
+        failure_type, result_json::text AS result_json, result_reference, next_attempt_at,
+        last_dispatched_at, lease_expires_at, created_at, updated_at, started_at, completed_at
+    </sql>
+
+    <insert id="insertIfAbsent" parameterType="com.kama.jchatmind.model.entity.BuiltinSkillExecutionTask">
+        INSERT INTO builtin_skill_execution_task (
+            task_id, requester_user_id, task_type, agent_id, session_id, skill_id, skill_version,
+            idempotency_key, request_sha256, input_snapshot, status, progress, attempt_count,
+            max_attempts, result_reference
+        ) VALUES (
+            CAST(#{taskId} AS uuid), #{requesterUserId}, #{taskType}, CAST(#{agentId} AS uuid),
+            CAST(#{sessionId} AS uuid), #{skillId}, #{skillVersion}, #{idempotencyKey}, #{requestSha256},
+            CAST(#{inputSnapshot} AS jsonb), #{status}, #{progress}, #{attemptCount}, #{maxAttempts},
+            #{resultReference}
+        )
+        ON CONFLICT (requester_user_id, idempotency_key) DO NOTHING
+    </insert>
+
+    <select id="selectByRequesterAndIdempotencyKey" resultMap="BuiltinSkillExecutionTaskResultMap">
+        SELECT <include refid="ResultColumns"/>
+        FROM builtin_skill_execution_task
+        WHERE requester_user_id = #{requesterUserId}
+          AND idempotency_key = #{idempotencyKey}
+    </select>
+
+    <select id="selectByIdAndRequester" resultMap="BuiltinSkillExecutionTaskResultMap">
+        SELECT <include refid="ResultColumns"/>
+        FROM builtin_skill_execution_task
+        WHERE task_id = CAST(#{taskId} AS uuid)
+          AND requester_user_id = #{requesterUserId}
+    </select>
+</mapper>

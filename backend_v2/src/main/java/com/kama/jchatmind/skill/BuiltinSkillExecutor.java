@@ -1,6 +1,7 @@
 package com.kama.jchatmind.skill;
 
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -8,6 +9,16 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class BuiltinSkillExecutor {
@@ -17,6 +28,7 @@ public class BuiltinSkillExecutor {
 
     private final BuiltinSkillRegistry skillRegistry;
     private final SkillKnowledgeToolExecutor knowledgeToolExecutor;
+    private final Map<SkillDefinition, ThreadPoolExecutor> executionPools = new ConcurrentHashMap<>();
 
     public BuiltinSkillExecutor(
             BuiltinSkillRegistry skillRegistry,
@@ -33,16 +45,81 @@ public class BuiltinSkillExecutor {
             Map<String, Object> input,
             List<String> authorizedKnowledgeBaseIds
     ) {
-        PreparedSkillInvocation invocation = skillRegistry.prepare(
-                skillId,
-                input,
-                authorizedKnowledgeBaseIds
+        return execute(userId, sessionId, prepare(skillId, input, authorizedKnowledgeBaseIds));
+    }
+
+    PreparedSkillInvocation prepare(
+            String skillId,
+            Map<String, Object> input,
+            List<String> authorizedKnowledgeBaseIds
+    ) {
+        return skillRegistry.prepare(skillId, input, authorizedKnowledgeBaseIds);
+    }
+
+    SkillExecutionResult execute(String userId, String sessionId, PreparedSkillInvocation invocation) {
+        String skillId = invocation.definition().id();
+        ThreadPoolExecutor executionPool = executionPools.computeIfAbsent(
+                invocation.definition(), this::createExecutionPool
         );
-        Map<String, Object> output = switch (invocation.definition().id()) {
-            case TECHNICAL_DECISION_COMPARISON -> executeTechnicalDecisionComparison(userId, sessionId, invocation);
-            default -> throw new IllegalArgumentException("未实现的内置 Skill：" + skillId);
-        };
+        Future<Map<String, Object>> execution;
+        try {
+            execution = executionPool.submit(() -> switch (invocation.definition().id()) {
+                case TECHNICAL_DECISION_COMPARISON -> executeTechnicalDecisionComparison(userId, sessionId, invocation);
+                default -> throw new IllegalArgumentException("未实现的内置 Skill：" + skillId);
+            });
+        } catch (RejectedExecutionException exception) {
+            return abstained(invocation, "当前 Skill 并发预算已满，请稍后重试。");
+        }
+
+        Map<String, Object> output;
+        try {
+            output = execution.get(invocation.definition().timeoutSeconds(), TimeUnit.SECONDS);
+        } catch (TimeoutException exception) {
+            execution.cancel(true);
+            return abstained(invocation, "Skill 执行超时，未返回未经验证的结果。");
+        } catch (InterruptedException exception) {
+            execution.cancel(true);
+            Thread.currentThread().interrupt();
+            return abstained(invocation, "Skill 执行被中断，未返回未经验证的结果。");
+        } catch (ExecutionException exception) {
+            return abstained(invocation, "Skill 执行失败，未返回未经验证的结果。");
+        }
         return new SkillExecutionResult(Map.copyOf(output), skillRegistry.validateOutput(invocation, output));
+    }
+
+    @PreDestroy
+    void shutdownExecutionPools() {
+        executionPools.values().forEach(ThreadPoolExecutor::shutdownNow);
+        executionPools.clear();
+    }
+
+    private ThreadPoolExecutor createExecutionPool(SkillDefinition definition) {
+        if (definition.concurrencyLimit() < 1 || definition.timeoutSeconds() < 1) {
+            throw new IllegalStateException("内置 Skill 执行预算必须大于零");
+        }
+        AtomicInteger threadNumber = new AtomicInteger();
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "builtin-skill-" + definition.id() + "-" + threadNumber.incrementAndGet()
+            );
+            thread.setDaemon(true);
+            return thread;
+        };
+        return new ThreadPoolExecutor(
+                definition.concurrencyLimit(),
+                definition.concurrencyLimit(),
+                0L,
+                TimeUnit.MILLISECONDS,
+                new SynchronousQueue<>(),
+                threadFactory,
+                new ThreadPoolExecutor.AbortPolicy()
+        );
+    }
+
+    private SkillExecutionResult abstained(PreparedSkillInvocation invocation, String reason) {
+        Map<String, Object> output = Map.of("abstained", true, "reason", reason);
+        return new SkillExecutionResult(output, skillRegistry.validateOutput(invocation, output));
     }
 
     private Map<String, Object> executeTechnicalDecisionComparison(
