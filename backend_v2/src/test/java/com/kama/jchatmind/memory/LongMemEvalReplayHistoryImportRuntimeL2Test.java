@@ -50,6 +50,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -381,6 +382,10 @@ class LongMemEvalReplayHistoryImportRuntimeL2Test {
             try {
                 assertThat(connection.getMetaData().getURL()).isEqualTo(ISOLATED_JDBC_URL);
                 assertThat(connection.getCatalog()).isEqualTo(ISOLATED_DATABASE);
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("CREATE TABLE IF NOT EXISTS public.agent_execution_turn_message ("
+                            + "chat_message_id UUID PRIMARY KEY, session_id UUID NOT NULL, sequence_no BIGINT NOT NULL)");
+                }
                 HistoryImportPlan importPlan = LongMemEvalReplayHistoryImportPlanBuilder.build(plan());
 
                 SqlSessionFactoryBean factoryBean = new SqlSessionFactoryBean();
