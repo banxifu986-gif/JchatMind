@@ -37,10 +37,10 @@ spring:
   ai:
     deepseek:
       api-key: ${DEEPSEEK_API_KEY}
-      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      base-url: https://api.deepseek.com
       chat:
         options:
-          model: ${DEEPSEEK_MODEL:deepseek-chat}
+          model: ${DEEPSEEK_MODEL:deepseek-flash}
     zhipuai:
       api-key: ${ZHIPUAI_API_KEY}
       base-url: ${ZHIPUAI_BASE_URL:https://open.bigmodel.cn/api/paas}
