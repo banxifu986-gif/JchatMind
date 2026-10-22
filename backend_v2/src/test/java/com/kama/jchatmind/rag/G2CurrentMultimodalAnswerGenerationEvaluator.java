@@ -3,6 +3,8 @@ package com.kama.jchatmind.rag;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -16,9 +18,11 @@ import java.util.Set;
 final class G2CurrentMultimodalAnswerGenerationEvaluator {
 
     private static final String SYSTEM_PROMPT = """
-            Answer only from the supplied retrieved context. If it does not support an answer, clearly state that
-            the evidence is insufficient. Cite factual claims with the exact `引用: <runtime chunk UUID>` marker
-            present in the context. Never invent or alter a citation ID.
+            Answer only from retrieved context that directly answers the question. If no context directly answers it,
+            clearly state that the evidence is insufficient and do not cite anything. For answerable questions, cite
+            the minimum number of sources that directly support the answer; do not cite related or duplicate sources.
+            If the question explicitly names an asset type, use only sources of that type. Cite each factual claim with
+            the exact `引用: <runtime chunk UUID>` marker shown in its context block. Never invent or alter a citation ID.
             """;
 
     private final ChatClient generatorClient;
@@ -35,6 +39,7 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
             Map<String, List<RagRetrievalResult>> resultsByCaseId
     ) {
         Map<String, String> logicalChunkIdByRuntimeUuid = validateInput(profile, runtimePlan, resultsByCaseId);
+        Map<String, String> assetTypeByLogicalChunkId = assetTypeByLogicalChunkId(profile);
         if (generatorClient != null && generatorModel == null) {
             throw new IllegalArgumentException("multimodal answer generator requires a model name");
         }
@@ -52,7 +57,7 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
             String caseId = candidateCase.caseId();
             if (generatorClient == null) {
                 answers.put(caseId, "");
-                caseResults.add(new CaseResult(caseId, "skipped", "generator_disabled", 0L));
+                caseResults.add(new CaseResult(caseId, "skipped", "generator_disabled", 0L, null, null));
                 reasonCounts.merge("generator_disabled", 1, Integer::sum);
                 skippedCount++;
                 continue;
@@ -61,6 +66,8 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
             String context = contextFor(
                     resultsByCaseId.get(caseId),
                     logicalChunkIdByRuntimeUuid.keySet(),
+                    logicalChunkIdByRuntimeUuid,
+                    assetTypeByLogicalChunkId,
                     profile.assetImportPlan().knowledgeBaseId()
             );
             long startedAt = System.nanoTime();
@@ -75,19 +82,26 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
                 latencies.add(latencyMs);
                 if (!StringUtils.hasText(answer)) {
                     answers.put(caseId, "");
-                    caseResults.add(new CaseResult(caseId, "failed", "empty_answer", latencyMs));
+                    caseResults.add(new CaseResult(caseId, "failed", "empty_answer", latencyMs, null, null));
                     reasonCounts.merge("empty_answer", 1, Integer::sum);
                     failedCount++;
                     continue;
                 }
                 answers.put(caseId, answer);
-                caseResults.add(new CaseResult(caseId, "generated", null, latencyMs));
+                caseResults.add(new CaseResult(caseId, "generated", null, latencyMs, null, null));
                 generatedCount++;
             } catch (Exception exception) {
                 long latencyMs = elapsedMillis(startedAt);
                 latencies.add(latencyMs);
                 answers.put(caseId, "");
-                caseResults.add(new CaseResult(caseId, "failed", "generation_error", latencyMs));
+                caseResults.add(new CaseResult(
+                        caseId,
+                        "failed",
+                        "generation_error",
+                        latencyMs,
+                        deepestCauseType(exception),
+                        httpStatus(exception)
+                ));
                 reasonCounts.merge("generation_error", 1, Integer::sum);
                 failedCount++;
             }
@@ -178,6 +192,8 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
     private String contextFor(
             List<RagRetrievalResult> results,
             Set<String> runtimeChunkIds,
+            Map<String, String> logicalChunkIdByRuntimeUuid,
+            Map<String, String> assetTypeByLogicalChunkId,
             String knowledgeBaseId
     ) {
         StringBuilder context = new StringBuilder();
@@ -189,10 +205,32 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
             if (context.length() > 0) {
                 context.append("\n\n");
             }
-            context.append("引用: ").append(result.getChunkId())
+            String logicalChunkId = logicalChunkIdByRuntimeUuid.get(result.getChunkId());
+            String assetType = assetTypeByLogicalChunkId.get(logicalChunkId);
+            if (!StringUtils.hasText(assetType)) {
+                throw new IllegalStateException("multimodal citation context asset type is missing");
+            }
+            context.append("Asset type: ").append(assetType)
+                    .append("\n引用: ").append(result.getChunkId())
                     .append('\n').append(result.getContent());
         }
         return context.toString();
+    }
+
+    private Map<String, String> assetTypeByLogicalChunkId(
+            G2CurrentMultimodalCandidateFixtureLoader.CandidateProfile profile
+    ) {
+        Map<String, String> assetTypes = new HashMap<>();
+        for (G2CurrentMultimodalCandidateFixtureLoader.ChunkImportRow chunk
+                : profile.assetImportPlan().chunkRows()) {
+            Object assetValue = chunk.metadata().get("asset");
+            if (assetValue instanceof Map<?, ?> asset
+                    && asset.get("type") instanceof String assetType
+                    && StringUtils.hasText(assetType)) {
+                assetTypes.put(chunk.logicalChunkId(), assetType);
+            }
+        }
+        return assetTypes;
     }
 
     private String buildPrompt(String query, String context) {
@@ -212,7 +250,35 @@ final class G2CurrentMultimodalAnswerGenerationEvaluator {
         return sorted.get(Math.max(0, (int) Math.ceil(0.95D * sorted.size()) - 1));
     }
 
-    record CaseResult(String caseId, String status, String reason, long generationLatencyMs) {
+    private String deepestCauseType(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; depth < 16 && current.getCause() != null && current.getCause() != current; depth++) {
+            current = current.getCause();
+        }
+        return current.getClass().getName();
+    }
+
+    private Integer httpStatus(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; depth < 16 && current != null; depth++, current = current.getCause()) {
+            if (current instanceof RestClientResponseException responseException) {
+                return responseException.getStatusCode().value();
+            }
+            if (current instanceof WebClientResponseException responseException) {
+                return responseException.getStatusCode().value();
+            }
+        }
+        return null;
+    }
+
+    record CaseResult(
+            String caseId,
+            String status,
+            String reason,
+            long generationLatencyMs,
+            String failureType,
+            Integer httpStatus
+    ) {
     }
 
     record Report(

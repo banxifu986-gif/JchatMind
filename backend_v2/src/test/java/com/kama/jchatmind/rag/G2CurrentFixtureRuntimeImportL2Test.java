@@ -14,6 +14,7 @@ import com.kama.jchatmind.service.impl.VchordBm25QueryService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration;
+import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiChatAutoConfiguration;
 import org.springframework.ai.zhipuai.ZhiPuAiChatModel;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,6 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
@@ -35,16 +35,22 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.datasource.DataSourceUtils;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.DefaultResponseErrorHandler;
+import org.springframework.web.client.ResponseErrorHandler;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -58,7 +64,10 @@ import static org.assertj.core.api.Assertions.assertThat;
         classes = G2CurrentFixtureRuntimeImportL2Test.RuntimeTestConfig.class,
         properties = {
                 "spring.ai.mcp.client.enabled=false",
-                "rag.query-rewrite.llm.enabled=false"
+                "rag.query-rewrite.llm.enabled=false",
+                "spring.datasource.url=jdbc:postgresql://127.0.0.1:55432/jchatmind_rag_eval",
+                "spring.datasource.username=rag_eval",
+                "spring.datasource.password="
         }
 )
 @ActiveProfiles("rag-eval")
@@ -67,14 +76,25 @@ class G2CurrentFixtureRuntimeImportL2Test {
     private static final String ISOLATED_JDBC_URL = "jdbc:postgresql://127.0.0.1:55432/jchatmind_rag_eval";
     private static final String OWNER_ID = "900000000004";
     private static final String MANIFEST_PATH = "rag-eval/datasets/manifests/fixture-fast-v1.json";
+    private static final String CITATION_CANDIDATE_MANIFEST_PATH =
+            "rag-eval/datasets/manifests/fixture-fast-v2-citation-candidate.json";
+    private static final String CITATION_CANDIDATE_RUNTIME_ENABLED_PROPERTY =
+            "g2.current.fixture.citation-candidate.runtime.enabled";
     private static final String ANSWER_GENERATION_ENABLED_PROPERTY =
             "g2.current.fixture.answer-generation.enabled";
-    private static final String ANSWER_GENERATION_MODEL = "deepseek-chat";
+    private static final String ANSWER_GENERATION_CLIENT = "deepseek-chat";
+    private static final String ANSWER_GENERATION_MODEL = "deepseek-flash";
     private static final String ANSWER_QUALITY_JUDGE_ENABLED_PROPERTY =
             "g2.current.fixture.answer-quality.judge.enabled";
     private static final String ANSWER_QUALITY_JUDGE_MODEL = "glm-4.6";
     private static final Path REPORT_PATH = Path.of(
             "target", "rag-eval", "current", "fixture-fast-v1-import-l2.json"
+    );
+    private static final Path CITATION_CANDIDATE_REPORT_PATH = Path.of(
+            "target", "rag-eval", "router", "fixture-fast-v2-citation-candidate-runtime.json"
+    );
+    private static final Path CITATION_CANDIDATE_PARENT_REPORT_PATH = Path.of(
+            "target", "rag-eval", "router", "fixture-fast-v2-citation-candidate-parent-runtime.json"
     );
 
     @Autowired
@@ -106,7 +126,11 @@ class G2CurrentFixtureRuntimeImportL2Test {
 
     @Test
     void importsAndReplaysTheFrozenFixtureOnlyInTheIsolatedDatabase() throws Exception {
+        G2CurrentFixtureCitationCandidateLoader.CandidateDataset citationCandidate =
+                loadCitationCandidateIfEnabled(
+                        Boolean.getBoolean(CITATION_CANDIDATE_RUNTIME_ENABLED_PROPERTY));
         assertIsolatedDatabase();
+        ensureIndexRevisionSchema();
         G2CurrentFixtureRuntimeCorpus fixture = G2CurrentFixtureRuntimeCorpusLoader.load(MANIFEST_PATH);
         List<G2CurrentFixtureRuntimeCorpus.Chunk> chunks = fixture.chunksByLogicalId().values().stream()
                 .sorted(Comparator.comparing(G2CurrentFixtureRuntimeCorpus.Chunk::logicalChunkId))
@@ -164,8 +188,22 @@ class G2CurrentFixtureRuntimeImportL2Test {
         assertThat(runtimeReport.router().permissionViolations()).isZero();
         assertThat(runtimeReport.router().externalCalls()).isZero();
         G2CurrentFixtureAnswerEvaluationPipeline.Report answerEvaluation =
-                evaluateAnswers(profile, fixture, replayed, runtimeEvaluation);
-        writeRuntimeReport(fixture, replayed, runtimeReport, answerEvaluation);
+                evaluateAnswers(profile, fixture, replayed, runtimeEvaluation, citationCandidate == null);
+        writeRuntimeReport(fixture, replayed, runtimeReport, answerEvaluation, citationCandidate != null);
+        if (citationCandidate != null) {
+            evaluateCitationCandidate(citationCandidate, fixture, replayed);
+        }
+    }
+
+    static G2CurrentFixtureCitationCandidateLoader.CandidateDataset loadCitationCandidateIfEnabled(boolean enabled)
+            throws IOException {
+        if (!enabled) {
+            return null;
+        }
+        G2CurrentFixtureCitationCandidateLoader.CandidateDataset candidate =
+                G2CurrentFixtureCitationCandidateLoader.load(CITATION_CANDIDATE_MANIFEST_PATH);
+        G2CurrentFixtureCitationCandidateAnswerPipeline.requireReviewedCandidate(candidate);
+        return candidate;
     }
 
     private RuntimeEvaluation compareFixedChainAndRouter(
@@ -202,8 +240,87 @@ class G2CurrentFixtureRuntimeImportL2Test {
         );
     }
 
+    private void evaluateCitationCandidate(
+            G2CurrentFixtureCitationCandidateLoader.CandidateDataset candidate,
+            G2CurrentFixtureRuntimeCorpus fixture,
+            G2CurrentFixtureRuntimeImportPlan.Prepared plan
+    ) throws IOException {
+        RagServiceImpl fixedRagService = createRagService();
+        RagServiceImpl routerRagService = createRagService();
+        Map<String, List<RagRetrievalResult>> fixedResultsByCaseId = new LinkedHashMap<>();
+        Map<String, List<RagRetrievalResult>> routerResultsByCaseId = new LinkedHashMap<>();
+        List<CandidateRuntimeReplay> replays = new ArrayList<>(candidate.cases().size());
+        int routeViolations = 0;
+        int permissionViolations = 0;
+        int externalCalls = 0;
+        for (int index = 0; index < candidate.cases().size(); index++) {
+            G2CurrentFixtureCitationCandidateLoader.CandidateCase evaluationCase = candidate.cases().get(index);
+            ArmReplay fixedReplay;
+            ArmReplay routerReplay;
+            if (index % 2 == 0) {
+                fixedReplay = runFixedArm(evaluationCase.query(), fixture, plan, fixedRagService);
+                routerReplay = runRouterArm(evaluationCase.query(), plan, routerRagService);
+            } else {
+                routerReplay = runRouterArm(evaluationCase.query(), plan, routerRagService);
+                fixedReplay = runFixedArm(evaluationCase.query(), fixture, plan, fixedRagService);
+            }
+            fixedResultsByCaseId.put(evaluationCase.caseId(), fixedReplay.results());
+            routerResultsByCaseId.put(evaluationCase.caseId(), routerReplay.results());
+            replays.add(new CandidateRuntimeReplay(
+                    evaluationCase.caseId(), fixedReplay.runtimeArm(), routerReplay.runtimeArm()
+            ));
+            if (!"PRIVATE_RAG".equals(routerReplay.runtimeArm().route())) {
+                routeViolations++;
+            }
+            if (fixedReplay.runtimeArm().permissionViolation() || routerReplay.runtimeArm().permissionViolation()) {
+                permissionViolations++;
+            }
+            if (fixedReplay.runtimeArm().externalCall() || routerReplay.runtimeArm().externalCall()) {
+                externalCalls++;
+            }
+        }
+
+        writeCitationCandidateRuntimeReport(candidate, plan, replays, routeViolations,
+                permissionViolations, externalCalls, null);
+        G2CurrentFixtureCitationCandidateAnswerPipeline.requireSafeRetrieval(
+                routeViolations, permissionViolations, externalCalls);
+
+        boolean generationEnabled = Boolean.getBoolean(ANSWER_GENERATION_ENABLED_PROPERTY);
+        ChatClient generator = answerGenerator(generationEnabled, ANSWER_GENERATION_CLIENT);
+        G2CurrentFixtureCitationCandidateAnswerPipeline.Report answerEvaluation =
+                new G2CurrentFixtureCitationCandidateAnswerPipeline().evaluate(
+                        candidate,
+                        plan,
+                        fixedResultsByCaseId,
+                        routerResultsByCaseId,
+                        generator,
+                        generationEnabled ? ANSWER_GENERATION_MODEL : null
+                );
+        writeCitationCandidateRuntimeReport(candidate, plan, replays, routeViolations,
+                permissionViolations, externalCalls, answerEvaluation);
+
+        assertThat(routeViolations).isZero();
+        assertThat(permissionViolations).isZero();
+        assertThat(externalCalls).isZero();
+        assertThat(answerEvaluation.candidateOnly()).isTrue();
+        assertThat(answerEvaluation.releaseEligible()).isFalse();
+        if (generationEnabled) {
+            assertThat(answerEvaluation.citationGateStatus())
+                    .isEqualTo("eligible_for_candidate_citation_contract");
+        }
+    }
+
     private ArmReplay runFixedArm(
             G2CurrentFixtureCase evaluationCase,
+            G2CurrentFixtureRuntimeCorpus fixture,
+            G2CurrentFixtureRuntimeImportPlan.Prepared plan,
+            RagServiceImpl ragService
+    ) {
+        return runFixedArm(evaluationCase.query(), fixture, plan, ragService);
+    }
+
+    private ArmReplay runFixedArm(
+            String query,
             G2CurrentFixtureRuntimeCorpus fixture,
             G2CurrentFixtureRuntimeImportPlan.Prepared plan,
             RagServiceImpl ragService
@@ -212,7 +329,7 @@ class G2CurrentFixtureRuntimeImportL2Test {
         long startedAt = System.nanoTime();
         List<RagRetrievalResult> results = ragService.retrieve(
                 authorizedScope,
-                evaluationCase.query(),
+                query,
                 fixture.manifest().defaultTopK()
         );
         return new ArmReplay(
@@ -235,6 +352,14 @@ class G2CurrentFixtureRuntimeImportL2Test {
             G2CurrentFixtureRuntimeImportPlan.Prepared plan,
             RagServiceImpl ragService
     ) {
+        return runRouterArm(evaluationCase.query(), plan, ragService);
+    }
+
+    private ArmReplay runRouterArm(
+            String query,
+            G2CurrentFixtureRuntimeImportPlan.Prepared plan,
+            RagServiceImpl ragService
+    ) {
         List<String> authorizedScope = List.of(plan.knowledgeBaseId());
         RecordingRagRouter ragRouter = new RecordingRagRouter();
         KnowledgeTools knowledgeTools = new KnowledgeTools(ragService, null, ragRouter)
@@ -246,7 +371,7 @@ class G2CurrentFixtureRuntimeImportL2Test {
                                 .toList()
                 );
         long startedAt = System.nanoTime();
-        List<RagRetrievalResult> results = knowledgeTools.retrieveKnowledge(evaluationCase.query(), null);
+        List<RagRetrievalResult> results = knowledgeTools.retrieveKnowledge(query, null);
         long latencyMs = elapsedMillis(startedAt);
         RagRouteDecision decision = ragRouter.recordedDecision();
         if (decision == null) {
@@ -273,12 +398,12 @@ class G2CurrentFixtureRuntimeImportL2Test {
             G2CurrentFixtureProfile profile,
             G2CurrentFixtureRuntimeCorpus fixture,
             G2CurrentFixtureRuntimeImportPlan.Prepared plan,
-            RuntimeEvaluation runtimeEvaluation
+            RuntimeEvaluation runtimeEvaluation,
+            boolean allowGeneration
     ) {
-        boolean enabled = Boolean.getBoolean("g2.current.fixture.answer-generation.enabled");
-        boolean judgeEnabled = Boolean.getBoolean(ANSWER_QUALITY_JUDGE_ENABLED_PROPERTY);
-        String model = "deepseek-chat";
-        ChatClient generatorClient = answerGenerator(enabled, model);
+        boolean enabled = allowGeneration && Boolean.getBoolean(ANSWER_GENERATION_ENABLED_PROPERTY);
+        boolean judgeEnabled = allowGeneration && Boolean.getBoolean(ANSWER_QUALITY_JUDGE_ENABLED_PROPERTY);
+        ChatClient generatorClient = answerGenerator(enabled, ANSWER_GENERATION_CLIENT);
         ChatClient judgeClient = answerQualityJudge(judgeEnabled, enabled);
         return new G2CurrentFixtureAnswerEvaluationPipeline().evaluate(
                 profile,
@@ -287,7 +412,7 @@ class G2CurrentFixtureRuntimeImportL2Test {
                 runtimeEvaluation.fixedResultsByCaseId(),
                 runtimeEvaluation.routerResultsByCaseId(),
                 generatorClient,
-                enabled ? model : null,
+                enabled ? ANSWER_GENERATION_MODEL : null,
                 judgeClient,
                 judgeEnabled ? ANSWER_QUALITY_JUDGE_MODEL : null
         );
@@ -382,10 +507,59 @@ class G2CurrentFixtureRuntimeImportL2Test {
 
     private void assertIsolatedDatabase() throws Exception {
         try (Connection connection = dataSource.getConnection()) {
-            if (!ISOLATED_JDBC_URL.equals(connection.getMetaData().getURL())
-                    || !"jchatmind_rag_eval".equals(connection.getCatalog())) {
-                throw new IllegalStateException("TC-G2 current fixture import 仅允许隔离 jchatmind_rag_eval");
+            String actualUrl = connection.getMetaData().getURL();
+            String actualCatalog = connection.getCatalog();
+            if (!ISOLATED_JDBC_URL.equals(actualUrl)
+                    || !"jchatmind_rag_eval".equals(actualCatalog)) {
+                throw new IllegalStateException("TC-G2 current fixture import 仅允许隔离 "
+                        + "127.0.0.1:55432/jchatmind_rag_eval；实际 endpoint/catalog="
+                        + sanitizedJdbcEndpoint(actualUrl) + "/" + actualCatalog);
             }
+        }
+    }
+
+    private void ensureIndexRevisionSchema() throws Exception {
+        Path migration = Path.of("..", "sql", "knowledge-base", "2026-10-21-create-rag-index-revision.sql")
+                .toAbsolutePath()
+                .normalize();
+        try (Connection connection = dataSource.getConnection()) {
+            boolean tableExists;
+            try (Statement statement = connection.createStatement();
+                 ResultSet resultSet = statement.executeQuery(
+                         "SELECT to_regclass('public.rag_kb_index_revision') IS NOT NULL")) {
+                if (!resultSet.next()) {
+                    throw new IllegalStateException("无法检查隔离 RAG 索引修订表");
+                }
+                tableExists = resultSet.getBoolean(1);
+            }
+            if (!tableExists) {
+                try (Statement migrationStatement = connection.createStatement()) {
+                    migrationStatement.execute(Files.readString(migration));
+                }
+            }
+            try (Statement statement = connection.createStatement();
+                 ResultSet resultSet = statement.executeQuery("SELECT COUNT(*) FROM pg_trigger "
+                         + "WHERE NOT tgisinternal AND tgname IN "
+                         + "('trg_chunk_bge_m3_rag_index_revision_insert', "
+                         + "'trg_chunk_bge_m3_rag_index_revision_update', "
+                         + "'trg_chunk_bge_m3_rag_index_revision_delete', "
+                         + "'trg_document_asset_rag_index_revision', "
+                         + "'trg_document_asset_chunk_rag_index_revision', "
+                         + "'trg_document_rag_index_revision', "
+                         + "'trg_knowledge_base_rag_index_revision_delete')")) {
+                if (!resultSet.next() || resultSet.getInt(1) != 7) {
+                    throw new IllegalStateException("隔离 RAG 索引修订触发器未完整安装");
+                }
+            }
+        }
+    }
+
+    private String sanitizedJdbcEndpoint(String jdbcUrl) {
+        try {
+            URI uri = URI.create(jdbcUrl.substring("jdbc:".length()));
+            return uri.getHost() + ":" + uri.getPort() + uri.getPath();
+        } catch (RuntimeException exception) {
+            return "unparseable";
         }
     }
 
@@ -411,11 +585,11 @@ class G2CurrentFixtureRuntimeImportL2Test {
             G2CurrentFixtureRuntimeCorpus fixture,
             G2CurrentFixtureRuntimeImportPlan.Prepared plan,
             G2CurrentFixtureRuntimeAblationEvaluator.RuntimeReport runtimeReport,
-            G2CurrentFixtureAnswerEvaluationPipeline.Report answerEvaluation
+            G2CurrentFixtureAnswerEvaluationPipeline.Report answerEvaluation,
+            boolean citationCandidateRuntime
     ) throws IOException {
-        Path reportPath = Path.of(
-                "target", "rag-eval", "router", "fixture-fast-v1-runtime-router-ablation.json"
-        );
+        Path reportPath = citationCandidateRuntime ? CITATION_CANDIDATE_PARENT_REPORT_PATH
+                : Path.of("target", "rag-eval", "router", "fixture-fast-v1-runtime-router-ablation.json");
         Files.createDirectories(reportPath.getParent());
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("executionMode", "isolated-real-runtime");
@@ -432,6 +606,10 @@ class G2CurrentFixtureRuntimeImportL2Test {
         report.put("answerQualityJudgeModel", answerEvaluation.judgeModel());
         report.put("answerGenerationEnabled", answerEvaluation.answerGenerationEnabled());
         report.put("answerGenerationModel", answerEvaluation.generatorModel());
+        report.put("answerGenerationPromptVersion", answerEvaluation.answerGenerationEnabled()
+                ? G2CurrentFixtureAnswerGenerationEvaluator.SYSTEM_PROMPT_VERSION : null);
+        report.put("answerGenerationSystemPromptSha256", answerEvaluation.answerGenerationEnabled()
+                ? G2CurrentFixtureAnswerGenerationEvaluator.SYSTEM_PROMPT_SHA256 : null);
         report.put("fixedAnswerGeneration", answerEvaluation.fixedGeneration());
         report.put("routerAnswerGeneration", answerEvaluation.routerGeneration());
         report.put("answerQualityMeasured", answerEvaluation.answerQualityMeasured());
@@ -462,6 +640,51 @@ class G2CurrentFixtureRuntimeImportL2Test {
         Files.writeString(reportPath, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(report));
     }
 
+    private void writeCitationCandidateRuntimeReport(
+            G2CurrentFixtureCitationCandidateLoader.CandidateDataset candidate,
+            G2CurrentFixtureRuntimeImportPlan.Prepared plan,
+            List<CandidateRuntimeReplay> replays,
+            int routeViolations,
+            int permissionViolations,
+            int externalCalls,
+            G2CurrentFixtureCitationCandidateAnswerPipeline.Report answerEvaluation
+    ) throws IOException {
+        Files.createDirectories(CITATION_CANDIDATE_REPORT_PATH.getParent());
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("executionMode", "isolated-real-runtime-candidate");
+        report.put("datasetId", candidate.datasetId());
+        report.put("parentDatasetId", candidate.parentDatasetId());
+        report.put("reviewStatus", candidate.reviewStatus());
+        report.put("caseSha256", candidate.caseSha256());
+        report.put("corpusSha256", candidate.corpusSha256());
+        report.put("parentFixtureSha256", plan.fixtureSha256());
+        report.put("runtimeChunkMapping", plan.logicalChunkIdByRuntimeUuid());
+        report.put("candidateOnly", true);
+        report.put("releaseEligible", false);
+        String status = answerEvaluation != null ? "evaluation_complete"
+                : routeViolations == 0 && permissionViolations == 0 && externalCalls == 0
+                ? "retrieval_safe_answer_evaluation_pending" : "retrieval_safety_gate_failed";
+        report.put("status", status);
+        report.put("answerGenerationEnabled", answerEvaluation != null
+                && answerEvaluation.answerGenerationEnabled());
+        report.put("answerGenerationModel", answerEvaluation == null ? null : answerEvaluation.generatorModel());
+        report.put("answerGenerationPromptVersion", answerEvaluation != null
+                && answerEvaluation.answerGenerationEnabled()
+                ? G2CurrentFixtureAnswerGenerationEvaluator.SYSTEM_PROMPT_VERSION : null);
+        report.put("answerGenerationSystemPromptSha256", answerEvaluation != null
+                && answerEvaluation.answerGenerationEnabled()
+                ? G2CurrentFixtureAnswerGenerationEvaluator.SYSTEM_PROMPT_SHA256 : null);
+        report.put("citationGateStatus", answerEvaluation == null ? "not_run" : answerEvaluation.citationGateStatus());
+        report.put("parentRetrievalReportPath", CITATION_CANDIDATE_PARENT_REPORT_PATH.toString());
+        report.put("routeViolations", routeViolations);
+        report.put("permissionViolations", permissionViolations);
+        report.put("externalCalls", externalCalls);
+        report.put("retrievalCases", replays);
+        report.put("answerEvaluation", answerEvaluation);
+        Files.writeString(CITATION_CANDIDATE_REPORT_PATH,
+                objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(report));
+    }
+
     @Configuration
     @ImportAutoConfiguration({
             JacksonAutoConfiguration.class,
@@ -480,6 +703,21 @@ class G2CurrentFixtureRuntimeImportL2Test {
             AnswerQualityJudgeRuntimeConfig.class
     })
     static class RuntimeTestConfig {
+
+        @Bean
+        ToolCallingManager toolCallingManager() {
+            return ToolCallingManager.builder().build();
+        }
+
+        @Bean
+        RetryTemplate retryTemplate() {
+            return new RetryTemplate();
+        }
+
+        @Bean
+        ResponseErrorHandler responseErrorHandler() {
+            return new DefaultResponseErrorHandler();
+        }
     }
 
     @Configuration
@@ -487,8 +725,7 @@ class G2CurrentFixtureRuntimeImportL2Test {
     @ImportAutoConfiguration(DeepSeekChatAutoConfiguration.class)
     static class AnswerGenerationRuntimeConfig {
 
-        @Bean(ANSWER_GENERATION_MODEL)
-        @ConditionalOnBean(DeepSeekChatModel.class)
+        @Bean(ANSWER_GENERATION_CLIENT)
         ChatClient deepSeekChatClient(DeepSeekChatModel deepSeekChatModel) {
             return ChatClient.create(deepSeekChatModel);
         }
@@ -503,7 +740,6 @@ class G2CurrentFixtureRuntimeImportL2Test {
     static class AnswerQualityJudgeRuntimeConfig {
 
         @Bean(ANSWER_QUALITY_JUDGE_MODEL)
-        @ConditionalOnBean(ZhiPuAiChatModel.class)
         ChatClient zhiPuAiChatClient(ZhiPuAiChatModel zhiPuAiChatModel) {
             return ChatClient.create(zhiPuAiChatModel);
         }
@@ -541,6 +777,13 @@ class G2CurrentFixtureRuntimeImportL2Test {
             results.forEach((caseId, caseResults) -> immutable.put(caseId, List.copyOf(caseResults)));
             return Map.copyOf(immutable);
         }
+    }
+
+    private record CandidateRuntimeReplay(
+            String caseId,
+            G2CurrentFixtureRuntimeAblationEvaluator.RuntimeArm fixed,
+            G2CurrentFixtureRuntimeAblationEvaluator.RuntimeArm router
+    ) {
     }
 
     private static final class RecordingRagRouter extends RagRouter {

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.dto.QueryRewriteResult;
+import com.kama.jchatmind.model.dto.RagKbIndexRevision;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.QueryRewriteService;
@@ -20,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,6 +36,38 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RagServiceImplTest {
+
+    @Test
+    void shouldReturnPerKnowledgeBaseIndexRevisionsAndRetrievalConfigurationFingerprint() {
+        ChunkBgeM3Mapper mapper = mock(ChunkBgeM3Mapper.class);
+        QueryRewriteService rewriteService = mock(QueryRewriteService.class);
+        BgeRerankerService rerankerService = mock(BgeRerankerService.class);
+        RagKbIndexRevision storedRevision = new RagKbIndexRevision();
+        storedRevision.setKbId("kb-1");
+        storedRevision.setRevision(3L);
+        when(mapper.selectKbIndexRevisions(List.of("kb-1", "kb-2")))
+                .thenReturn(List.of(storedRevision));
+        when(rewriteService.cacheConfigurationFingerprint()).thenReturn("rewrite-v1");
+        when(rerankerService.cacheConfigurationFingerprint()).thenReturn("rerank-v1");
+        RagServiceImpl service = new RagServiceImpl(
+                WebClient.builder(),
+                mapper,
+                rewriteService,
+                mock(VchordBm25QueryService.class),
+                rerankerService,
+                "http://127.0.0.1:1",
+                "embedding-v1",
+                false,
+                false,
+                false,
+                0
+        );
+
+        assertEquals(Map.of("kb-1", 3L, "kb-2", 0L), service.indexRevisions(List.of("kb-1", "kb-2")));
+        assertTrue(service.retrievalConfigurationFingerprint().contains("embeddingModel=embedding-v1"));
+        assertTrue(service.retrievalConfigurationFingerprint().contains("rewrite-v1"));
+        assertTrue(service.retrievalConfigurationFingerprint().contains("rerank-v1"));
+    }
 
     @Test
     void shouldRetrieveOnlyMarkdownTableAssetCandidatesWithinAuthorizedKnowledgeBasesAndHardContext() throws Exception {

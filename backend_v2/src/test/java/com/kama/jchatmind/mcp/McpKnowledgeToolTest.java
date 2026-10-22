@@ -68,9 +68,13 @@ class McpKnowledgeToolTest {
             when(ragService.retrieve(List.of("kb-own"), "查询", 3)).thenReturn(List.of(result));
 
             String response = tool.search("查询", List.of("kb-own"));
+            String cachedResponse = tool.search("查询", List.of("kb-own"));
 
             assertThat(response).contains("知识库: 用户 7 知识库").contains("仅属于用户 7 的内容");
-            verify(knowledgeBaseAccessService).requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7");
+            assertThat(cachedResponse).isEqualTo(response);
+            verify(knowledgeBaseAccessService, org.mockito.Mockito.times(2))
+                    .requireAccessibleKnowledgeBaseIds(List.of("kb-own"), "7");
+            verify(ragService).retrieve(List.of("kb-own"), "查询", 3);
             verify(ragService).retrieve(List.of("kb-own"), "查询", 3);
         } finally {
             RequestContextHolder.resetRequestAttributes();

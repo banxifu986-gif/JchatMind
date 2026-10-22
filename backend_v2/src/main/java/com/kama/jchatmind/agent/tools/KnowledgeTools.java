@@ -6,6 +6,7 @@ import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.rag.RagRouteDecision;
+import com.kama.jchatmind.rag.RagRetrievalResultCache;
 import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
@@ -31,6 +32,7 @@ public class KnowledgeTools implements Tool {
     private final RagService ragService;
     private final ChatSessionFacadeService chatSessionFacadeService;
     private final RagRouter ragRouter;
+    private final RagRetrievalResultCache retrievalResultCache;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String userId;
@@ -38,7 +40,8 @@ public class KnowledgeTools implements Tool {
     private Map<String, KnowledgeBaseDTO> allowedKbMap;
 
     public KnowledgeTools(RagService ragService, ChatSessionFacadeService chatSessionFacadeService) {
-        this(ragService, chatSessionFacadeService, new RagRouter());
+        this(ragService, chatSessionFacadeService, new RagRouter(),
+                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES));
     }
 
     @Autowired
@@ -47,16 +50,28 @@ public class KnowledgeTools implements Tool {
             ChatSessionFacadeService chatSessionFacadeService,
             RagRouter ragRouter
     ) {
+        this(ragService, chatSessionFacadeService, ragRouter,
+                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES));
+    }
+
+    private KnowledgeTools(
+            RagService ragService,
+            ChatSessionFacadeService chatSessionFacadeService,
+            RagRouter ragRouter,
+            RagRetrievalResultCache retrievalResultCache
+    ) {
         this.ragService = ragService;
         this.chatSessionFacadeService = chatSessionFacadeService;
         this.ragRouter = ragRouter;
+        this.retrievalResultCache = retrievalResultCache;
         this.userId = null;
         this.chatSessionId = null;
         this.allowedKbMap = Map.of();
     }
 
     public KnowledgeTools fork(String userId, String chatSessionId, List<KnowledgeBaseDTO> allowedKbs) {
-        KnowledgeTools tool = new KnowledgeTools(ragService, chatSessionFacadeService, ragRouter);
+        KnowledgeTools tool = new KnowledgeTools(ragService, chatSessionFacadeService, ragRouter,
+                retrievalResultCache);
         tool.userId = userId;
         tool.chatSessionId = chatSessionId;
         tool.allowedKbMap = buildAllowedKbMap(allowedKbs);
@@ -112,40 +127,79 @@ public class KnowledgeTools implements Tool {
         if (routeScope.isEmpty()) {
             return KnowledgeQueryResult.empty("当前授权知识范围内没有可检索的知识库。");
         }
-        retrievalContext = alignRetrievalContext(retrievalContext, kbIds, routeScope);
-        List<RagRetrievalResult> markdownTableAssetResults = List.of();
-        List<RagRetrievalResult> pdfPageAssetResults = List.of();
-        if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
-            try {
-                markdownTableAssetResults = ragService.retrieveMarkdownTableAssets(
-                        routeScope,
-                        query,
-                        retrievalContext,
-                        route.topK()
-                );
-            } catch (RuntimeException e) {
-                markdownTableAssetResults = List.of();
-            }
-            try {
-                pdfPageAssetResults = ragService.retrievePdfPageAssets(routeScope, query, retrievalContext, route.topK());
-            } catch (RuntimeException e) {
-                pdfPageAssetResults = List.of();
-            }
-        }
-        List<RagRetrievalResult> results = ragService.retrieve(routeScope, query, retrievalContext, route.topK());
-        if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
-            results = mergeMultimodalResults(
-                    markdownTableAssetResults,
-                    pdfPageAssetResults,
-                    results,
+        RagRetrievalContext alignedRetrievalContext = alignRetrievalContext(retrievalContext, kbIds, routeScope);
+        RagRetrievalResultCache.Key cacheKey = RagRetrievalResultCache.Key.of(
+                userId,
+                routeScope,
+                ragService.indexRevisions(routeScope),
+                query,
+                alignedRetrievalContext,
+                route.route().name(),
+                routeFingerprint(route),
+                route.topK(),
+                ragService.retrievalConfigurationFingerprint()
+        );
+        List<RagRetrievalResult> results = retrievalResultCache.getOrCompute(cacheKey, () -> {
+            List<RagRetrievalResult> markdownTableAssetResults =
+                    route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                            ? retrieveMarkdownTableAssets(routeScope, query, alignedRetrievalContext, route.topK())
+                            : List.of();
+            List<RagRetrievalResult> pdfPageAssetResults =
+                    route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                            ? retrievePdfPageAssets(routeScope, query, alignedRetrievalContext, route.topK())
+                            : List.of();
+            List<RagRetrievalResult> retrievedResults = ragService.retrieve(
+                    routeScope,
+                    query,
+                    alignedRetrievalContext,
                     route.topK()
             );
-        }
+            if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
+                return mergeMultimodalResults(
+                        markdownTableAssetResults,
+                        pdfPageAssetResults,
+                        retrievedResults,
+                        route.topK()
+                );
+            }
+            return retrievedResults;
+        });
         if (results == null || results.isEmpty()) {
             return KnowledgeQueryResult.empty("当前授权知识范围内没有足够证据，无法可靠回答。");
         }
         updateRetrievalContext(results);
         return new KnowledgeQueryResult(List.copyOf(results), null);
+    }
+
+    private List<RagRetrievalResult> retrieveMarkdownTableAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        try {
+            return ragService.retrieveMarkdownTableAssets(kbIds, query, context, limit);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    private List<RagRetrievalResult> retrievePdfPageAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        try {
+            return ragService.retrievePdfPageAssets(kbIds, query, context, limit);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    private String routeFingerprint(RagRouteDecision route) {
+        return route.route().name() + "|" + route.rewriteMode() + "|" + route.retrievalChannels()
+                + "|rerank=" + route.rerankEnabled() + "|clarify=" + route.needClarification();
     }
 
     private List<RagRetrievalResult> mergeMultimodalResults(

@@ -1,6 +1,7 @@
 package com.kama.jchatmind.mapper;
 
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
+import com.kama.jchatmind.model.dto.RagKbIndexRevision;
 import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -16,6 +17,8 @@ import java.util.List;
 @Mapper
 public interface ChunkBgeM3Mapper {
     int insert(ChunkBgeM3 chunkBgeM3);
+
+    List<RagKbIndexRevision> selectKbIndexRevisions(@Param("kbIds") List<String> kbIds);
 
     ChunkBgeM3 selectById(String id);
 

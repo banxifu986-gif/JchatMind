@@ -29,6 +29,7 @@ import java.util.Set;
 @Service
 @Slf4j
 public class QueryRewriteServiceImpl implements QueryRewriteService {
+    private static final String CACHE_ALGORITHM_VERSION = "query-rewrite-v1";
     private static final int MIN_PATH_SUBSTRING_LENGTH = 4;
     private static final int TITLE_LOOKUP_MAX_QUERY_LENGTH = 80;
     private static final int TITLE_EXPANSION_MAX_QUERY_LENGTH = 24;
@@ -62,6 +63,12 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     private final ObjectProvider<ChatClientRegistry> chatClientRegistryProvider;
     private final boolean llmRewriteEnabled;
     private final String llmRewriteModel;
+
+    @Override
+    public String cacheConfigurationFingerprint() {
+        return CACHE_ALGORITHM_VERSION + "|llmRewriteEnabled=" + llmRewriteEnabled
+                + "|llmRewriteModel=" + (llmRewriteModel == null ? "" : llmRewriteModel);
+    }
 
     public QueryRewriteServiceImpl(ChunkBgeM3Mapper chunkBgeM3Mapper) {
         this(chunkBgeM3Mapper, null, null, false, null);

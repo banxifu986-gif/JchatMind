@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.model.dto.QueryRewriteResult;
+import com.kama.jchatmind.model.dto.RagKbIndexRevision;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.service.QueryRewriteService;
@@ -28,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -36,6 +38,7 @@ import java.util.regex.Pattern;
 @Service
 @Slf4j
 public class RagServiceImpl implements RagService {
+    private static final String CACHE_ALGORITHM_VERSION = "rag-retrieval-v1";
     private static final int RERANK_CANDIDATE_LIMIT = 50;
     private static final int TITLE_MATCH_CANDIDATE_LIMIT = 20;
     private static final int TITLE_CONTAINS_CANDIDATE_LIMIT = 10;
@@ -148,6 +151,39 @@ public class RagServiceImpl implements RagService {
     @Override
     public float[] embed(String text) {
         return doEmbed(text);
+    }
+
+    @Override
+    public Map<String, Long> indexRevisions(List<String> kbIds) {
+        List<String> effectiveKbIds = sanitizeKbIds(kbIds);
+        if (effectiveKbIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, Long> revisions = new TreeMap<>();
+        for (String kbId : effectiveKbIds) {
+            revisions.put(kbId, 0L);
+        }
+        List<RagKbIndexRevision> storedRevisions = chunkBgeM3Mapper.selectKbIndexRevisions(effectiveKbIds);
+        if (storedRevisions != null) {
+            for (RagKbIndexRevision revision : storedRevisions) {
+                if (revision != null && StringUtils.hasText(revision.getKbId()) && revision.getRevision() != null
+                        && revisions.containsKey(revision.getKbId())) {
+                    revisions.put(revision.getKbId(), revision.getRevision());
+                }
+            }
+        }
+        return Map.copyOf(revisions);
+    }
+
+    @Override
+    public String retrievalConfigurationFingerprint() {
+        return CACHE_ALGORITHM_VERSION + "|embeddingModel=" + embeddingModel
+                + "|rerankDebug=" + rerankDebug
+                + "|disableQueryExpansion=" + disableQueryExpansion
+                + "|disableRerank=" + disableRerank
+                + "|queryRewrite=" + queryRewriteService.cacheConfigurationFingerprint()
+                + "|reranker=" + bgeRerankerService.cacheConfigurationFingerprint();
     }
 
     @Override

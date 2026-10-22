@@ -352,7 +352,6 @@ class G2CurrentMultimodalCandidateImportL2Test {
     static class AnswerGenerationRuntimeConfig {
 
         @Bean(ANSWER_GENERATION_CLIENT)
-        @ConditionalOnBean(DeepSeekChatModel.class)
         ChatClient multimodalDeepSeekChatClient(DeepSeekChatModel deepSeekChatModel) {
             return ChatClient.create(deepSeekChatModel);
         }

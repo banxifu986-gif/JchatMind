@@ -3,7 +3,11 @@ package com.kama.jchatmind.rag;
 import com.kama.jchatmind.config.ChatClientRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration;
+import org.springframework.ai.model.tool.autoconfigure.ToolCallingAutoConfiguration;
+import org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration;
 import org.springframework.ai.zhipuai.ZhiPuAiChatModel;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +58,31 @@ class G2CurrentMultimodalAnswerEvaluationRuntimeConfigTest {
                     assertThat(registry.get("deepseek-multimodal"))
                             .isNotSameAs(registry.get("glm-multimodal-refusal"));
                     assertThat(registry.getAllClients()).hasSize(2);
+                });
+    }
+
+    @Test
+    void registersGeneratorFromTheOptInDeepSeekAutoConfiguration() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        DeepSeekChatAutoConfiguration.class,
+                        ToolCallingAutoConfiguration.class,
+                        SpringAiRetryAutoConfiguration.class
+                ))
+                .withUserConfiguration(
+                        ChatClientRegistry.class,
+                        G2CurrentMultimodalCandidateImportL2Test.AnswerGenerationRuntimeConfig.class
+                )
+                .withPropertyValues(
+                        "spring.ai.model.chat=deepseek",
+                        "spring.ai.deepseek.api-key=test-dummy-key",
+                        "g2.current.multimodal.answer-generation.enabled=true"
+                )
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(DeepSeekChatModel.class);
+                    assertThat(context.getBean(ChatClientRegistry.class)
+                            .get("deepseek-multimodal")).isNotNull();
                 });
     }
 }

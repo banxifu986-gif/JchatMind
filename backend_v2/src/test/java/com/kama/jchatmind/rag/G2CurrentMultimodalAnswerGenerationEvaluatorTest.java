@@ -5,7 +5,11 @@ import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.client.HttpClientErrorException;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,8 +52,16 @@ class G2CurrentMultimodalAnswerGenerationEvaluatorTest {
         );
 
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> systemPrompts = ArgumentCaptor.forClass(String.class);
         verify(generator.client(), times(4)).prompt();
+        verify(generator.requestSpec(), times(4)).system(systemPrompts.capture());
         verify(generator.requestSpec(), times(4)).user(prompts.capture());
+        assertThat(systemPrompts.getAllValues()).allSatisfy(systemPrompt -> {
+            assertThat(systemPrompt).contains("directly answers the question");
+            assertThat(systemPrompt).contains("minimum number of sources");
+            assertThat(systemPrompt).contains("do not cite anything");
+            assertThat(systemPrompt).contains("explicitly names an asset type");
+        });
         for (int index = 0; index < input.profile().cases().size(); index++) {
             G2CurrentMultimodalCandidateFixtureLoader.CandidateCase candidateCase =
                     input.profile().cases().get(index);
@@ -61,6 +73,7 @@ class G2CurrentMultimodalAnswerGenerationEvaluatorTest {
                 assertThat(prompt).contains("Retrieved context:");
             } else {
                 assertThat(prompt).contains(results.get(0).getChunkId(), results.get(0).getContent());
+                assertThat(prompt).contains(candidateCase.goldAsset().assetType());
             }
         }
     }
@@ -102,7 +115,16 @@ class G2CurrentMultimodalAnswerGenerationEvaluatorTest {
     void recordsGenerationErrorsWithoutExposingExceptionMessages() throws Exception {
         EvaluationInput input = evaluationInput();
         GeneratorFixture generator = generator("unused");
-        when(generator.requestSpec().call()).thenThrow(new IllegalStateException("sensitive prompt content"));
+        String sensitiveMessage = "sensitive upstream response message";
+        String sensitiveBody = "sensitive upstream response body";
+        HttpClientErrorException unauthorized = HttpClientErrorException.create(
+                HttpStatus.UNAUTHORIZED,
+                sensitiveMessage,
+                HttpHeaders.EMPTY,
+                sensitiveBody.getBytes(StandardCharsets.UTF_8),
+                StandardCharsets.UTF_8
+        );
+        when(generator.requestSpec().call()).thenThrow(unauthorized);
 
         G2CurrentMultimodalAnswerGenerationEvaluator.Report report =
                 new G2CurrentMultimodalAnswerGenerationEvaluator(generator.client(), "test-generator")
@@ -113,7 +135,11 @@ class G2CurrentMultimodalAnswerGenerationEvaluatorTest {
         assertThat(report.failedCaseCount()).isEqualTo(4);
         assertThat(report.reasonCounts()).containsEntry("generation_error", 4);
         assertThat(report.finalAnswersByCaseId().values()).containsOnly("");
-        assertThat(report.toString()).doesNotContain("sensitive prompt content");
+        assertThat(report.cases()).allSatisfy(caseResult -> {
+            assertThat(caseResult.failureType()).contains("HttpClientErrorException");
+            assertThat(caseResult.httpStatus()).isEqualTo(401);
+        });
+        assertThat(report.toString()).doesNotContain(sensitiveMessage, sensitiveBody);
     }
 
     @Test

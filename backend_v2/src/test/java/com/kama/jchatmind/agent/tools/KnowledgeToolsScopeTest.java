@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -545,5 +546,102 @@ class KnowledgeToolsScopeTest {
                 .contains("引用: chunk-1")
                 .contains("页码: 2")
                 .contains("证据正文");
+    }
+
+    @Test
+    void shouldReuseCachedRetrievalForTheSameAuthorizedRequest() {
+        RagService ragService = mock(RagService.class);
+        RagRetrievalResult result = new RagRetrievalResult();
+        result.setChunkId("chunk-1");
+        result.setKbId("kb-1");
+        result.setContent("证据正文");
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(result));
+        KnowledgeTools tool = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class))
+                .fork("7", "session-1", List.of(KnowledgeBaseDTO.builder().id("kb-1").build()));
+
+        tool.retrieveKnowledge("问题", null);
+        tool.retrieveKnowledge("问题", null);
+
+        verify(ragService).retrieve(List.of("kb-1"), "问题", null, 3);
+    }
+
+    @Test
+    void shouldShareResultsAcrossSessionsForOneUserWithoutSharingAcrossUsers() {
+        RagService ragService = mock(RagService.class);
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of());
+        KnowledgeTools base = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class));
+        KnowledgeTools firstSession = base.fork("7", "session-1", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build()
+        ));
+        KnowledgeTools secondSession = base.fork("7", "session-2", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build()
+        ));
+        KnowledgeTools otherUser = base.fork("8", "session-3", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build()
+        ));
+
+        firstSession.retrieveKnowledge("问题", null);
+        secondSession.retrieveKnowledge("问题", null);
+        otherUser.retrieveKnowledge("问题", null);
+
+        verify(ragService, times(2)).retrieve(List.of("kb-1"), "问题", null, 3);
+    }
+
+    @Test
+    void shouldPartitionCachedResultsByKbIndexRevisionAndRetrievalConfiguration() {
+        RagService ragService = mock(RagService.class);
+        java.util.concurrent.atomic.AtomicLong revision = new java.util.concurrent.atomic.AtomicLong(1L);
+        java.util.concurrent.atomic.AtomicReference<String> configuration =
+                new java.util.concurrent.atomic.AtomicReference<>("config-1");
+        when(ragService.indexRevisions(org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+            List<String> kbIds = invocation.getArgument(0);
+            return java.util.Map.of(kbIds.get(0), revision.get());
+        });
+        when(ragService.retrievalConfigurationFingerprint()).thenAnswer(invocation -> configuration.get());
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of());
+        when(ragService.retrieve(List.of("kb-2"), "问题", null, 3)).thenReturn(List.of());
+        KnowledgeTools base = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class));
+        KnowledgeTools kb1 = base.fork("7", "session-1", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build()
+        ));
+        KnowledgeTools kb2 = base.fork("7", "session-2", List.of(
+                KnowledgeBaseDTO.builder().id("kb-2").build()
+        ));
+
+        kb1.retrieveKnowledge("问题", null);
+        kb1.retrieveKnowledge("问题", null);
+        revision.set(2L);
+        kb1.retrieveKnowledge("问题", null);
+        configuration.set("config-2");
+        kb1.retrieveKnowledge("问题", null);
+        kb2.retrieveKnowledge("问题", null);
+
+        verify(ragService, times(4)).retrieve(
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.eq("问题"),
+                isNull(),
+                org.mockito.ArgumentMatchers.eq(3)
+        );
+    }
+
+    @Test
+    void shouldReturnCopiesSoCallerMutationDoesNotChangeCachedEvidence() {
+        RagService ragService = mock(RagService.class);
+        RagRetrievalResult evidence = new RagRetrievalResult();
+        evidence.setChunkId("chunk-1");
+        evidence.setKbId("kb-1");
+        evidence.setContent("原始证据");
+        when(ragService.retrieve(List.of("kb-1"), "问题", null, 3)).thenReturn(List.of(evidence));
+        KnowledgeTools base = new KnowledgeTools(ragService, mock(ChatSessionFacadeService.class));
+        KnowledgeTools tool = base.fork("7", "session-1", List.of(
+                KnowledgeBaseDTO.builder().id("kb-1").build()
+        ));
+
+        List<RagRetrievalResult> first = tool.retrieveKnowledge("问题", null);
+        first.get(0).setContent("调用方篡改");
+        List<RagRetrievalResult> second = tool.retrieveKnowledge("问题", null);
+
+        assertThat(second.get(0).getContent()).isEqualTo("原始证据");
+        verify(ragService).retrieve(List.of("kb-1"), "问题", null, 3);
     }
 }

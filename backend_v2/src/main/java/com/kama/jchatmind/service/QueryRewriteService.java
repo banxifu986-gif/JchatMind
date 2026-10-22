@@ -7,4 +7,8 @@ import java.util.List;
 
 public interface QueryRewriteService {
     QueryRewriteResult rewrite(List<String> kbIds, String query, RagRetrievalContext context);
+
+    default String cacheConfigurationFingerprint() {
+        return getClass().getName();
+    }
 }

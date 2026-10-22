@@ -153,8 +153,9 @@ final class G2CurrentMultimodalCandidateFixtureLoader {
                     || candidateCase.kbScope().isEmpty()
                     || !StringUtils.hasText(candidateCase.expectedRoute())
                     || !StringUtils.hasText(candidateCase.sourceDocumentId())
-                    || !"pending".equals(candidateCase.reviewStatus())) {
-                throw new IllegalStateException("multimodal candidate case 缺少字段、数据集不匹配或已越过待审核状态");
+                    || !("pending".equals(candidateCase.reviewStatus())
+                    || "approved".equals(candidateCase.reviewStatus()))) {
+                throw new IllegalStateException("multimodal candidate case 缺少字段、数据集不匹配或 reviewStatus 非法");
             }
             cases.add(candidateCase);
         }

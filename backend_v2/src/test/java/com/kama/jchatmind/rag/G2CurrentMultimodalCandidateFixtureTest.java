@@ -142,7 +142,21 @@ class G2CurrentMultimodalCandidateFixtureTest {
     }
 
     @Test
-    void loadsHashVerifiedTableAndPdfGoldWithoutAdmittingCandidateToRelease() throws Exception {
+    void abstentionCaseAsksForInformationMissingFromTheTable() throws Exception {
+        G2CurrentMultimodalCandidateFixtureLoader.CandidateProfile profile =
+                G2CurrentMultimodalCandidateFixtureLoader.load(MANIFEST_PATH);
+        G2CurrentMultimodalCandidateFixtureLoader.CandidateCase abstentionCase = profile.cases().stream()
+                .filter(G2CurrentMultimodalCandidateFixtureLoader.CandidateCase::shouldAbstain)
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(abstentionCase.query()).contains("保价");
+        assertThat(abstentionCase.goldAsset()).isNull();
+        assertThat(asset(profile, "TABLE").content()).doesNotContain("保价");
+    }
+
+    @Test
+    void loadsApprovedCasesWithoutAdmittingCandidateToRelease() throws Exception {
         G2CurrentMultimodalCandidateFixtureLoader.CandidateProfile profile =
                 G2CurrentMultimodalCandidateFixtureLoader.load(MANIFEST_PATH);
 
@@ -153,7 +167,7 @@ class G2CurrentMultimodalCandidateFixtureTest {
         assertThat(profile.caseSha256()).hasSize(64);
         assertThat(profile.corpusSha256()).hasSize(64);
         assertThat(profile.cases()).hasSize(4)
-                .allMatch(candidateCase -> "pending".equals(candidateCase.reviewStatus()));
+                .allMatch(candidateCase -> "approved".equals(candidateCase.reviewStatus()));
         assertThat(profile.cases().stream().filter(G2CurrentMultimodalCandidateFixtureLoader.CandidateCase::shouldAbstain))
                 .hasSize(1);
         assertThat(profile.assets()).hasSize(2);

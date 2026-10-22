@@ -17,11 +17,13 @@ import java.util.List;
 
 @Service
 public class BgeRerankerService {
+    private static final String MODEL_VERSION = "BAAI/bge-reranker-v2-m3";
     private static final int TEI_MAX_CLIENT_BATCH_SIZE = 32;
     private static final int TEI_MAX_CONCURRENT_BATCHES = 1;
 
     private final WebClient webClient;
     private final boolean enabled;
+    private final String baseUrl;
     private final Duration timeout;
 
     public BgeRerankerService(
@@ -32,7 +34,13 @@ public class BgeRerankerService {
     ) {
         this.webClient = builder.baseUrl(baseUrl).build();
         this.enabled = enabled;
+        this.baseUrl = baseUrl;
         this.timeout = Duration.ofMillis(Math.max(timeoutMs, 1));
+    }
+
+    public String cacheConfigurationFingerprint() {
+        return "bge-reranker-v1|model=" + MODEL_VERSION + "|enabled=" + enabled + "|baseUrl=" + baseUrl
+                + "|timeoutMs=" + timeout.toMillis();
     }
 
     public List<Double> rerank(String query, List<String> texts) {

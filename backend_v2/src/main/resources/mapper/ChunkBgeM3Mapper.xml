@@ -31,6 +31,17 @@
         </foreach>
     </sql>
 
+    <select id="selectKbIndexRevisions" resultMap="RagKbIndexRevisionMap">
+        SELECT kb_id,
+               revision
+        FROM rag_kb_index_revision
+        WHERE kb_id IN
+        <foreach collection="kbIds" item="kbId" open="(" separator="," close=")">
+            #{kbId}
+        </foreach>
+        ORDER BY kb_id
+    </select>
+
     <resultMap id="RagRetrievalResultMap" type="com.kama.jchatmind.model.dto.RagRetrievalResult">
         <result property="chunkId" column="chunk_id" jdbcType="VARCHAR"/>
         <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
@@ -39,6 +50,11 @@
         <result property="metadata" column="metadata" jdbcType="VARCHAR"/>
         <result property="distance" column="distance" jdbcType="DOUBLE"/>
         <result property="rank" column="rank" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <resultMap id="RagKbIndexRevisionMap" type="com.kama.jchatmind.model.dto.RagKbIndexRevision">
+        <id property="kbId" column="kb_id" jdbcType="VARCHAR"/>
+        <result property="revision" column="revision" jdbcType="BIGINT"/>
     </resultMap>
 
     <insert id="insert" parameterType="com.kama.jchatmind.model.entity.ChunkBgeM3"

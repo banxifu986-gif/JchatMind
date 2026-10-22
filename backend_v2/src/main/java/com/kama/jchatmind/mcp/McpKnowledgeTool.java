@@ -7,6 +7,7 @@ import com.kama.jchatmind.mapper.KnowledgeBaseMapper;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.entity.KnowledgeBase;
 import com.kama.jchatmind.rag.RagRouteDecision;
+import com.kama.jchatmind.rag.RagRetrievalResultCache;
 import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
@@ -34,6 +35,9 @@ public class McpKnowledgeTool {
     private final KnowledgeBaseAccessService knowledgeBaseAccessService;
     private final McpPrincipalAccessService mcpPrincipalAccessService;
     private final RagRouter ragRouter;
+    private final RagRetrievalResultCache retrievalResultCache = new RagRetrievalResultCache(
+            RagRetrievalResultCache.DEFAULT_MAX_ENTRIES
+    );
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public McpKnowledgeTool(
@@ -108,34 +112,37 @@ public class McpKnowledgeTool {
                 );
                 return "当前授权知识范围内没有可检索的知识库。";
             }
-            List<RagRetrievalResult> markdownTableAssetResults = List.of();
-            List<RagRetrievalResult> pdfPageAssetResults = List.of();
-            if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
-                try {
-                    markdownTableAssetResults = ragService.retrieveMarkdownTableAssets(
-                            routeScope,
-                            query,
-                            null,
+            RagRetrievalResultCache.Key cacheKey = RagRetrievalResultCache.Key.of(
+                    String.valueOf(caller.userId()),
+                    routeScope,
+                    ragService.indexRevisions(routeScope),
+                    query,
+                    null,
+                    route.route().name(),
+                    route.toString(),
+                    route.topK(),
+                    ragService.retrievalConfigurationFingerprint()
+            );
+            List<RagRetrievalResult> results = retrievalResultCache.getOrCompute(cacheKey, () -> {
+                List<RagRetrievalResult> markdownTableAssetResults =
+                        route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                                ? retrieveMarkdownTableAssets(routeScope, query, route.topK())
+                                : List.of();
+                List<RagRetrievalResult> pdfPageAssetResults =
+                        route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                                ? retrievePdfPageAssets(routeScope, query, route.topK())
+                                : List.of();
+                List<RagRetrievalResult> retrieved = ragService.retrieve(routeScope, query, route.topK());
+                if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
+                    return mergeMultimodalResults(
+                            markdownTableAssetResults,
+                            pdfPageAssetResults,
+                            retrieved,
                             route.topK()
                     );
-                } catch (RuntimeException e) {
-                    markdownTableAssetResults = List.of();
                 }
-                try {
-                    pdfPageAssetResults = ragService.retrievePdfPageAssets(routeScope, query, null, route.topK());
-                } catch (RuntimeException e) {
-                    pdfPageAssetResults = List.of();
-                }
-            }
-            List<RagRetrievalResult> results = ragService.retrieve(routeScope, query, route.topK());
-            if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
-                results = mergeMultimodalResults(
-                        markdownTableAssetResults,
-                        pdfPageAssetResults,
-                        results,
-                    route.topK()
-                );
-            }
+                return retrieved;
+            });
             if (results == null || results.isEmpty()) {
                 mcpPrincipalAccessService.recordKnowledgeQuery(
                         caller,
@@ -163,6 +170,22 @@ public class McpKnowledgeTool {
                     "knowledge_base_access_denied"
             );
             return PRIVATE_KNOWLEDGE_ACCESS_DENIED;
+        }
+    }
+
+    private List<RagRetrievalResult> retrieveMarkdownTableAssets(List<String> kbIds, String query, int limit) {
+        try {
+            return ragService.retrieveMarkdownTableAssets(kbIds, query, null, limit);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    private List<RagRetrievalResult> retrievePdfPageAssets(List<String> kbIds, String query, int limit) {
+        try {
+            return ragService.retrievePdfPageAssets(kbIds, query, null, limit);
+        } catch (RuntimeException e) {
+            return List.of();
         }
     }
 

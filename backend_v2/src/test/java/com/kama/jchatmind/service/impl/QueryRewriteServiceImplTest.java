@@ -504,6 +504,11 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
+        public List<com.kama.jchatmind.model.dto.RagKbIndexRevision> selectKbIndexRevisions(List<String> kbIds) {
+            return List.of();
+        }
+
+        @Override
         public List<com.kama.jchatmind.model.entity.ChunkBgeM3> similaritySearch(List<String> kbIds, String vectorLiteral, int limit) {
             throw new UnsupportedOperationException();
         }

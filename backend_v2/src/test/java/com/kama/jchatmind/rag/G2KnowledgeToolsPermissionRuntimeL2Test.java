@@ -349,6 +349,16 @@ class G2KnowledgeToolsPermissionRuntimeL2Test {
             return List.of();
         }
 
+        @Override
+        public java.util.Map<String, Long> indexRevisions(List<String> kbIds) {
+            return java.util.Map.of();
+        }
+
+        @Override
+        public String retrievalConfigurationFingerprint() {
+            return "permission-test";
+        }
+
         private String marker(String kbId) {
             return switch (kbId) {
                 case KB_A1 -> "A1_SCOPE_EVIDENCE";

@@ -4,6 +4,7 @@ import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 
 import java.util.List;
+import java.util.Map;
 
 public interface RagService {
     float[] embed(String text);
@@ -27,4 +28,8 @@ public interface RagService {
             RagRetrievalContext context,
             int limit
     );
+
+    Map<String, Long> indexRevisions(List<String> kbIds);
+
+    String retrievalConfigurationFingerprint();
 }
