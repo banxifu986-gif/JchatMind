@@ -3,7 +3,7 @@
   "schemaVersion": "1",
   "status": "candidate",
   "caseFile": "../cases/g2-current-multimodal-v1.jsonl",
-  "caseSha256": "f0f2c0d2a1690b47c554e87014cdf2dfca36fdf7679d99de1661d132b17a8e1c",
+  "caseSha256": "9b46dff863ef54d0cf8ae7fc58958b1c508a95dfed9b26ee7831718ad405e360",
   "corpusFiles": [
     "../../fixtures/g2-current-multimodal-v1.md"
   ],

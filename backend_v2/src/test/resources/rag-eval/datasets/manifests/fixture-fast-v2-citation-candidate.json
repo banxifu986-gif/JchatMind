@@ -1,0 +1,23 @@
+{
+  "datasetId": "fixture-fast-v2-citation-candidate",
+  "schemaVersion": "2",
+  "status": "candidate",
+  "parentDatasetId": "fixture-fast-v1",
+  "parentCaseSha256": "e4a255341737ce7f601db872c28a76f24e633e01c4a4d8f56f758878f2f876a6",
+  "caseFile": "../cases/fixture-fast-v2-citation-candidate.jsonl",
+  "caseSha256": "13cb60e397fdf4cc9918679a2b95a48b7ae21dfee96c3f5379be1671656e7a5b",
+  "corpusFiles": [
+    "../../fixtures/fixture-kb.md",
+    "../../fixtures/fixture-kb-returns.md",
+    "../../fixtures/fixture-kb-logistics.md",
+    "../../fixtures/fixture-kb-membership.md"
+  ],
+  "corpusSha256": "35638ee31b212a7610541e9f12cfe42e9964f534db86c63d28b7f6d16029e6d1",
+  "chunkingVersion": "markdown-section-v1",
+  "embeddingModel": "bge-m3",
+  "embeddingInputVersion": "title-title-content-v1",
+  "defaultTopK": 10,
+  "citationGoldContractVersion": "direct-evidence-groups-v1",
+  "citationGoldPolicy": "Every group is required; cite exactly one directly supporting chunk from each group and no chunk outside the groups.",
+  "reviewStatus": "approved"
+}
