@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.AgentExecutionTaskMapper">
+
+    <resultMap id="AgentExecutionTaskResultMap" type="com.kama.jchatmind.model.dto.AgentExecutionTask">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="sessionId" column="session_id" jdbcType="VARCHAR"/>
+        <result property="userId" column="user_id" jdbcType="VARCHAR"/>
+        <result property="agentId" column="agent_id" jdbcType="VARCHAR"/>
+        <result property="userMessageId" column="user_message_id" jdbcType="VARCHAR"/>
+        <result property="sequenceNo" column="sequence_no" jdbcType="BIGINT"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
+        <result property="attemptCount" column="attempt_count" jdbcType="INTEGER"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.dto.AgentExecutionTask">
+        INSERT INTO agent_execution_task (
+            id,
+            session_id,
+            user_id,
+            agent_id,
+            user_message_id,
+            sequence_no,
+            status
+        ) VALUES (
+            CAST(#{id} AS uuid),
+            CAST(#{sessionId} AS uuid),
+            #{userId},
+            #{agentId},
+            CAST(#{userMessageId} AS uuid),
+            #{sequenceNo},
+            'PENDING'
+        )
+    </insert>
+
+    <select id="selectRunnableSessionHeads" resultMap="AgentExecutionTaskResultMap">
+        SELECT
+            task.id,
+            task.session_id,
+            task.user_id,
+            task.agent_id,
+            task.user_message_id,
+            task.sequence_no,
+            task.status,
+            task.attempt_count,
+            task.created_at
+        FROM agent_execution_task task
+        WHERE task.status IN ('PENDING', 'RUNNING')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM agent_execution_task earlier
+              WHERE earlier.session_id = task.session_id
+                AND earlier.sequence_no &lt; task.sequence_no
+                AND earlier.status IN ('PENDING', 'RUNNING')
+          )
+        ORDER BY task.created_at, task.id
+        LIMIT #{limit}
+    </select>
+
+    <select id="claim" resultMap="AgentExecutionTaskResultMap" flushCache="true" useCache="false">
+        UPDATE agent_execution_task task
+        SET status = 'RUNNING',
+            attempt_count = task.attempt_count + 1,
+            started_at = CURRENT_TIMESTAMP,
+            failure_type = NULL
+        WHERE task.id = CAST(#{id} AS uuid)
+          AND task.status IN ('PENDING', 'RUNNING')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM agent_execution_task earlier
+              WHERE earlier.session_id = task.session_id
+                AND earlier.sequence_no &lt; task.sequence_no
+                AND earlier.status IN ('PENDING', 'RUNNING')
+          )
+        RETURNING
+            task.id,
+            task.session_id,
+            task.user_id,
+            task.agent_id,
+            task.user_message_id,
+            task.sequence_no,
+            task.status,
+            task.attempt_count,
+            task.created_at
+    </select>
+
+    <update id="release">
+        UPDATE agent_execution_task
+        SET status = 'PENDING',
+            attempt_count = GREATEST(attempt_count - 1, 0),
+            started_at = NULL
+        WHERE id = CAST(#{id} AS uuid)
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="complete">
+        UPDATE agent_execution_task
+        SET status = 'COMPLETED',
+            completed_at = CURRENT_TIMESTAMP
+        WHERE id = CAST(#{id} AS uuid)
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="fail">
+        UPDATE agent_execution_task
+        SET status = 'FAILED',
+            failure_type = #{failureType},
+            completed_at = CURRENT_TIMESTAMP
+        WHERE id = CAST(#{id} AS uuid)
+          AND status = 'RUNNING'
+    </update>
+
+    <select id="countByStatus" resultType="long">
+        SELECT COUNT(*)
+        FROM agent_execution_task
+        WHERE status = #{status}
+    </select>
+</mapper>

@@ -7,7 +7,6 @@ import com.kama.jchatmind.service.MemoryExtractionResult;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
@@ -17,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 @Slf4j
-public class ChatEventListener {
+public class ChatEventListener implements AgentExecutionTaskRunner {
 
     private final JChatMindFactory jChatMindFactory;
     private final UserMemoryFacadeService userMemoryFacadeService;
@@ -40,7 +39,6 @@ public class ChatEventListener {
         this.agentTaskExecutor = agentTaskExecutor;
     }
 
-    @EventListener
     public void handle(ChatEvent event) {
         ChatSessionExecutionCoordinator.ExecutionTicket ticket =
                 chatSessionExecutionCoordinator.reserve(event.getSessionId());
@@ -66,6 +64,11 @@ public class ChatEventListener {
             chatSessionExecutionCoordinator.cancel(ticket);
             throw exception;
         }
+    }
+
+    @Override
+    public void runPersistedTask(ChatEvent event) {
+        handleInSession(event);
     }
 
     private void recordRejection() {
@@ -102,11 +105,14 @@ public class ChatEventListener {
 
     private void handleInSession(ChatEvent event) {
         try {
-            JChatMind jChatMind = jChatMindFactory.create(
-                    event.getUserId(),
-                    event.getAgentId(),
-                    event.getSessionId()
-            );
+            JChatMind jChatMind = event.getUserMessageId() == null
+                    ? jChatMindFactory.create(event.getUserId(), event.getAgentId(), event.getSessionId())
+                    : jChatMindFactory.create(
+                            event.getUserId(),
+                            event.getAgentId(),
+                            event.getSessionId(),
+                            event.getUserMessageId()
+                    );
             jChatMind.run();
         } finally {
             try {

@@ -11,6 +11,7 @@ import com.kama.jchatmind.service.AgentKnowledgeBaseBindingService;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
+import com.kama.jchatmind.rag.RagRetrievalResultCache;
 import com.kama.jchatmind.webhook.WebhookProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -38,6 +39,9 @@ public class WorkflowExecutionService {
     private final WorkflowSingleAgentFallbackAnswerService fallbackAnswerService;
     private final WebhookProperties webhookProperties;
     private final ObjectMapper objectMapper;
+    private final RagRetrievalResultCache retrievalResultCache = new RagRetrievalResultCache(
+            RagRetrievalResultCache.DEFAULT_MAX_ENTRIES
+    );
 
     public WorkflowExecutionService(
             AgentMapper agentMapper,
@@ -115,9 +119,22 @@ public class WorkflowExecutionService {
         if (allowedKbIds.isEmpty()) {
             throw new BizException("Webhook 来源未授权 Agent 知识库");
         }
-        List<RagRetrievalResult> results = allowedKbIds.isEmpty()
-                ? List.of()
-                : ragService.retrieve(allowedKbIds, command.request(), RETRIEVAL_LIMIT);
+        List<RagRetrievalResult> results = List.of();
+        if (!allowedKbIds.isEmpty()) {
+            RagRetrievalResultCache.Key cacheKey = RagRetrievalResultCache.Key.of(
+                    userId,
+                    allowedKbIds,
+                    ragService.indexRevisions(allowedKbIds),
+                    command.request(),
+                    null,
+                    "workflow",
+                    "workflow:KnowledgeTool",
+                    RETRIEVAL_LIMIT,
+                    ragService.retrievalConfigurationFingerprint()
+            );
+            results = retrievalResultCache.getOrCompute(cacheKey,
+                    () -> ragService.retrieve(allowedKbIds, command.request(), RETRIEVAL_LIMIT));
+        }
         List<WorkflowEvidence> evidence = toEvidence(results);
         Map<String, RagRetrievalResult> resultByChunkId = new LinkedHashMap<>();
         if (results != null) {

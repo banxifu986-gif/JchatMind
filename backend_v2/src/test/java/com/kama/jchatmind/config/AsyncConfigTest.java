@@ -3,10 +3,13 @@ package com.kama.jchatmind.config;
 import com.kama.jchatmind.agent.JChatMind;
 import com.kama.jchatmind.agent.JChatMindFactory;
 import com.kama.jchatmind.event.ChatEvent;
+import com.kama.jchatmind.event.listener.AgentExecutionQueueMetrics;
+import com.kama.jchatmind.event.listener.AgentExecutionTaskWorker;
 import com.kama.jchatmind.event.listener.AgentTaskExecutorMetrics;
 import com.kama.jchatmind.event.listener.ChatEventListener;
 import com.kama.jchatmind.event.listener.ChatSessionExecutionCoordinator;
 import com.kama.jchatmind.event.listener.MemoryExtractionFailureRegistry;
+import com.kama.jchatmind.service.AgentExecutionTaskQueue;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -58,6 +61,83 @@ class AsyncConfigTest {
     }
 
     @Test
+    void shouldProvideUnqueuedExecutorForPersistentAgentTasks() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(AsyncConfig.class)) {
+            ThreadPoolTaskExecutor executor = context.getBean(
+                    "agentExecutionWorkerExecutor",
+                    ThreadPoolTaskExecutor.class
+            );
+
+            assertThat(executor.getCorePoolSize()).isEqualTo(2);
+            assertThat(executor.getMaxPoolSize()).isEqualTo(4);
+            assertThat(executor.getThreadPoolExecutor().getQueue().remainingCapacity()).isZero();
+            assertThat(executor.getThreadNamePrefix()).isEqualTo("agent-queue-");
+        }
+    }
+
+    @Test
+    void shouldExposePersistentQueueMetricsThroughLocalJmx() throws Exception {
+        MBeanServer mBeanServer = ManagementFactory.getPlatformMBeanServer();
+        ObjectName objectName = new ObjectName("com.kama.jchatmind:type=AgentExecutionQueueMetrics");
+        AgentExecutionTaskQueue queue = new AgentExecutionTaskQueue(null) {
+            @Override
+            public long countByStatus(String status) {
+                return switch (status) {
+                    case "PENDING" -> 6L;
+                    case "RUNNING" -> 4L;
+                    case "FAILED" -> 2L;
+                    default -> 0L;
+                };
+            }
+        };
+        CountDownLatch started = new CountDownLatch(4);
+        CountDownLatch release = new CountDownLatch(1);
+
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.register(AsyncConfig.class);
+            context.registerBean("queueMetrics", AgentExecutionQueueMetrics.class,
+                    () -> new AgentExecutionQueueMetrics(
+                            new AgentExecutionTaskWorker(
+                                    queue,
+                                    null,
+                                    null,
+                                    context.getBean("agentExecutionWorkerExecutor", ThreadPoolTaskExecutor.class)
+                            ),
+                            queue
+                    ));
+            context.refresh();
+            ThreadPoolTaskExecutor executor = context.getBean(
+                    "agentExecutionWorkerExecutor", ThreadPoolTaskExecutor.class);
+            for (int index = 0; index < 4; index++) {
+                executor.execute(() -> {
+                    started.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            }
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(mBeanServer.isRegistered(objectName)).isTrue();
+            assertThat(mBeanServer.getAttribute(objectName, "RejectedTaskCount")).isEqualTo(0L);
+            assertThat(mBeanServer.getAttribute(objectName, "PoolSize")).isEqualTo(4);
+            assertThat(mBeanServer.getAttribute(objectName, "ActiveThreads")).isEqualTo(4);
+            assertThat(mBeanServer.getAttribute(objectName, "QueuedTasks")).isEqualTo(0);
+            assertThat(mBeanServer.getAttribute(objectName, "RemainingQueueCapacity")).isEqualTo(0);
+            assertThat(mBeanServer.getAttribute(objectName, "PendingTaskCount")).isEqualTo(6L);
+            assertThat(mBeanServer.getAttribute(objectName, "RunningTaskCount")).isEqualTo(4L);
+            assertThat(mBeanServer.getAttribute(objectName, "FailedTaskCount")).isEqualTo(2L);
+            release.countDown();
+        } finally {
+            release.countDown();
+        }
+
+        assertThat(mBeanServer.isRegistered(objectName)).isFalse();
+    }
+
+    @Test
     void shouldExposeAgentTaskExecutorMetricsThroughLocalJmx() throws Exception {
         MBeanServer mBeanServer = ManagementFactory.getPlatformMBeanServer();
         ObjectName objectName = new ObjectName("com.kama.jchatmind:type=AgentTaskExecutorMetrics");
@@ -66,7 +146,7 @@ class AsyncConfigTest {
             context.register(AsyncConfig.class);
             context.registerBean(JChatMindFactory.class, () -> mock(JChatMindFactory.class));
             context.registerBean(UserMemoryFacadeService.class, () -> mock(UserMemoryFacadeService.class));
-            context.registerBean(ChatSessionExecutionCoordinator.class);
+            context.registerBean(ChatSessionExecutionCoordinator.class, () -> new ChatSessionExecutionCoordinator());
             context.registerBean(MemoryExtractionFailureRegistry.class);
             context.registerBean(ChatEventListener.class);
             context.registerBean(AgentTaskExecutorMetrics.class);
@@ -106,7 +186,7 @@ class AsyncConfigTest {
                 context.register(AsyncConfig.class);
                 context.registerBean(JChatMindFactory.class, () -> mock(JChatMindFactory.class));
                 context.registerBean(UserMemoryFacadeService.class, () -> mock(UserMemoryFacadeService.class));
-                context.registerBean(ChatSessionExecutionCoordinator.class);
+                context.registerBean(ChatSessionExecutionCoordinator.class, () -> new ChatSessionExecutionCoordinator());
                 context.registerBean(MemoryExtractionFailureRegistry.class);
                 context.registerBean(ChatEventListener.class);
                 context.registerBean(AgentTaskExecutorMetrics.class);
@@ -129,7 +209,7 @@ class AsyncConfigTest {
 
                     ChatEventListener listener = context.getBean(ChatEventListener.class);
                     assertThatThrownBy(() -> listener.handle(new ChatEvent(
-                            "7", "agent-1", "session-1", "队列已满"
+                            "7", "agent-1", "session-1", null, null, "队列已满"
                     ))).isInstanceOf(TaskRejectedException.class);
 
                     ChatEventListener.ExecutorSnapshot snapshot = listener.getExecutorSnapshot();
@@ -198,7 +278,7 @@ class AsyncConfigTest {
                 context.register(AsyncConfig.class);
                 context.registerBean(JChatMindFactory.class, () -> factory);
                 context.registerBean(UserMemoryFacadeService.class, () -> memoryService);
-                context.registerBean(ChatSessionExecutionCoordinator.class);
+                context.registerBean(ChatSessionExecutionCoordinator.class, () -> new ChatSessionExecutionCoordinator());
                 context.registerBean(MemoryExtractionFailureRegistry.class);
                 context.registerBean(ChatEventListener.class);
                 context.registerBean(AgentTaskExecutorMetrics.class);
@@ -211,7 +291,7 @@ class AsyncConfigTest {
                     for (int index = 0; index < 100 && !rejected; index++) {
                         String sessionId = index == 54 ? "session-rejected" : "session-" + index;
                         try {
-                            listener.handle(new ChatEvent("7", "agent-1", sessionId, "负载测试"));
+                            listener.handle(new ChatEvent("7", "agent-1", sessionId, null, null, "负载测试"));
                             accepted++;
                         } catch (TaskRejectedException exception) {
                             rejected = true;
@@ -237,7 +317,7 @@ class AsyncConfigTest {
 
                     releaseFirstFour.countDown();
                     assertThat(initialEventsExtracted.await(5, TimeUnit.SECONDS)).isTrue();
-                    listener.handle(new ChatEvent("7", "agent-1", "session-rejected", "恢复后重试"));
+                    listener.handle(new ChatEvent("7", "agent-1", "session-rejected", null, null, "恢复后重试"));
                     assertThat(rejectedSessionRecovered.await(2, TimeUnit.SECONDS)).isTrue();
                     assertThat(listener.getExecutorSnapshot().queuedTasks()).isZero();
                     assertThat(mBeanServer.getAttribute(objectName, "RejectedTaskCount")).isEqualTo(2L);

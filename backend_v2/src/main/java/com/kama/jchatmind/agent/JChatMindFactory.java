@@ -196,14 +196,25 @@ public class JChatMindFactory {
     }
 
     private List<Message> loadMemory(String userId, String chatSessionId) {
+        return loadMemory(userId, chatSessionId, null);
+    }
+
+    private List<Message> loadMemory(String userId, String chatSessionId, String throughMessageId) {
         int messageLength = agentConfig.getChatOptions().getMessageLength();
         List<Message> memory = new ArrayList<>();
 
-        List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
-                chatSessionId,
-                messageLength,
-                userId
-        );
+        List<ChatMessageDTO> chatMessages = throughMessageId == null
+                ? chatMessageFacadeService.getChatMessagesBySessionIdRecently(
+                        chatSessionId,
+                        messageLength,
+                        userId
+                )
+                : chatMessageFacadeService.getChatMessagesBySessionIdRecently(
+                        chatSessionId,
+                        messageLength,
+                        userId,
+                        throughMessageId
+                );
 
         String latestUserQuery = chatMessages.stream()
                 .filter(m -> m.getRole() == ChatMessageDTO.RoleType.USER)
@@ -453,9 +464,13 @@ public class JChatMindFactory {
     }
 
     public JChatMind create(String userId, String agentId, String chatSessionId) {
+        return create(userId, agentId, chatSessionId, null);
+    }
+
+    public JChatMind create(String userId, String agentId, String chatSessionId, String userMessageId) {
         Agent agent = loadAgent(userId, agentId);
         AgentDTO currentAgentConfig = toAgentConfig(agent);
-        List<Message> memory = loadMemory(userId, chatSessionId);
+        List<Message> memory = loadMemory(userId, chatSessionId, userMessageId);
         List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(currentAgentConfig, userId);
         List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
         runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases);

@@ -159,6 +159,8 @@ public class G5ChatHttpRecoveryRuntimeL2Test {
                 + "id UUID PRIMARY KEY, session_id UUID NOT NULL REFERENCES chat_session(id), "
                 + "role VARCHAR(32) NOT NULL, content TEXT NOT NULL, metadata JSONB, "
                 + "created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)");
+        statement.execute("CREATE TABLE agent_execution_turn_message ("
+                + "chat_message_id UUID PRIMARY KEY, session_id UUID NOT NULL, sequence_no BIGINT NOT NULL)");
 
         Timestamp createdAt = Timestamp.valueOf(LocalDateTime.of(2026, 10, 13, 0, 0));
         try (PreparedStatement session = connection.prepareStatement(

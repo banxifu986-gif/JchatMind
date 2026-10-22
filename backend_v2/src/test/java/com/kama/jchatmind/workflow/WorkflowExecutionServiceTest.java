@@ -157,6 +157,6 @@ class WorkflowExecutionServiceTest {
                         "agent-1", "session-1", "question", "foreign-source"
                 )
         )).hasMessage("无权访问 Webhook 来源");
-        verify(ragService, org.mockito.Mockito.times(2)).retrieve(List.of("kb-owned"), "question", 10);
+        verify(ragService).retrieve(List.of("kb-owned"), "question", 10);
     }
 }

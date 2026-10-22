@@ -48,7 +48,7 @@ class ChatEventListenerTest {
                 failureRegistry,
                 DIRECT_EXECUTOR
         );
-        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", "请总结这段内容");
+        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
         when(userMemoryFacadeService.extractMemoryCandidates("7", "session-1"))
                 .thenThrow(new IllegalStateException("internal memory content"));
@@ -76,7 +76,7 @@ class ChatEventListenerTest {
                 failureRegistry,
                 DIRECT_EXECUTOR
         );
-        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", "请总结这段内容");
+        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
         doThrow(new IllegalStateException("model unavailable")).when(agent).run();
         when(userMemoryFacadeService.extractMemoryCandidates("7", "session-1"))
@@ -104,7 +104,7 @@ class ChatEventListenerTest {
                 failureRegistry,
                 DIRECT_EXECUTOR
         );
-        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", "请总结这段内容");
+        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
         when(userMemoryFacadeService.extractMemoryCandidates("7", "session-1"))
                 .thenThrow(new IllegalStateException("first failure"))
@@ -129,7 +129,7 @@ class ChatEventListenerTest {
                 failureRegistry,
                 DIRECT_EXECUTOR
         );
-        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", "请总结这段内容");
+        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
         when(userMemoryFacadeService.extractMemoryCandidates("7", "session-1"))
                 .thenThrow(new IllegalStateException("first failure"))
@@ -154,7 +154,7 @@ class ChatEventListenerTest {
                 new MemoryExtractionFailureRegistry(),
                 DIRECT_EXECUTOR
         );
-        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", "请总结这段内容");
+        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
 
         listener.handle(event);
@@ -176,7 +176,7 @@ class ChatEventListenerTest {
                 new MemoryExtractionFailureRegistry(),
                 DIRECT_EXECUTOR
         );
-        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", "请总结这段内容");
+        ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
         doThrow(new IllegalStateException("model unavailable")).when(agent).run();
 
@@ -204,8 +204,8 @@ class ChatEventListenerTest {
                 new MemoryExtractionFailureRegistry(),
                 queuedExecutor
         );
-        ChatEvent firstEvent = new ChatEvent("7", "agent-1", "session-1", "第一条消息");
-        ChatEvent secondEvent = new ChatEvent("7", "agent-2", "session-1", "第二条消息");
+        ChatEvent firstEvent = new ChatEvent("7", "agent-1", "session-1", null, null, "第一条消息");
+        ChatEvent secondEvent = new ChatEvent("7", "agent-2", "session-1", null, null, "第二条消息");
         doAnswer(invocation -> {
             String agentId = invocation.getArgument(1);
             executionOrder.add("create-" + agentId);
@@ -277,12 +277,12 @@ class ChatEventListenerTest {
                 .thenReturn(MemoryExtractionResult.SKIPPED);
 
         assertThatThrownBy(() -> listener.handle(
-                new ChatEvent("7", "agent-1", "session-1", "被拒绝的消息")
+                new ChatEvent("7", "agent-1", "session-1", null, null, "被拒绝的消息")
         )).isInstanceOf(TaskRejectedException.class);
         assertThat(listener.getRejectedTaskCount()).isEqualTo(2);
         assertThat(acceptedTasks).isEmpty();
 
-        listener.handle(new ChatEvent("7", "agent-2", "session-1", "后续消息"));
+        listener.handle(new ChatEvent("7", "agent-2", "session-1", null, null, "后续消息"));
         acceptedTasks.get(0).run();
 
         verify(agent).run();
@@ -314,7 +314,7 @@ class ChatEventListenerTest {
         when(userMemoryFacadeService.extractMemoryCandidates("7", "session-1"))
                 .thenReturn(MemoryExtractionResult.SKIPPED);
 
-        listener.handle(new ChatEvent("7", "agent-1", "session-1", "临时拒绝后重试"));
+        listener.handle(new ChatEvent("7", "agent-1", "session-1", null, null, "临时拒绝后重试"));
         assertThat(listener.getRejectedTaskCount()).isEqualTo(1);
         assertThat(acceptedTasks).hasSize(1);
 

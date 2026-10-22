@@ -128,6 +128,7 @@ class G1ModelDrivenSessionScopeRuntimeL2Test {
         jdbcTemplate.execute("CREATE TABLE agent_knowledge_base (agent_id UUID NOT NULL, kb_id UUID NOT NULL, bound_by_user_id BIGINT NOT NULL, bound_at TIMESTAMP NOT NULL DEFAULT NOW(), PRIMARY KEY (agent_id, kb_id))");
         jdbcTemplate.execute("CREATE TABLE chat_session (id UUID PRIMARY KEY, user_id VARCHAR(64) NOT NULL, agent_id UUID NOT NULL, title VARCHAR(255), metadata JSONB, created_at TIMESTAMP NOT NULL DEFAULT NOW(), updated_at TIMESTAMP NOT NULL DEFAULT NOW())");
         jdbcTemplate.execute("CREATE TABLE chat_message (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), session_id UUID NOT NULL, role VARCHAR(32) NOT NULL, content TEXT, metadata JSONB, created_at TIMESTAMP NOT NULL DEFAULT NOW(), updated_at TIMESTAMP NOT NULL DEFAULT NOW())");
+        jdbcTemplate.execute("CREATE TABLE agent_execution_turn_message (chat_message_id UUID PRIMARY KEY, session_id UUID NOT NULL, sequence_no BIGINT NOT NULL)");
         jdbcTemplate.execute("CREATE TABLE user_memory (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id VARCHAR(64) NOT NULL, session_id UUID, memory_type VARCHAR(32), content TEXT, importance VARCHAR(16), evidence_message_id UUID, evidence_text TEXT, embedding TEXT, created_at TIMESTAMP NOT NULL DEFAULT NOW(), updated_at TIMESTAMP NOT NULL DEFAULT NOW())");
         jdbcTemplate.execute("CREATE TABLE user_memory_candidate (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id VARCHAR(64) NOT NULL, session_id UUID, memory_type VARCHAR(32), content TEXT, evidence TEXT, importance VARCHAR(16), evidence_message_id UUID, status VARCHAR(32), created_at TIMESTAMP NOT NULL DEFAULT NOW(), updated_at TIMESTAMP NOT NULL DEFAULT NOW())");
     }
@@ -243,6 +244,16 @@ class G1ModelDrivenSessionScopeRuntimeL2Test {
                 int limit
         ) {
             return retrieve(kbIds, query, context, limit);
+        }
+
+        @Override
+        public java.util.Map<String, Long> indexRevisions(List<String> kbIds) {
+            return java.util.Map.of(KB_A1, 0L);
+        }
+
+        @Override
+        public String retrievalConfigurationFingerprint() {
+            return "session-scope-test";
         }
 
         List<List<String>> effectiveKbIdCalls() {

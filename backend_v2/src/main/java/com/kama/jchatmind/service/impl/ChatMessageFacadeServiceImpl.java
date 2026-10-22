@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.event.ChatEvent;
+import com.kama.jchatmind.event.listener.AgentExecutionTurnContext;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.ChatMessageMapper;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
@@ -18,6 +19,7 @@ import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -55,6 +57,26 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     public List<ChatMessageDTO> getChatMessagesBySessionIdRecently(String sessionId, int limit, String userId) {
         requireOwnedSession(sessionId, userId);
         List<ChatMessage> chatMessages = chatMessageMapper.selectBySessionIdRecently(sessionId, limit);
+        return toDTOs(chatMessages);
+    }
+
+    @Override
+    public List<ChatMessageDTO> getChatMessagesBySessionIdRecently(
+            String sessionId,
+            int limit,
+            String userId,
+            String throughMessageId
+    ) {
+        requireOwnedSession(sessionId, userId);
+        List<ChatMessage> chatMessages = chatMessageMapper.selectBySessionIdRecentlyThroughMessageId(
+                sessionId,
+                throughMessageId,
+                limit
+        );
+        return toDTOs(chatMessages);
+    }
+
+    private List<ChatMessageDTO> toDTOs(List<ChatMessage> chatMessages) {
         List<ChatMessageDTO> result = new ArrayList<>();
         for (ChatMessage chatMessage : chatMessages) {
             result.add(toDTO(chatMessage));
@@ -69,13 +91,17 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
+    @Transactional
     public CreateChatMessageResponse createChatMessage(CreateChatMessageRequest request) {
         requireOwnedSession(request.getSessionId());
-        ChatMessage chatMessage = doCreateChatMessage(request);
+        long sequenceNo = chatMessageMapper.reserveAgentTurnSequence(request.getSessionId());
+        ChatMessage chatMessage = doCreateChatMessage(request, sequenceNo);
         publisher.publishEvent(new ChatEvent(
                 requireUserId(),
                 request.getAgentId(),
                 chatMessage.getSessionId(),
+                chatMessage.getId(),
+                sequenceNo,
                 chatMessage.getContent()
         ));
         return CreateChatMessageResponse.builder()
@@ -84,11 +110,13 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
     }
 
     @Override
+    @Transactional
     public CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO) {
         return createChatMessage(chatMessageDTO, requireUserId());
     }
 
     @Override
+    @Transactional
     public CreateChatMessageResponse createChatMessage(ChatMessageDTO chatMessageDTO, String userId) {
         requireOwnedSession(chatMessageDTO.getSessionId(), userId);
         ChatMessage chatMessage = doCreateChatMessage(chatMessageDTO);
@@ -169,7 +197,22 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
         return doCreateChatMessage(chatMessageDTO);
     }
 
+    private ChatMessage doCreateChatMessage(CreateChatMessageRequest request, long sequenceNo) {
+        ChatMessageDTO chatMessageDTO = chatMessageConverter.toDTO(request);
+        ChatMessage chatMessage = doCreateChatMessage(chatMessageDTO, null);
+        requireOne(chatMessageMapper.insertAgentTurnMessageLink(
+                chatMessage.getId(),
+                chatMessage.getSessionId(),
+                sequenceNo
+        ));
+        return chatMessage;
+    }
+
     private ChatMessage doCreateChatMessage(ChatMessageDTO chatMessageDTO) {
+        return doCreateChatMessage(chatMessageDTO, AgentExecutionTurnContext.currentSequence());
+    }
+
+    private ChatMessage doCreateChatMessage(ChatMessageDTO chatMessageDTO, Long sequenceNo) {
         try {
             ChatMessage chatMessage = chatMessageConverter.toEntity(chatMessageDTO);
             LocalDateTime now = LocalDateTime.now();
@@ -179,9 +222,22 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
             if (result <= 0) {
                 throw new BizException("创建聊天消息失败");
             }
+            if (sequenceNo != null) {
+                requireOne(chatMessageMapper.insertAgentTurnMessageLink(
+                        chatMessage.getId(),
+                        chatMessage.getSessionId(),
+                        sequenceNo
+                ));
+            }
             return chatMessage;
         } catch (JsonProcessingException e) {
             throw new BizException("创建聊天消息时序列化失败: " + e.getMessage());
+        }
+    }
+
+    private void requireOne(int affectedRows) {
+        if (affectedRows != 1) {
+            throw new BizException("创建 Agent turn 消息关联失败");
         }
     }
 

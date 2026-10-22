@@ -1,5 +1,6 @@
 package com.kama.jchatmind.event.listener;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
@@ -13,7 +14,17 @@ import java.util.concurrent.atomic.AtomicReference;
 @Component
 public class ChatSessionExecutionCoordinator {
 
+    private final AgentExecutionSessionLockManager sessionLockManager;
     private final ConcurrentMap<String, SessionExecution> sessionExecutions = new ConcurrentHashMap<>();
+
+    public ChatSessionExecutionCoordinator() {
+        this(null);
+    }
+
+    @Autowired
+    public ChatSessionExecutionCoordinator(AgentExecutionSessionLockManager sessionLockManager) {
+        this.sessionLockManager = sessionLockManager;
+    }
 
     public ExecutionTicket reserve(String sessionId) {
         Assert.hasText(sessionId, "Chat session id cannot be empty");
@@ -42,7 +53,14 @@ public class ChatSessionExecutionCoordinator {
         try {
             entered = ticket.execution.awaitTurn(ticket.order);
             if (entered) {
-                task.run();
+                if (sessionLockManager == null) {
+                    task.run();
+                } else {
+                    try (AgentExecutionSessionLockManager.SessionLock ignored =
+                                 sessionLockManager.lock(ticket.sessionId)) {
+                        task.run();
+                    }
+                }
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();

@@ -14,6 +14,14 @@ import java.util.List;
  */
 @Mapper
 public interface ChatMessageMapper {
+    long reserveAgentTurnSequence(@Param("sessionId") String sessionId);
+
+    int insertAgentTurnMessageLink(
+            @Param("messageId") String messageId,
+            @Param("sessionId") String sessionId,
+            @Param("sequenceNo") long sequenceNo
+    );
+
     int insert(ChatMessage chatMessage);
 
     ChatMessage selectById(String id);
@@ -21,6 +29,12 @@ public interface ChatMessageMapper {
     List<ChatMessage> selectBySessionId(String sessionId);
 
     List<ChatMessage> selectBySessionIdRecently(@Param("sessionId") String sessionId, @Param("limit") int limit);
+
+    List<ChatMessage> selectBySessionIdRecentlyThroughMessageId(
+            @Param("sessionId") String sessionId,
+            @Param("messageId") String messageId,
+            @Param("limit") int limit
+    );
 
     int countUserMessagesBySessionId(@Param("sessionId") String sessionId);
 

@@ -98,7 +98,11 @@ class ChatMessageHistoryWindowRuntimeL2Test {
         try (Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE " + schema + ".chat_message ("
                     + "id UUID PRIMARY KEY, session_id UUID NOT NULL, role VARCHAR(32) NOT NULL, "
-                    + "content TEXT NOT NULL, metadata JSONB, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL"
+                    + "content TEXT NOT NULL, metadata JSONB, "
+                    + "created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL"
+                    + ")");
+            statement.execute("CREATE TABLE " + schema + ".agent_execution_turn_message ("
+                    + "chat_message_id UUID PRIMARY KEY, session_id UUID NOT NULL, sequence_no BIGINT NOT NULL"
                     + ")");
         }
         try (PreparedStatement insert = connection.prepareStatement(sql)) {

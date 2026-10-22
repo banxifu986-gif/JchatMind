@@ -70,6 +70,19 @@ public class RabbitMQConfig {
     public static final int KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS = 1;
     public static final int KNOWLEDGE_BASE_DELETION_PREFETCH_COUNT = 1;
 
+    public static final String BUILTIN_SKILL_TASK_EXCHANGE = "builtin-skill-task.exchange";
+    public static final String BUILTIN_SKILL_TASK_QUEUE = "builtin-skill-task.queue";
+    public static final String BUILTIN_SKILL_TASK_ROUTING_KEY = "builtin-skill-task.execute";
+    public static final String BUILTIN_SKILL_TASK_RETRY_EXCHANGE = "builtin-skill-task.retry.exchange";
+    public static final String BUILTIN_SKILL_TASK_RETRY_QUEUE = "builtin-skill-task.retry.queue";
+    public static final String BUILTIN_SKILL_TASK_RETRY_ROUTING_KEY = "builtin-skill-task.retry";
+    public static final String BUILTIN_SKILL_TASK_DLX = "builtin-skill-task.dlx";
+    public static final String BUILTIN_SKILL_TASK_DLQ = "builtin-skill-task.dlq";
+    public static final String BUILTIN_SKILL_TASK_DLQ_ROUTING_KEY = "builtin-skill-task.dead-letter";
+    public static final int BUILTIN_SKILL_TASK_RETRY_TTL_MILLIS = 30_000;
+    public static final int BUILTIN_SKILL_TASK_CONCURRENT_CONSUMERS = 2;
+    public static final int BUILTIN_SKILL_TASK_PREFETCH_COUNT = 1;
+
     @Bean
     public DirectExchange emailExchange() {
         return new DirectExchange(EMAIL_EXCHANGE);
@@ -195,6 +208,68 @@ public class RabbitMQConfig {
     }
 
     @Bean
+    public DirectExchange skillTaskExchange() {
+        return new DirectExchange(BUILTIN_SKILL_TASK_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange skillTaskRetryExchange() {
+        return new DirectExchange(BUILTIN_SKILL_TASK_RETRY_EXCHANGE);
+    }
+
+    @Bean
+    public DirectExchange skillTaskDeadLetterExchange() {
+        return new DirectExchange(BUILTIN_SKILL_TASK_DLX);
+    }
+
+    @Bean
+    public Queue skillTaskQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", BUILTIN_SKILL_TASK_DLX);
+        args.put("x-dead-letter-routing-key", BUILTIN_SKILL_TASK_DLQ_ROUTING_KEY);
+        return QueueBuilder.durable(BUILTIN_SKILL_TASK_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue skillTaskRetryQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", BUILTIN_SKILL_TASK_EXCHANGE);
+        args.put("x-dead-letter-routing-key", BUILTIN_SKILL_TASK_ROUTING_KEY);
+        args.put("x-message-ttl", BUILTIN_SKILL_TASK_RETRY_TTL_MILLIS);
+        return QueueBuilder.durable(BUILTIN_SKILL_TASK_RETRY_QUEUE)
+                .withArguments(args)
+                .build();
+    }
+
+    @Bean
+    public Queue skillTaskDeadLetterQueue() {
+        return QueueBuilder.durable(BUILTIN_SKILL_TASK_DLQ).build();
+    }
+
+    @Bean
+    public Binding skillTaskBinding() {
+        return BindingBuilder.bind(skillTaskQueue())
+                .to(skillTaskExchange())
+                .with(BUILTIN_SKILL_TASK_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding skillTaskRetryBinding() {
+        return BindingBuilder.bind(skillTaskRetryQueue())
+                .to(skillTaskRetryExchange())
+                .with(BUILTIN_SKILL_TASK_RETRY_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding skillTaskDeadLetterBinding() {
+        return BindingBuilder.bind(skillTaskDeadLetterQueue())
+                .to(skillTaskDeadLetterExchange())
+                .with(BUILTIN_SKILL_TASK_DLQ_ROUTING_KEY);
+    }
+
+    @Bean
     public DirectExchange knowledgeBaseDeletionExchange() {
         return new DirectExchange(KNOWLEDGE_BASE_DELETION_EXCHANGE);
     }
@@ -285,6 +360,22 @@ public class RabbitMQConfig {
         factory.setConcurrentConsumers(KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS);
         factory.setMaxConcurrentConsumers(KNOWLEDGE_BASE_DELETION_CONCURRENT_CONSUMERS);
         factory.setPrefetchCount(KNOWLEDGE_BASE_DELETION_PREFETCH_COUNT);
+        return factory;
+    }
+
+    @Bean
+    public SimpleRabbitListenerContainerFactory builtinSkillTaskRabbitListenerContainerFactory(
+            @Nullable SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            ConnectionFactory connectionFactory
+    ) {
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
+        factory.setConnectionFactory(connectionFactory);
+        if (configurer != null) {
+            configurer.configure(factory, connectionFactory);
+        }
+        factory.setConcurrentConsumers(BUILTIN_SKILL_TASK_CONCURRENT_CONSUMERS);
+        factory.setMaxConcurrentConsumers(BUILTIN_SKILL_TASK_CONCURRENT_CONSUMERS);
+        factory.setPrefetchCount(BUILTIN_SKILL_TASK_PREFETCH_COUNT);
         return factory;
     }
 

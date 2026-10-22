@@ -20,6 +20,19 @@
         updated_at
     </sql>
 
+    <select id="reserveAgentTurnSequence" resultType="long" flushCache="true" useCache="false">
+        INSERT INTO agent_execution_session_sequence (session_id, next_sequence)
+        VALUES (CAST(#{sessionId} AS uuid), 1)
+        ON CONFLICT (session_id)
+        DO UPDATE SET next_sequence = agent_execution_session_sequence.next_sequence + 1
+        RETURNING next_sequence - 1
+    </select>
+
+    <insert id="insertAgentTurnMessageLink">
+        INSERT INTO agent_execution_turn_message (chat_message_id, session_id, sequence_no)
+        VALUES (CAST(#{messageId} AS uuid), CAST(#{sessionId} AS uuid), #{sequenceNo})
+    </insert>
+
     <insert id="insert" parameterType="com.kama.jchatmind.model.entity.ChatMessage"
             keyColumn="id" keyProperty="id" useGeneratedKeys="true">
         INSERT INTO chat_message
@@ -57,16 +70,17 @@
 
     <select id="selectBySessionId" resultMap="BaseResultMap">
         SELECT
-            id,
-            session_id,
-            role,
-            content,
-            metadata::text AS metadata,
-            created_at,
-            updated_at
-        FROM chat_message
-        WHERE session_id = CAST(#{sessionId} AS uuid)
-        ORDER BY created_at ASC
+            message.id,
+            message.session_id,
+            message.role,
+            message.content,
+            message.metadata::text AS metadata,
+            message.created_at,
+            message.updated_at
+        FROM chat_message message
+        LEFT JOIN agent_execution_turn_message turn ON turn.chat_message_id = message.id
+        WHERE message.session_id = CAST(#{sessionId} AS uuid)
+        ORDER BY turn.sequence_no ASC NULLS FIRST, message.created_at ASC, message.id ASC
     </select>
 
     <select id="selectBySessionIdRecently" resultMap="BaseResultMap">
@@ -80,19 +94,61 @@
             recent.updated_at
         FROM (
             SELECT
-                id,
-                session_id,
-                role,
-                content,
-                metadata,
-                created_at,
-                updated_at
-            FROM chat_message
-            WHERE session_id = CAST(#{sessionId} AS uuid)
-            ORDER BY created_at DESC
+                message.id,
+                message.session_id,
+                message.role,
+                message.content,
+                message.metadata,
+                turn.sequence_no AS agent_turn_sequence,
+                message.created_at,
+                message.updated_at
+            FROM chat_message message
+            LEFT JOIN agent_execution_turn_message turn ON turn.chat_message_id = message.id
+            WHERE message.session_id = CAST(#{sessionId} AS uuid)
+            ORDER BY turn.sequence_no DESC NULLS LAST, message.created_at DESC, message.id DESC
             LIMIT #{limit}
         ) recent
-        ORDER BY recent.created_at ASC
+        ORDER BY recent.agent_turn_sequence ASC NULLS FIRST, recent.created_at ASC, recent.id ASC
+    </select>
+
+    <select id="selectBySessionIdRecentlyThroughMessageId" resultMap="BaseResultMap">
+        SELECT
+            recent.id,
+            recent.session_id,
+            recent.role,
+            recent.content,
+            recent.metadata::text AS metadata,
+            recent.created_at,
+            recent.updated_at
+        FROM (
+            SELECT
+                message.id,
+                message.session_id,
+                message.role,
+                message.content,
+                message.metadata,
+                turn.sequence_no AS agent_turn_sequence,
+                message.created_at,
+                message.updated_at
+            FROM chat_message message
+            LEFT JOIN agent_execution_turn_message turn ON turn.chat_message_id = message.id
+            WHERE message.session_id = CAST(#{sessionId} AS uuid)
+              AND (
+                  turn.sequence_no IS NULL
+                  OR turn.sequence_no &lt;= (
+                      SELECT target_turn.sequence_no
+                      FROM chat_message target_message
+                      LEFT JOIN agent_execution_turn_message target_turn
+                          ON target_turn.chat_message_id = target_message.id
+                      WHERE target_message.id = CAST(#{messageId} AS uuid)
+                        AND target_message.session_id = CAST(#{sessionId} AS uuid)
+                        AND target_message.role = 'user'
+                  )
+              )
+            ORDER BY turn.sequence_no DESC NULLS LAST, message.created_at DESC, message.id DESC
+            LIMIT #{limit}
+        ) recent
+        ORDER BY recent.agent_turn_sequence ASC NULLS FIRST, recent.created_at ASC, recent.id ASC
     </select>
 
     <select id="countUserMessagesBySessionId" resultType="int">

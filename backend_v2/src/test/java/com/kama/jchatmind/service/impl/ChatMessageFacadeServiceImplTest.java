@@ -57,7 +57,9 @@ class ChatMessageFacadeServiceImplTest {
                 .build();
         when(chatMessageConverter.toDTO(request)).thenReturn(messageDTO);
         when(chatMessageConverter.toEntity(messageDTO)).thenReturn(persistedMessage);
+        when(chatMessageMapper.reserveAgentTurnSequence("session-1")).thenReturn(0L);
         when(chatMessageMapper.insert(persistedMessage)).thenReturn(1);
+        when(chatMessageMapper.insertAgentTurnMessageLink("message-1", "session-1", 0L)).thenReturn(1);
 
         CreateChatMessageResponse response = service.createChatMessage(request);
 
@@ -67,8 +69,15 @@ class ChatMessageFacadeServiceImplTest {
         ArgumentCaptor<ChatEvent> eventCaptor = ArgumentCaptor.forClass(ChatEvent.class);
         verify(publisher).publishEvent(eventCaptor.capture());
         assertThat(eventCaptor.getValue())
-                .extracting(ChatEvent::getUserId, ChatEvent::getAgentId, ChatEvent::getSessionId, ChatEvent::getUserInput)
-                .containsExactly("7", "agent-1", "session-1", "请总结这段内容");
+                .extracting(
+                        ChatEvent::getUserId,
+                        ChatEvent::getAgentId,
+                        ChatEvent::getSessionId,
+                        ChatEvent::getUserMessageId,
+                        ChatEvent::getSequenceNo,
+                        ChatEvent::getUserInput
+                )
+                .containsExactly("7", "agent-1", "session-1", "message-1", 0L, "请总结这段内容");
     }
 
     @Test
@@ -115,6 +124,33 @@ class ChatMessageFacadeServiceImplTest {
         assertThat(count).isEqualTo(4);
         verify(chatSessionFacadeService).getChatSession("session-1", "7");
         verify(chatMessageMapper).countUserMessagesBySessionId("session-1");
+    }
+
+    @Test
+    void shouldLoadQueuedTurnHistoryOnlyThroughItsUserMessage() throws Exception {
+        ChatMessageMapper chatMessageMapper = mock(ChatMessageMapper.class);
+        ChatMessageConverter chatMessageConverter = mock(ChatMessageConverter.class);
+        ChatSessionFacadeService chatSessionFacadeService = mock(ChatSessionFacadeService.class);
+        ChatMessageFacadeServiceImpl service = new ChatMessageFacadeServiceImpl(
+                chatMessageMapper,
+                chatMessageConverter,
+                chatSessionFacadeService,
+                mock(ApplicationEventPublisher.class),
+                requestScopeData(7L)
+        );
+        ChatMessage queuedMessage = ChatMessage.builder().id("queued-message").sessionId("session-1").build();
+        ChatMessageDTO queuedDTO = ChatMessageDTO.builder().id("queued-message").build();
+        when(chatMessageMapper.selectBySessionIdRecentlyThroughMessageId("session-1", "queued-message", 8))
+                .thenReturn(List.of(queuedMessage));
+        when(chatMessageConverter.toDTO(queuedMessage)).thenReturn(queuedDTO);
+
+        List<ChatMessageDTO> result = service.getChatMessagesBySessionIdRecently(
+                "session-1", 8, "7", "queued-message"
+        );
+
+        verify(chatSessionFacadeService).getChatSession("session-1", "7");
+        verify(chatMessageMapper).selectBySessionIdRecentlyThroughMessageId("session-1", "queued-message", 8);
+        assertThat(result).containsExactly(queuedDTO);
     }
 
     private RequestScopeData requestScopeData(long userId) {

@@ -28,6 +28,11 @@ public class AsyncConfig {
     }
 
     @Bean
+    public Executor agentExecutionWorkerExecutor() {
+        return createExecutor(2, 4, 0, "agent-queue-", false);
+    }
+
+    @Bean
     public ThreadPoolTaskExecutor workflowTaskExecutor() {
         return createExecutor(2, 4, 20, "workflow-step-");
     }
@@ -38,22 +43,34 @@ public class AsyncConfig {
             int queueCapacity,
             String threadNamePrefix
     ) {
+        return createExecutor(corePoolSize, maxPoolSize, queueCapacity, threadNamePrefix, true);
+    }
+
+    private ThreadPoolTaskExecutor createExecutor(
+            int corePoolSize,
+            int maxPoolSize,
+            int queueCapacity,
+            String threadNamePrefix,
+            boolean propagateRequestContext
+    ) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(corePoolSize);
         executor.setMaxPoolSize(maxPoolSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix(threadNamePrefix);
-        executor.setTaskDecorator(task -> {
-            RequestAttributes context = RequestContextHolder.currentRequestAttributes();
-            return () -> {
-                try {
-                    RequestContextHolder.setRequestAttributes(context);
-                    task.run();
-                } finally {
-                    RequestContextHolder.resetRequestAttributes();
-                }
-            };
-        });
+        if (propagateRequestContext) {
+            executor.setTaskDecorator(task -> {
+                RequestAttributes context = RequestContextHolder.currentRequestAttributes();
+                return () -> {
+                    try {
+                        RequestContextHolder.setRequestAttributes(context);
+                        task.run();
+                    } finally {
+                        RequestContextHolder.resetRequestAttributes();
+                    }
+                };
+            });
+        }
         executor.initialize();
         return executor;
     }
