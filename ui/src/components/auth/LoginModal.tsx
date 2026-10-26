@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Form, Input, Button, Tabs, message } from "antd";
+import { Modal, Form, Input, Button, Tabs, message, Alert } from "antd";
 import { loginUser } from "../../api/api.ts";
 import type { LoginResponse } from "../../api/api.ts";
 import { useUser } from "../../hooks/useUser.ts";
@@ -14,9 +14,11 @@ export function LoginModal({ open, onClose, onSwitchToRegister }: Props) {
   const { login } = useUser();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"password" | "verifyCode">("password");
+  const [submitError, setSubmitError] = useState("");
 
   const handleSubmit = async (values: Record<string, string>) => {
     setLoading(true);
+    setSubmitError("");
     try {
       const resp: LoginResponse = await loginUser({
         account: mode === "password" ? values.account : undefined,
@@ -35,7 +37,7 @@ export function LoginModal({ open, onClose, onSwitchToRegister }: Props) {
       message.success("登录成功");
       onClose();
     } catch {
-      message.error("登录失败，请检查凭证");
+      setSubmitError("登录失败，请检查账号、密码或验证码后重试");
     } finally {
       setLoading(false);
     }
@@ -84,7 +86,15 @@ export function LoginModal({ open, onClose, onSwitchToRegister }: Props) {
 
   return (
     <Modal open={open} onCancel={onClose} footer={null} title="登录" destroyOnClose>
-      <Tabs activeKey={mode} onChange={(key) => setMode(key as "password" | "verifyCode")} items={tabItems} />
+      {submitError && <Alert className="mb-4" type="error" showIcon message={submitError} />}
+      <Tabs
+        activeKey={mode}
+        onChange={(key) => {
+          setMode(key as "password" | "verifyCode");
+          setSubmitError("");
+        }}
+        items={tabItems}
+      />
       <div style={{ textAlign: "center" }}>
         还没有账号？
         <Button type="link" onClick={onSwitchToRegister}>

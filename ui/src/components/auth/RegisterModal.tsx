@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Form, Input, Button, message } from "antd";
+import { Modal, Form, Input, Button, message, Alert } from "antd";
 import { registerUser } from "../../api/api.ts";
 import type { RegisterResponse } from "../../api/api.ts";
 import { useUser } from "../../hooks/useUser.ts";
@@ -13,6 +13,7 @@ interface Props {
 export function RegisterModal({ open, onClose, onSwitchToLogin }: Props) {
   const { login } = useUser();
   const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const handleSubmit = async (values: Record<string, string>) => {
     if (values.password !== values.confirmPassword) {
@@ -20,6 +21,7 @@ export function RegisterModal({ open, onClose, onSwitchToLogin }: Props) {
       return;
     }
     setLoading(true);
+    setSubmitError("");
     try {
       const resp: RegisterResponse = await registerUser({
         account: values.account,
@@ -36,7 +38,7 @@ export function RegisterModal({ open, onClose, onSwitchToLogin }: Props) {
       message.success("注册成功");
       onClose();
     } catch {
-      message.error("注册失败，请重试");
+      setSubmitError("注册失败，请检查填写内容后重试");
     } finally {
       setLoading(false);
     }
@@ -45,6 +47,11 @@ export function RegisterModal({ open, onClose, onSwitchToLogin }: Props) {
   return (
     <Modal open={open} onCancel={onClose} footer={null} title="注册" destroyOnClose>
       <Form layout="vertical" onFinish={handleSubmit}>
+        {submitError && (
+          <Form.Item>
+            <Alert type="error" showIcon message={submitError} />
+          </Form.Item>
+        )}
         <Form.Item name="account" rules={[{ required: true, message: "请输入账号" }]}>
           <Input placeholder="账号" />
         </Form.Item>

@@ -10,6 +10,8 @@ import {
 } from "../api/api.ts";
 import { useUser } from "./useUser.ts";
 
+const AGENTS_CHANGED_EVENT = "jchatmind:agents-changed";
+
 export function useAgents() {
   const { isLogin, user } = useUser();
   const [agentState, setAgentState] = useState<{
@@ -35,9 +37,25 @@ export function useAgents() {
     fetchData().then();
   }, [isLogin, user]);
 
+  useEffect(() => {
+    if (!isLogin || !user) {
+      return;
+    }
+
+    const handleAgentsChanged = () => {
+      void getAgents()
+        .then((resp) => setAgentState({ userId: user.userId, agents: resp.agents }))
+        .catch(() => setAgentState({ userId: user.userId, agents: [] }));
+    };
+
+    window.addEventListener(AGENTS_CHANGED_EVENT, handleAgentsChanged);
+    return () => window.removeEventListener(AGENTS_CHANGED_EVENT, handleAgentsChanged);
+  }, [isLogin, user]);
+
   async function refreshAgents() {
     const resp = await getAgents();
     setAgentState({ userId: user?.userId ?? null, agents: resp.agents });
+    window.dispatchEvent(new Event(AGENTS_CHANGED_EVENT));
   }
 
   async function createAgentHandle(agent: CreateAgentRequest) {

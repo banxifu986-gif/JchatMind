@@ -120,6 +120,17 @@ const SideMenu: React.FC<SideMenuProps> = ({
       message.success("知识库删除完成");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "知识库删除失败");
+      throw error;
+    }
+  };
+
+  const onDeleteChatSession = async (sessionId: string) => {
+    try {
+      await deleteChatSession(sessionId);
+      message.success("聊天记录已删除");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "聊天记录删除失败");
+      throw error;
     }
   };
 
@@ -135,7 +146,14 @@ const SideMenu: React.FC<SideMenuProps> = ({
       okText: "确定",
       cancelText: "取消",
       okType: "danger",
-      onOk: () => deleteAgentHandle(agent.id),
+      onOk: async () => {
+        try {
+          await deleteAgentHandle(agent.id);
+          message.success("智能体已删除");
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "智能体删除失败");
+        }
+      },
     });
   };
 
@@ -253,7 +271,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                       description="删除后无法恢复"
                       okText="确认"
                       cancelText="取消"
-                      onConfirm={() => deleteChatSession(session.id)}
+                      onConfirm={() => onDeleteChatSession(session.id)}
                     >
                       <Button
                         type="text"

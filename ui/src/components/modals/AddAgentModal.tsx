@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Button, Checkbox, Input, Modal, Select, Slider } from "antd";
+import React, { useEffect, useRef, useState } from "react";
+import { Button, Checkbox, Input, message, Modal, Select, Slider } from "antd";
 import TextArea from "antd/es/input/TextArea";
 import { SaveOutlined } from "@ant-design/icons";
 import {
@@ -64,11 +64,13 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
   });
 
   const [createAgentLoading, setCreateAgentLoading] = useState(false);
+  const initialFormDataRef = useRef("");
 
   // 当编辑的 agent 变化时，更新表单数据
   useEffect(() => {
+    let nextFormData: CreateAgentRequest;
     if (editingAgent) {
-      setFormData({
+      nextFormData = {
         name: editingAgent.name,
         description: editingAgent.description || "",
         systemPrompt: editingAgent.systemPrompt || "",
@@ -80,10 +82,9 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
           topP: 1.0,
           messageLength: 10,
         },
-      });
+      };
     } else {
-      // 重置表单
-      setFormData({
+      nextFormData = {
         name: "agent",
         description: "",
         systemPrompt: "",
@@ -95,8 +96,10 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
           topP: 1.0,
           messageLength: 10,
         },
-      });
+      };
     }
+    setFormData(nextFormData);
+    initialFormDataRef.current = JSON.stringify(nextFormData);
   }, [editingAgent, open]);
 
   // 获取工具列表
@@ -115,11 +118,31 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
 
   const isEditMode = !!editingAgent;
 
+  const handleClose = () => {
+    if (createAgentLoading) {
+      return;
+    }
+    if (JSON.stringify(formData) === initialFormDataRef.current) {
+      onClose();
+      return;
+    }
+
+    Modal.confirm({
+      title: "放弃未保存的修改？",
+      content: "关闭后，本次对智能体的修改将丢失。",
+      okText: "放弃修改",
+      cancelText: "继续编辑",
+      okType: "danger",
+      onOk: onClose,
+    });
+  };
+
   return (
     <Modal
       open={open}
-      onCancel={onClose}
+      onCancel={handleClose}
       title={isEditMode ? "编辑智能体" : "智能体助手"}
+      rootClassName="app-agent-modal"
       footer={null}
       width={800}
       centered
@@ -492,6 +515,12 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
             )}
           </div>
           <div className="absolute bottom-0 right-0">
+            <span className="mr-3 text-xs text-gray-500">
+              已选 {formData.allowedKbs?.length ?? 0} 个知识库 · {formData.allowedTools?.length ?? 0} 个工具
+            </span>
+            <Button className="mr-2" onClick={handleClose} disabled={createAgentLoading}>
+              取消
+            </Button>
             <Button
               type="primary"
               icon={<SaveOutlined />}
@@ -504,7 +533,10 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
                   } else {
                     await createAgentHandle(formData);
                   }
+                  initialFormDataRef.current = JSON.stringify(formData);
                   onClose();
+                } catch (error) {
+                  message.error(error instanceof Error ? error.message : "智能体保存失败，请重试");
                 } finally {
                   setCreateAgentLoading(false);
                 }

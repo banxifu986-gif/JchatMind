@@ -28,6 +28,7 @@ import { useDocuments } from "../../hooks/useDocuments.ts";
 import {
   cancelIngestionTask,
   getIngestionTask,
+  getRetryableIngestionTasks,
   retryIngestionTask,
   subscribeIngestionTaskProgress,
   uploadDocument,
@@ -75,8 +76,12 @@ const KnowledgeBaseView: React.FC = () => {
 
   const [uploading, setUploading] = useState(false);
   const [ingestionTask, setIngestionTask] = useState<IngestionTaskVO | null>(null);
+  const [retryableTasks, setRetryableTasks] = useState<IngestionTaskVO[]>([]);
   const uploadIdempotencyKeys = useRef<Map<string, string>>(new Map());
   const currentIngestionTask = ingestionTask?.kbId === knowledgeBaseId ? ingestionTask : null;
+  const historicalRetryableTasks = retryableTasks.filter(
+    (task) => task.taskId !== currentIngestionTask?.taskId,
+  );
   const ingestionTaskId = currentIngestionTask?.taskId;
   const ingestionTaskStatus = currentIngestionTask?.status;
   const canCancelIngestion = currentIngestionTask !== null
@@ -93,6 +98,24 @@ const KnowledgeBaseView: React.FC = () => {
 
   useEffect(() => {
     setIngestionTask((currentTask) => currentTask?.kbId === knowledgeBaseId ? currentTask : null);
+  }, [knowledgeBaseId]);
+
+  useEffect(() => {
+    setRetryableTasks([]);
+    if (!knowledgeBaseId) return;
+
+    let active = true;
+    void getRetryableIngestionTasks(knowledgeBaseId)
+      .then((tasks) => {
+        if (active) setRetryableTasks(tasks);
+      })
+      .catch(() => {
+        if (active) setRetryableTasks([]);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [knowledgeBaseId]);
 
   useEffect(() => {
@@ -119,6 +142,11 @@ const KnowledgeBaseView: React.FC = () => {
       setIngestionTask(nextTask);
       if (!ACTIVE_INGESTION_STATUSES.has(nextTask.status)) {
         void refreshDocuments();
+        void getRetryableIngestionTasks(knowledgeBaseId)
+          .then((tasks) => {
+            if (active) setRetryableTasks(tasks);
+          })
+          .catch(() => {});
         controller.abort();
       }
     };
@@ -235,16 +263,18 @@ const KnowledgeBaseView: React.FC = () => {
     }
   };
 
-  const handleRetryIngestion = async () => {
-    if (!currentIngestionTask || !RETRYABLE_INGESTION_STATUSES.has(currentIngestionTask.status)) return;
+  const handleRetryIngestion = async (task: IngestionTaskVO) => {
+    if (!RETRYABLE_INGESTION_STATUSES.has(task.status)) return;
     try {
-      await retryIngestionTask(currentIngestionTask.taskId);
-      setIngestionTask({
-        ...currentIngestionTask,
+      await retryIngestionTask(task.taskId);
+      const queuedTask = {
+        ...task,
         status: "QUEUED",
         attemptCount: 0,
         errorSummary: null,
-      });
+      } satisfies IngestionTaskVO;
+      setIngestionTask(queuedTask);
+      setRetryableTasks((tasks) => tasks.filter((item) => item.taskId !== task.taskId));
       message.success("已重新提交文档处理");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "重新提交文档处理失败");
@@ -302,6 +332,52 @@ const KnowledgeBaseView: React.FC = () => {
             删除
           </Button>
         </Popconfirm>
+      ),
+    },
+  ];
+
+  const retryableTaskColumns = [
+    {
+      title: "文件名",
+      key: "filename",
+      render: (_: unknown, task: IngestionTaskVO) => (
+        documents.find((document) => document.id === task.documentId)?.filename ?? task.documentId
+      ),
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      render: (status: IngestionTaskVO["status"]) => (
+        <Tag color={taskStatusColor(status)}>{taskStatusText(status)}</Tag>
+      ),
+    },
+    {
+      title: "错误",
+      dataIndex: "errorSummary",
+      key: "errorSummary",
+      render: (errorSummary: string | null) => (
+        <Text type="danger">{errorSummary || "处理失败"}</Text>
+      ),
+    },
+    {
+      title: "更新时间",
+      dataIndex: "updatedAt",
+      key: "updatedAt",
+      render: (updatedAt: string | null) => updatedAt ? new Date(updatedAt).toLocaleString() : "—",
+    },
+    {
+      title: "操作",
+      key: "action",
+      width: 120,
+      render: (_: unknown, task: IngestionTaskVO) => (
+        <Button
+          type="link"
+          icon={<RedoOutlined />}
+          onClick={() => void handleRetryIngestion(task)}
+        >
+          重新处理
+        </Button>
       ),
     },
   ];
@@ -425,7 +501,7 @@ const KnowledgeBaseView: React.FC = () => {
                           size="small"
                           icon={<RedoOutlined />}
                           aria-label="重新处理"
-                          onClick={() => void handleRetryIngestion()}
+                          onClick={() => void handleRetryIngestion(currentIngestionTask)}
                         />
                       </Tooltip>
                     )}
@@ -454,6 +530,22 @@ const KnowledgeBaseView: React.FC = () => {
             )}
           </Card>
         </div>
+
+        {historicalRetryableTasks.length > 0 && (
+          <div className="mb-3">
+            <Card title={`失败任务 (${historicalRetryableTasks.length})`}>
+              <Table
+                columns={retryableTaskColumns}
+                dataSource={historicalRetryableTasks}
+                rowKey="taskId"
+                pagination={{
+                  pageSize: 5,
+                  showTotal: (total) => `共 ${total} 条`,
+                }}
+              />
+            </Card>
+          </div>
+        )}
 
         <div className="mb-3">
           {/* 文档列表 */}

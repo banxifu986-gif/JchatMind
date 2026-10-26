@@ -57,6 +57,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   const [streamingContent, setStreamingContent] = useState("");
   const [pendingApproval, setPendingApproval] =
     useState<PendingApprovalVO | null>(null);
+  const [approvalOutcome, setApprovalOutcome] = useState<"approved" | "rejected" | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
 
   useEffect(() => {
@@ -164,6 +165,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
     if (!message || !message.trim()) {
       return;
     }
+    setApprovalOutcome(null);
 
     if (!isLogin) {
       antdMessage.warning("请先登录");
@@ -225,9 +227,11 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
     try {
       if (approved) {
         await approveHarnessRequest(pendingApproval.id);
+        setApprovalOutcome("approved");
         antdMessage.success("已批准工具执行");
       } else {
         await rejectHarnessRequest(pendingApproval.id);
+        setApprovalOutcome("rejected");
         antdMessage.success("已拒绝工具执行");
       }
       setPendingApproval(null);
@@ -383,10 +387,11 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
     };
   }, [chatSessionId, getChatMessages, recordAgentTrace, refreshPendingApproval]);
 
-  const agentName = useMemo(() => {
+  const activeAgent = useMemo(() => {
     if (!agentId) return null;
-    return agents.find((a) => a.id === agentId)?.name ?? null;
+    return agents.find((agent) => agent.id === agentId) ?? null;
   }, [agentId, agents]);
+  const agentName = activeAgent?.name ?? null;
 
   if (!chatSessionId) {
     return <EmptyAgentChatView agents={agents} loading={loading} />;
@@ -395,16 +400,21 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
   return (
     <div className="app-chat-page">
       <div className="app-chat__topbar">
-        <div className="app-chat__agent-context">
-          <span className="app-chat__agent-avatar app-chat__agent-avatar--live">
-            <RobotOutlined />
-          </span>
-          <div className="app-chat__agent-select-copy">
-            <span className="app-chat__eyebrow">当前对话</span>
-            <span className="app-chat__active-agent-name">{agentName ?? "JChatMind"}</span>
+        <span className="app-chat__topbar-title">当前对话</span>
+        <div className="app-chat__topbar-meta">
+          <div className="app-chat__agent-context">
+            <span className="app-chat__agent-avatar app-chat__agent-avatar--live">
+              <RobotOutlined />
+            </span>
+            <div className="app-chat__agent-select-copy">
+              <span className="app-chat__active-agent-name">{agentName ?? "JChatMind"}</span>
+              {activeAgent?.description && (
+                <span className="app-chat__agent-description">{activeAgent.description}</span>
+              )}
+            </div>
           </div>
+          <span className="app-chat__topbar-hint">实时工作区</span>
         </div>
-        <span className="app-chat__topbar-hint">实时工作区</span>
       </div>
       <AgentChatHistory
         messages={messages}
@@ -414,6 +424,7 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
         agentTrace={agentTrace}
         streamingContent={streamingSessionIdRef.current === chatSessionId ? streamingContent : ""}
         pendingApproval={pendingApproval}
+        approvalOutcome={approvalOutcome}
         approvalSubmitting={approvalSubmitting}
         onApprove={() => handleApproval(true)}
         onReject={() => handleApproval(false)}

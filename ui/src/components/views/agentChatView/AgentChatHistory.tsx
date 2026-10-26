@@ -31,10 +31,78 @@ interface AgentChatHistoryProps {
   agentTrace?: AgentExecutionTraceItem[];
   streamingContent?: string;
   pendingApproval?: PendingApprovalVO | null;
+  approvalOutcome?: "approved" | "rejected" | null;
   approvalSubmitting?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
 }
+
+const normalizeAssistantMarkdown = (content: string) => {
+  const lines = content.split("\n");
+  const normalizedLines: string[] = [];
+  let fenceChar = "";
+  let fenceLength = 0;
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fenceChar) {
+      normalizedLines.push(line);
+      if (fenceMatch && fenceMatch[1][0] === fenceChar
+        && fenceMatch[1].length >= fenceLength && !fenceMatch[2].trim()) {
+        fenceChar = "";
+      }
+      continue;
+    }
+    if (fenceMatch && (fenceMatch[1][0] !== "`" || !fenceMatch[2].includes("`"))) {
+      const marker = fenceMatch[1];
+      let closingIndex = index + 1;
+      while (closingIndex < lines.length && !lines[closingIndex].trim()) {
+        closingIndex++;
+      }
+      const closingFence = lines[closingIndex]?.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closingFence && closingFence[1][0] === marker[0]
+        && closingFence[1].length >= marker.length) {
+        normalizedLines.push("（原回答未提供代码）");
+        index = closingIndex;
+        continue;
+      }
+      fenceChar = marker[0];
+      fenceLength = marker.length;
+      normalizedLines.push(line);
+      continue;
+    }
+
+    const wrappedHeading = line.match(/^[ \t]*\*\*\\?(#{1,6})[ \t]+(.+?)\*\*[ \t]*$/)
+      ?? line.match(/^[ \t]*\\(#{1,6})[ \t]+(.+?)[ \t]*$/);
+    if (wrappedHeading) {
+      normalizedLines.push(`${wrappedHeading[1]} ${wrappedHeading[2]}`);
+      continue;
+    }
+
+    const normalizedLine = line.replace(
+      /(^|[\s。；:：！？])(#{1,6})(?=[^\s#])/g,
+      (_, prefix: string, hashes: string) => `${prefix.trimEnd()}\n\n${hashes} `,
+    );
+    if (normalizedLine.includes("||") && /\|[-:| ]{3,}\|/.test(normalizedLine)) {
+      const firstPipe = normalizedLine.indexOf("|");
+      const title = normalizedLine.slice(0, firstPipe).trimEnd();
+      const table = normalizedLine.slice(firstPipe).replace(/\|\|/g, "|\n|");
+      normalizedLines.push(`${title}\n\n${table}`);
+      continue;
+    }
+    if (!/^#{1,6}\s/.test(normalizedLine)) {
+      normalizedLines.push(normalizedLine);
+      continue;
+    }
+
+    normalizedLines.push(normalizedLine
+      .replace(/^(#{1,6}\s.*?)(?=[1-9]\d*[.、]\s)/, "$1\n\n")
+      .replace(/(?<=\S)\s+([1-9]\d*[.、])\s+/g, "\n$1 ")
+      .replace(/^(#{1,6}\s.{1,40}?[：:])\s+/, "$1\n\n"));
+  }
+  return normalizedLines.join("\n");
+};
 
 // 工具调用展示组件（简化版，用于 assistant 消息内）
 const ToolCallDisplay: React.FC<{ toolCall: ToolCall }> = ({ toolCall }) => {
@@ -128,6 +196,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
   agentTrace = [],
   streamingContent = "",
   pendingApproval,
+  approvalOutcome,
   approvalSubmitting = false,
   onApprove,
   onReject,
@@ -269,10 +338,8 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
                     {/* 消息内容 */}
                     {message.content && (
                       <div>
-                        <XMarkdown
-                          streaming={{ enableAnimation: false, hasNextChunk: true }}
-                        >
-                          {message.content}
+                        <XMarkdown>
+                          {normalizeAssistantMarkdown(message.content)}
                         </XMarkdown>
                       </div>
                     )}
@@ -313,7 +380,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
           <Bubble
             content={
               <XMarkdown streaming={{ enableAnimation: true, hasNextChunk: true }}>
-                {streamingContent}
+                {normalizeAssistantMarkdown(streamingContent)}
               </XMarkdown>
             }
             placement="start"
@@ -351,6 +418,9 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
                   <SafetyCertificateOutlined className="mr-1" />
                   工具执行需要审批
                 </span>
+                <span className="app-chat__approval-intro">
+                  请核对即将执行的工具和调用参数。批准后，智能体才会继续调用。
+                </span>
                 <span className="app-chat__approval-tool">
                   {pendingApproval.toolName}
                   {pendingApproval.callCount > 1 ? `，共 ${pendingApproval.callCount} 次调用` : ""}
@@ -371,10 +441,10 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
                     loading={approvalSubmitting}
                     onClick={onApprove}
                   >
-                    批准
+                    批准执行
                   </Button>
                   <Button
-                    danger
+                    className="app-chat__approval-reject"
                     size="small"
                     icon={<CloseOutlined />}
                     disabled={approvalSubmitting}
@@ -387,6 +457,13 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
             }
             placement="start"
           />
+        </div>
+      )}
+      {approvalOutcome && !pendingApproval && (
+        <div className="app-chat__approval app-chat__approval--resolved" role="status">
+          <span>
+            {approvalOutcome === "approved" ? "已批准工具执行，正在继续处理" : "已拒绝工具执行"}
+          </span>
         </div>
       )}
       {displayAgentStatus && agentStatusType !== "TOOL_APPROVAL_REQUIRED" && (

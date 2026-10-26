@@ -647,14 +647,30 @@ button {
 
 .app-chat__topbar {
   display: flex;
-  min-height: 62px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 34px;
+  min-height: 104px;
+  align-items: stretch;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 34px;
   border-bottom: 1px solid rgba(229, 225, 218, 0.88);
   background: rgba(251, 250, 247, 0.7);
   backdrop-filter: blur(14px);
+}
+
+.app-chat__topbar-title {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.app-chat__topbar-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
 }
 
 .app-chat__agent-context {
@@ -677,8 +693,10 @@ button {
 }
 
 .app-chat__agent-avatar {
-  width: 30px;
-  height: 30px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  font-size: 16px;
 }
 
 .app-chat__agent-select-copy {
@@ -896,9 +914,20 @@ button {
 
 .app-chat__active-agent-name {
   color: var(--ink);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 15px;
+  font-weight: 700;
   line-height: 1.4;
+}
+
+.app-chat__agent-description {
+  display: -webkit-box;
+  max-width: min(680px, 68vw);
+  overflow: hidden;
+  color: #817a71;
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .app-chat__history {
@@ -910,7 +939,7 @@ button {
 }
 
 .app-chat__history-inner {
-  width: min(920px, 100%);
+  width: min(1080px, 100%);
   min-height: 100%;
   margin: 0 auto;
   padding: 30px 32px 54px;
@@ -925,10 +954,66 @@ button {
 }
 
 .app-chat__message--assistant .ant-bubble-content {
-  padding: 0;
-  background: transparent;
+  padding: 12px 16px;
+  border-radius: 15px;
+  background: #f3f1ed;
   color: var(--ink);
   line-height: 1.8;
+}
+
+.app-chat__message--assistant .x-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1em 0 0.5em;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.app-chat__message--assistant .x-markdown :is(h1, h2) {
+  font-size: 1.25em;
+}
+
+.app-chat__message--assistant .x-markdown :is(h3, h4) {
+  font-size: 1.1em;
+}
+
+.app-chat__message--assistant .x-markdown pre {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #e8e5df;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1.5;
+}
+
+.app-chat__message--assistant .x-markdown table:not(pre) {
+  border: 1px solid #cfc4b8;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 10px;
+  background: #fffdfa;
+}
+
+.app-chat__message--assistant .x-markdown :is(th, td) {
+  padding: 9px 12px;
+  border-right: 1px solid #e1d8ce;
+  border-bottom: 1px solid #e1d8ce;
+  text-align: left;
+}
+
+.app-chat__message--assistant .x-markdown th {
+  background: #e9e0d6;
+  color: #342f29;
+  font-weight: 700;
+}
+
+.app-chat__message--assistant .x-markdown tbody tr:nth-child(even) {
+  background: #f7f3ee;
+}
+
+.app-chat__message--assistant .x-markdown tr > :last-child {
+  border-right: 0;
+}
+
+.app-chat__message--assistant .x-markdown tr:last-child td {
+  border-bottom: 0;
 }
 
 .app-chat__message--user {
@@ -938,9 +1023,9 @@ button {
 
 .app-chat__message--user .ant-bubble-content {
   border-radius: 15px 15px 5px 15px;
-  background: var(--ink);
-  color: #fffaf3;
-  box-shadow: 0 8px 20px rgba(36, 35, 32, 0.1);
+  background: var(--orange-soft);
+  color: var(--ink);
+  box-shadow: none;
 }
 
 .app-chat__message--tool {
@@ -1012,30 +1097,49 @@ button {
   margin: 7px 0 23px;
 }
 
+.app-chat__approval .ant-bubble {
+  max-width: 100%;
+}
+
 .app-chat__approval .ant-bubble-content {
-  border: 1px solid #f2c8a8;
-  border-radius: 15px;
-  background: var(--orange-soft);
+  width: min(820px, 100%);
+  border: 1px solid #f0c98b;
+  border-left: 4px solid #f2a923;
+  border-radius: 14px;
+  background: #fff9ed;
   box-shadow: none;
 }
 
 .app-chat__approval-card {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  min-width: min(460px, 70vw);
+  gap: 12px;
+  min-width: 0;
+  padding: 3px;
 }
 
 .app-chat__approval-title {
-  color: #bd5a29;
-  font-size: 13px;
+  color: #9b5718;
+  font-size: 16px;
   font-weight: 750;
+}
+
+.app-chat__approval-intro {
+  color: #665a49;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .app-chat__approval-tool,
 .app-chat__approval-details {
   color: #796e63;
-  font-size: 11px;
+  font-size: 12px;
+}
+
+.app-chat__approval-tool {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .app-chat__approval-input {
@@ -1053,8 +1157,27 @@ button {
 }
 
 .app-chat__approval-actions .ant-btn-primary {
-  border-color: var(--ink);
-  background: var(--ink);
+  min-height: 42px;
+  border-color: var(--orange);
+  background: var(--orange);
+}
+
+.app-chat__approval-actions .app-chat__approval-reject {
+  min-height: 42px;
+  border-color: #ded8d0;
+  background: #fff;
+  color: var(--ink);
+}
+
+.app-chat__approval--resolved {
+  width: fit-content;
+  margin: 7px 0 23px 8px;
+  padding: 9px 13px;
+  border: 1px solid #d8e5d7;
+  border-radius: 10px;
+  background: #f3f8f1;
+  color: #4e7350;
+  font-size: 12px;
 }
 
 .app-chat__status {
@@ -1081,8 +1204,132 @@ button {
 }
 
 .app-chat__active-composer .app-chat__composer-shell {
-  width: min(820px, 100%);
+  width: min(1080px, 100%);
   margin: 0 auto;
+}
+
+.app-sidebar__session.is-active {
+  background: #e9e3dc;
+  border-color: #ded6cc;
+  box-shadow: inset 3px 0 0 var(--orange);
+}
+
+.app-sidebar__section-title,
+.app-chat__eyebrow {
+  color: #827b72;
+}
+
+.app-chat__topbar-hint,
+.app-chat__composer-note {
+  color: #817a71;
+}
+
+.app-chat__empty-subtitle {
+  color: #716b63;
+}
+
+.app-chat__prompt-chip {
+  color: #5f5a53;
+}
+
+.app-chat__prompt-chip:focus-visible,
+.app-sidebar__nav-item:focus-visible,
+.app-sidebar__nested-create:focus-visible,
+.app-sidebar__account:focus-visible,
+.app-sidebar__session:focus-visible,
+.app-sidebar__agent:focus-visible,
+.app-sidebar__knowledge-base:focus-visible {
+  outline: 3px solid rgba(233, 111, 50, 0.32);
+  outline-offset: 2px;
+}
+
+.app-chat__composer-shell:focus-within {
+  border-color: rgba(233, 111, 50, 0.58);
+  box-shadow: 0 20px 50px rgba(54, 48, 38, 0.12), 0 0 0 4px rgba(233, 111, 50, 0.1);
+}
+
+.app-chat__trace {
+  border-color: #ead9cb;
+  background: rgba(255, 248, 241, 0.78);
+}
+
+.app-chat__trace-header,
+.app-chat__trace-label {
+  color: #a7552e;
+}
+
+.app-chat__trace-item {
+  color: #625d55;
+}
+
+.app-chat__trace-dot {
+  background: var(--orange);
+  box-shadow: 0 0 0 3px rgba(233, 111, 50, 0.14);
+}
+
+.app-chat__trace-step {
+  color: #756e65;
+}
+
+.app-management-page .ant-card,
+.app-memory-page .ant-card {
+  border-color: var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(54, 48, 38, 0.045);
+}
+
+.app-management-page .ant-card-head,
+.app-memory-page .ant-card-head {
+  border-bottom-color: #ece8e2;
+}
+
+.app-management-page .ant-card-head-title,
+.app-memory-page .ant-card-head-title {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.app-management-page .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid #ece8e2;
+  border-radius: 10px;
+}
+
+.app-management-page .ant-table-thead > tr > th {
+  background: #f6f3ee;
+  color: #625d55;
+  font-weight: 650;
+}
+
+.app-management-page .ant-table-tbody > tr > td {
+  color: #4f4a43;
+}
+
+.app-management-page .ant-table-tbody > tr:hover > td {
+  background: #fff9f3;
+}
+
+.app-memory-page .ant-card-small {
+  border-color: #e8e2da;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: none;
+}
+
+.app-memory-page .ant-card-small:hover {
+  border-color: #dfb99f;
+}
+
+.app-memory-page .ant-typography-secondary,
+.app-management-page .ant-typography-secondary {
+  color: #716b63;
+}
+
+.app-sidebar__item-action.ant-btn:focus-visible,
+.app-sidebar__session-delete:focus-visible,
+.app-sidebar__header-actions .ant-btn:focus-visible {
+  opacity: 1;
+  outline: 3px solid rgba(233, 111, 50, 0.32);
+  outline-offset: 1px;
 }
 
 @keyframes app-chat-rise {
@@ -1188,12 +1435,28 @@ button {
     padding-inline: 18px;
   }
 
+  .app-chat__agent-description {
+    max-width: calc(100vw - 120px);
+  }
+
   .app-chat__topbar-hint {
     display: none;
   }
 
   .app-chat__history-inner {
-    padding: 24px 18px 42px;
+    padding: 22px 16px 36px;
+  }
+
+  .app-chat__message .ant-bubble {
+    max-width: 94%;
+  }
+
+  .app-chat__approval .ant-bubble-content {
+    width: 100%;
+  }
+
+  .app-chat__approval-actions .ant-btn {
+    min-height: 44px;
   }
 
   .app-chat__composer-area,
@@ -1220,5 +1483,404 @@ button {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+}
+
+.app-memory-page__inner {
+  gap: 30px;
+}
+
+.app-memory-hero.ant-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-memory-hero.ant-card > .ant-card-body {
+  padding: 8px 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-memory-grid {
+  gap: 30px;
+}
+
+.app-memory-grid > .ant-card,
+.app-memory-page__inner > .ant-card:not(.app-memory-hero) {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-memory-grid > .ant-card > .ant-card-head,
+.app-memory-page__inner > .ant-card:not(.app-memory-hero) > .ant-card-head {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.app-memory-grid > .ant-card > .ant-card-body,
+.app-memory-page__inner > .ant-card:not(.app-memory-hero) > .ant-card-body {
+  padding: 16px 0 0;
+}
+
+.app-memory-page .ant-card-small {
+  border: 0;
+  border-bottom: 1px solid #ece8e2;
+  border-radius: 0;
+  background: transparent;
+}
+
+.app-memory-page .ant-card-small > .ant-card-body {
+  padding: 14px 0;
+}
+
+.app-memory-grid > .ant-card .space-y-3 > .ant-card:last-child,
+.app-memory-page__inner > .ant-card:not(.app-memory-hero) .space-y-3 > .ant-card:last-child {
+  border-bottom: 0;
+}
+
+.app-memory-page .ant-collapse {
+  border-color: #ece8e2;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+@media (max-width: 880px) {
+  .app-memory-page__inner {
+    gap: 22px;
+  }
+
+  .app-memory-grid {
+    gap: 22px;
+  }
+}
+
+.app-agent-modal .ant-modal .ant-modal-content {
+  display: flex;
+  max-height: 88vh;
+  flex-direction: column;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 0 24px 16px;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child {
+  display: flex;
+  height: min(500px, 62vh) !important;
+  min-height: 360px;
+  flex-direction: column;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:first-child {
+  width: 100% !important;
+  height: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  border-right: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:first-child > div {
+  flex-direction: row;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 0 8px;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:first-child > div > div {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border-radius: 9px 9px 0 0;
+  color: #625d55;
+  font-size: 13px;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:first-child > div > div:hover {
+  background: #f4f0ea;
+  color: var(--ink);
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:first-child > div > div[class*="font-medium"] {
+  background: var(--orange-soft);
+  box-shadow: inset 0 -2px 0 var(--orange);
+  color: #a7552e;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) {
+  min-height: 0;
+  flex: 1;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) > div:first-child {
+  height: 100%;
+  overflow-y: auto;
+  padding: 18px 4px 82px;
+  scrollbar-color: #d0c8bd transparent;
+  scrollbar-width: thin;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) > div:last-child {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 4px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.app-agent-modal .ant-modal .ant-modal-body label {
+  color: #49453f;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) div[class*="border-gray-200"],
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) div[class*="border-blue-500"] {
+  padding: 14px 10px;
+  border-top: 0 !important;
+  border-right: 0 !important;
+  border-bottom: 1px solid #e8e2da !important;
+  border-left: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) div[class*="border-gray-200"]:hover {
+  background: #f8f5f0 !important;
+}
+
+.app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:nth-child(2) div[class*="border-blue-500"] {
+  background: #fff6ed !important;
+  box-shadow: inset 3px 0 0 var(--orange);
+}
+
+.app-agent-modal .ant-modal .ant-input,
+.app-agent-modal .ant-modal .ant-input-affix-wrapper,
+.app-agent-modal .ant-modal .ant-select-selector {
+  border-color: #ded8d0;
+  border-radius: 9px;
+  background: #fffdfa;
+  box-shadow: none;
+}
+
+.app-agent-modal .ant-modal .ant-input:focus,
+.app-agent-modal .ant-modal .ant-input-affix-wrapper:focus-within,
+.app-agent-modal .ant-modal .ant-select-focused .ant-select-selector {
+  border-color: rgba(233, 111, 50, 0.62);
+  box-shadow: 0 0 0 3px rgba(233, 111, 50, 0.1);
+}
+
+.app-agent-modal .ant-modal .ant-slider-track,
+.app-agent-modal .ant-modal .ant-slider:hover .ant-slider-track {
+  background-color: var(--orange);
+}
+
+.app-agent-modal .ant-modal .ant-slider-handle::after {
+  box-shadow: 0 0 0 2px var(--orange);
+}
+
+.app-agent-modal .ant-modal .ant-checkbox-checked .ant-checkbox-inner {
+  border-color: var(--orange);
+  background: var(--orange);
+}
+
+@media (max-width: 640px) {
+  .app-agent-modal .ant-modal {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px);
+    margin: 8px auto;
+  }
+
+  .app-agent-modal .ant-modal .ant-modal-content {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .app-agent-modal .ant-modal .ant-modal-body {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .app-agent-modal .ant-modal .ant-modal-body > div:first-child {
+    min-height: 320px;
+  }
+
+  .app-agent-modal .ant-modal .ant-modal-body > div:first-child > div:first-child > div > div {
+    padding-inline: 10px;
+  }
+}
+
+.ant-modal-root .ant-modal .ant-modal-content {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 64px rgba(36, 35, 32, 0.18);
+}
+
+.ant-modal-root .ant-modal-mask {
+  background: rgba(36, 35, 32, 0.3) !important;
+  backdrop-filter: blur(2px);
+}
+
+.ant-modal-root .ant-modal .ant-modal-header {
+  margin-bottom: 0;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.ant-modal-root .ant-modal .ant-modal-title {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.ant-modal-root .ant-modal .ant-modal-close {
+  border-radius: 8px;
+  color: #756e65;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.ant-modal-root .ant-modal .ant-modal-close:hover {
+  background: var(--orange-soft);
+  color: #a7552e;
+}
+
+.ant-modal-root .ant-modal .ant-modal-body {
+  padding: 18px 24px 22px;
+  color: #514c45;
+}
+
+.ant-modal-root .ant-modal .ant-form-item {
+  margin-bottom: 17px;
+}
+
+.ant-modal-root .ant-modal label {
+  color: #49453f;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ant-modal-root .ant-modal .ant-modal-footer {
+  margin-top: 0;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+
+.ant-modal-root .ant-modal .ant-modal-footer .ant-btn,
+.ant-modal-root .ant-modal .ant-modal-confirm-btns .ant-btn {
+  min-width: 76px;
+  border-radius: 9px;
+}
+
+.ant-modal-root .ant-modal .ant-btn-primary {
+  border-color: var(--orange);
+  background: var(--orange);
+  box-shadow: 0 4px 10px rgba(233, 111, 50, 0.16);
+}
+
+.ant-modal-root .ant-modal .ant-btn-primary:hover {
+  border-color: #d76128;
+  background: #d76128;
+}
+
+.ant-modal-root .ant-modal .ant-btn-primary.ant-btn-dangerous {
+  border-color: var(--danger);
+  background: var(--danger);
+  box-shadow: 0 4px 10px rgba(201, 79, 70, 0.14);
+}
+
+.ant-modal-root .ant-modal .ant-btn-primary.ant-btn-dangerous:hover {
+  border-color: #b9433b;
+  background: #b9433b;
+}
+
+.ant-modal-root .ant-modal .ant-input,
+.ant-modal-root .ant-modal .ant-input-affix-wrapper,
+.ant-modal-root .ant-modal .ant-select-selector {
+  border-color: #ded8d0;
+  border-radius: 9px;
+  background: #fffdfa;
+  box-shadow: none;
+}
+
+.ant-modal-root .ant-modal .ant-input:hover,
+.ant-modal-root .ant-modal .ant-input-affix-wrapper:hover,
+.ant-modal-root .ant-modal .ant-select:hover .ant-select-selector {
+  border-color: #d1a88e;
+}
+
+.ant-modal-root .ant-modal .ant-input:focus,
+.ant-modal-root .ant-modal .ant-input-affix-wrapper:focus-within,
+.ant-modal-root .ant-modal .ant-select-focused .ant-select-selector {
+  border-color: rgba(233, 111, 50, 0.62);
+  box-shadow: 0 0 0 3px rgba(233, 111, 50, 0.1);
+}
+
+.ant-modal-root .ant-modal .ant-tabs-ink-bar {
+  background: var(--orange);
+}
+
+.ant-modal-root .ant-modal .ant-tabs-tab:hover,
+.ant-modal-root .ant-modal .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #a7552e;
+}
+
+.ant-modal-root .ant-modal .ant-modal-confirm-title {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.ant-modal-root .ant-modal .ant-modal-confirm-content {
+  color: #716b63;
+}
+
+.ant-modal-root .ant-modal .ant-modal-confirm-body > .anticon {
+  color: var(--orange);
+}
+
+.ant-modal-root .ant-modal .ant-modal-confirm-body > .anticon.anticon-exclamation-circle {
+  color: #d66a32;
+}
+
+.ant-modal-root .ant-modal .ant-btn:focus-visible,
+.ant-modal-root .ant-modal .ant-tabs-tab:focus-visible {
+  outline: 3px solid rgba(233, 111, 50, 0.28);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .ant-modal-root .ant-modal .ant-modal-header {
+    padding: 16px 18px;
+  }
+
+  .ant-modal-root .ant-modal .ant-modal-body {
+    padding: 16px 18px 18px;
+  }
+
+  .ant-modal-root .ant-modal .ant-modal-footer {
+    padding: 12px 18px 16px;
+  }
+}
+
+.app-agent-modal .ant-modal .ant-modal-body {
+  padding: 0 24px 16px;
+}
+
+@media (max-width: 640px) {
+  .app-agent-modal .ant-modal .ant-modal-body {
+    padding-right: 16px;
+    padding-left: 16px;
   }
 }
