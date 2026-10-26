@@ -1,9 +1,9 @@
-# 可信研发知识协作 Agent 升级总计划
+# JChatMind 技术能力演进计划（业务场景待定）
 
 > 状态：G0 已结项；G1 核心链路已完成，受控 KB 删除任务已通过隔离 L2 与 Edge Playwright L3，显式生产迁移入口和托管 catalog 对账已实现并通过隔离 L2，真实生产执行仍须发布窗口；G2 已完成原生 BM25、Router/资产候选接线、独立三路实现及 mMARCO v3 本机诊断，当前 Bad Case 回放已全绿，KnowledgeTools/MCP 双 KB 组合授权 L2 已补齐，current fixture 检索双臂 L2 已通过；独立 v2 citation candidate 的 citation-minimal-v3 双臂门禁 eligible，但仍为 candidate/release-ineligible，答案质量与拒答门禁按用户决定暂缓，R0 与本地 rerank 默认保持不变；旧 `regression-v1` 内部文档来源路线已退役，仅保留历史审计资料；G4 核心目标已完成隔离 L0-L2 验收，迁移 catalog 已扩展至 22 项；G5 结果缓存隔离、完整应用顺序 JVM 重启与 `java -jar` 制品重启及 PostgreSQL 持久 FIFO/双 worker JVM queue competition 有隔离 L0/L2 证据，崩溃后按至少一次重放；完整应用双 worker HTTP L2、持久 worker executor 满载恢复和 120 秒独立 PostgreSQL queue soak 均通过；服务管理器、生产故障与生产代表性负载边界仍待，G3 已接入 Skill submit/status、持久 dispatcher 与 Rabbit worker；迁移/lifecycle、worker 单测和隔离 PostgreSQL task L2 已通过，真实 Rabbit+PostgreSQL worker 与 isolated Spring @RabbitListener L2 已通过；memory L3、真实 KnowledgeTool/RAG 与模型总结仍待；G5 仍为部分实现。
 > G2 最新重验状态（2026-10-22）：获授权的 4-case citation-only 重验在隔离 PostgreSQL 上完成了 4 次 DeepSeek 请求，但 4 条均为 `generation_error`，本轮 citation gate=`inconclusive`；GLM 0 次，answer-quality 未测。报告 `backend_v2/target/rag-eval/multimodal/g2-current-multimodal-v1-runtime.json` 已由该次运行覆盖，candidate 仍 release-ineligible；此前成功的 citation-minimal-v3 运行记录保留在下方历史证据中。本地 evaluator 现已加入仅记录 cause class 和 HTTP status 的 safe diagnostics，不写异常 message/body；当前被覆盖的报告仍只有通用 `generation_error`，诊断结果须在另行授权后的下一次运行产生。
 > 创建日期：2026-08-14  
-> 产品定位：面向个人开发者和小型研发团队的可信知识协作 Agent。  
+> 业务场景：项目目标使用场景尚未确定。本文原先以“面向个人开发者和小型研发团队的可信研发知识协作 Agent”为候选方向编写；该方向未经确认，文中的场景问题、产品范围和需求均为讨论假设，不构成已确定的产品定位或后续开发承诺。G0-G5 状态与验收记录描述已实施或评测中的技术能力，不代表业务场景已经确定。
 > 本文是当前唯一维护的跨模块计划，负责需求、设计、实施和验收的主索引。历史专项方案已归档；当前实施范围和验收以本文与现有 Spec 为准。
 
 ---
@@ -174,22 +174,22 @@
 
 ## 1. 目标与产品边界
 
-### 1.1 核心问题
+### 1.1 候选方向的问题定义（未确认）
 
-用户的项目资料分散于设计文档、接口说明、故障复盘、会议纪要、PDF、架构图和任务系统中。模型即使具备通用知识，也无法可靠获得这些私有、持续变化且需要权限控制的事实。
+以下内容沿用此前提出的“研发知识协作”候选方向，仅用于记录方案假设。项目目标用户、真实痛点和目标场景仍待确定。
 
-系统目标是：根据问题和证据状态，选择直接回答、私有知识库检索、受控公开资料检索或任务工作流；所有事实性结论均可追溯到证据，并对无证据、权限不足或高风险操作明确拒答、追问或请求审批。
+该候选方向假设用户资料分散于设计文档、接口说明、故障复盘、会议纪要、PDF、架构图和任务系统。若后续选择此方向，系统可根据问题和证据状态选择直接回答、私有知识库检索、受控公开资料检索或任务工作流，并对事实性结论提供证据，对无证据、权限不足或高风险操作拒答、追问或请求审批。
 
-### 1.2 一期范围
+### 1.2 候选一期范围（待确认）
 
-一期只服务“研发知识协作”场景，覆盖：
+若确认采用“研发知识协作”方向，一期可评估以下范围；当前不据此默认新增产品功能：
 
 - 项目 Onboarding：基于架构、接口、运行手册回答系统设计问题。
 - 故障排查：关联日志、故障复盘和版本记录，输出带证据的排查建议。
 - 技术决策追溯：说明某项技术方案的结论、证据、替代方案和历史取舍。
 - 文档处理任务：异步解析、索引、评测和报告生成，并向发起方反馈进度和结果。
 
-### 1.3 非目标
+### 1.3 候选方向的边界假设
 
 - 不做通用搜索引擎，不抓取或长期存储整个互联网。
 - 不允许用户上传任意可执行脚本作为 Skill；Skill 只能调用经登记、授权和审计的工具。
@@ -367,6 +367,8 @@ R0/R1/R2 必须使用相同的 KB 范围、gold、Top-K、embedding、VectorChor
 项目内冻结集必须补足带授权会话上下文的 follow-up、topic switch、标题/正文精确术语、中文/代码、无答案和越权 case；只有非原问扩展 query 占比非零时，R2 才有资格作为三路实验。`mMARCO-zh-sampled` 的自然 query 通常不含会话上下文，若 frozen replay 没有扩展 query，它只能验证 Dense/Sparse/RRF 与 rerank，不能作为第三路收益证据。
 
 通过门槛沿用本计划与 Spec 的性能、安全边界：三个变体的授权和拒答断言必须全绿；R2 必须与 R0 使用同一有效 query 集，且不低于 R0 的 `Recall@5`、`MRR@10`、`nDCG@10`，p95 增幅不超过 15%。development 允许参数选择；untouched test 只允许一次冻结运行。任一门槛失败时保留 R0，并把 R2 报告为 `inconclusive` 或 `rejected`，不得默认启用。
+
+**2026-10-22 G3 用户记忆智能默认与透明控制。** 采用 `REVIEW_ALL`、默认 `BALANCED`、`AUTOMATIC` 三档；平衡档自动保存仅限模型高置信且用户明确表达的低风险偏好，敏感、冲突、关键约束和低置信内容继续人工确认，一次性任务绝不持久化。记忆管理页显示档位、候选、证据和来源会话；达到 10 条有效长期记忆后可由用户主动生成合并预览，只有确认才替代来源记录。抽取 scope/schema/evidence 失败关闭，移除关键词写入回退；节流检查点和候选幂等状态进入 PostgreSQL，召回新增 20,000 字符整条记录预算。order 230 migration 仅登记于 manifest/catalog；静态契约 4 项、隔离 PostgreSQL migration lifecycle/MyBatis 运行时 5 项均通过。只在随机隔离库验证，未执行本机业务数据库迁移。
 
 #### 3.3.4 LongMemEval 30 题记忆系统诊断计划（G3，部分实施，运行时验收待完成）
 
@@ -1050,7 +1052,7 @@ ParadeDB 为 PostgreSQL 18.6、`pg_search 0.25.3`、`pgvector 0.8.4`，与项目
 
 | 日期 | 决策 | 原因 |
 | --- | --- | --- |
-| 2026-08-14 | 定位为可信研发知识协作 Agent | 能将现有 RAG、记忆、MCP 和 Harness 组织为真实业务闭环 |
+| 2026-08-14 | 曾提出“可信研发知识协作 Agent”候选定位，未作为项目最终使用场景确认 | 能将现有 RAG、记忆、MCP 和 Harness 组织为真实业务闭环的候选理由 |
 | 2026-08-14 | 私有知识库优先，公开资料分层使用 | 私有、时效、权限和可追溯事实才是 RAG 的核心价值 |
 | 2026-08-14 | 任务中心先于 Skill、Webhook 和多 Agent | 任务状态、恢复、权限和可观测性是后续编排的基础 |
 | 2026-08-14 | 多 Agent 不作为默认路径 | 普通问答无法证明多角色协作的额外成本合理 |

@@ -11,8 +11,9 @@
 
 ## 当前仓库基线认知
 - 后端测试入口存在：`backend_v2` 可执行 `mvnw.cmd test`
-- 当前后端测试基线不是绿色，`mvnw.cmd test` 失败，现状是 Spring Boot `ApplicationContext` 启动失败
-- 前端当前没有 `test` 脚本，现有校验入口主要是 `npm run lint` 和 `npm run build`
+- 2026-10-26 后端 `mvnw.cmd test` 基线通过：1058 项，0 failures/errors，118 项按条件跳过（显式启用本次隔离 PostgreSQL 记忆确认测试 4 项；未启用时跳过数为 122）；跳过项不代表真实基础设施或模型验收通过
+- Codex Windows 沙箱内可能在 Mockito/Byte Buddy attach 阶段挂起；应先诊断执行环境，不能据此修改业务逻辑或关闭测试。基线分类与证据见 `docs/项目架构与关键链路.md` 的后端测试基线
+- 前端统一校验入口为 `npm run check`（lint、`npm test`、build）；`npm test` 执行 Node 源码契约与 TypeScript 类型契约，`npm run test:e2e` 显式执行需要前端服务和相应 fixture 的 Playwright 测试
 - 后续改动前应先复用这些现有入口确认基线，不要自创校验方式
 
 ## 代码风格

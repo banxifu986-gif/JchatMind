@@ -7,9 +7,9 @@
 | 类型 | 文档 | 维护边界 |
 |------|------|----------|
 | 架构 | [项目架构与关键链路.md](项目架构与关键链路.md) | 当前实现、主链路、源码索引和已知边界 |
-| 当前计划 | [trusted-knowledge-agent-roadmap.md](plans/active/trusted-knowledge-agent-roadmap.md) | 可信研发知识协作 Agent 的目标、阶段、依赖和验收 |
+| 当前计划 | [trusted-knowledge-agent-roadmap.md](plans/active/trusted-knowledge-agent-roadmap.md) | 技术能力演进状态与验收；业务场景尚未确定，研发知识协作仅为候选方向 |
 | 实施专项计划 | [intent-recognition-enterprise-plan.md](plans/active/intent-recognition-enterprise-plan.md) | 意图分类、路由、风险、评测和验收 |
-| Spec | [trusted-knowledge-agent-spec.md](spec/trusted-knowledge-agent-spec.md) | G0-G5 实施契约、SDD/TDD 追溯、RAG 指标配置与测试验收 |
+| Spec | [trusted-knowledge-agent-spec.md](spec/trusted-knowledge-agent-spec.md) | Agent/RAG 等技术能力的实施契约、SDD/TDD 追溯与验收；不代表已确定业务场景 |
 | 参考资料 | [JChatMind-简历技术深挖与面试八股.md](reference/JChatMind-简历技术深挖与面试八股.md) | 简历项目表述、源码证据、技术栈八股和当前边界 |
 
 ## 使用顺序
