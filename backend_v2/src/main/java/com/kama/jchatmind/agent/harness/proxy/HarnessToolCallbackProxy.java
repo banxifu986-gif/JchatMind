@@ -1,5 +1,6 @@
 package com.kama.jchatmind.agent.harness.proxy;
 
+import com.kama.jchatmind.agent.AgentToolExecutor;
 import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessConstants;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
@@ -38,9 +39,11 @@ public class HarnessToolCallbackProxy implements ToolCallback {
 
     @Override
     public String call(String toolInput, ToolContext toolContext) {
+        AgentToolExecutor.checkActive();
         HarnessContext context = resolveContext(toolInput, toolContext);
         try {
             String result = delegate.call(toolInput, toolContext);
+            AgentToolExecutor.checkActive();
             interceptorChain.executeAfter(context, result);
             return result;
         } catch (Exception e) {

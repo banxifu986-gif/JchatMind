@@ -167,7 +167,8 @@ class JChatMindFactoryOwnershipTest {
                 userMemoryFacadeService,
                 externalToolCallbackProvider,
                 mock(HarnessRunner.class),
-                mock(HarnessInterceptorChain.class)
+                mock(HarnessInterceptorChain.class),
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
     }
 

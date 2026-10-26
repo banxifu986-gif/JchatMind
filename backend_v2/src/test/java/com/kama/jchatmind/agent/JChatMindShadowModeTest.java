@@ -102,7 +102,8 @@ class JChatMindShadowModeTest {
                 messageService,
                 mock(ChatMessageConverter.class),
                 harnessRunner,
-                toolSelectionPolicy
+                toolSelectionPolicy,
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
 
         agent.run();

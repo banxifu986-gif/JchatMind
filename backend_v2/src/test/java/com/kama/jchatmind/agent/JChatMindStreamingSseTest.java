@@ -10,6 +10,8 @@ import com.kama.jchatmind.service.ChatMessageFacadeService;
 import com.kama.jchatmind.service.SseService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -19,6 +21,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -30,6 +33,34 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class JChatMindStreamingSseTest {
+
+    @Test
+    void shouldPreserveWhitespaceOnlyAssistantChunks() {
+        JChatMind agent = new JChatMind();
+        List<String> streamedChunks = new ArrayList<>();
+        SseService sseService = new SseService() {
+            @Override
+            public SseEmitter connect(String chatSessionId, Long lastEventId) {
+                return null;
+            }
+
+            @Override
+            public void send(String chatSessionId, SseMessage message) {
+                streamedChunks.add(message.getPayload().getContentDelta());
+            }
+        };
+        ReflectionTestUtils.setField(agent, "sseService", sseService);
+        ReflectionTestUtils.setField(agent, "chatSessionId", "session-1");
+        StringBuilder fullContent = new StringBuilder();
+
+        for (String chunk : List.of("##", " ", "标题", "\n", "\n", "内容")) {
+            ReflectionTestUtils.invokeMethod(agent, "appendContentDelta", chatResponse(chunk), fullContent);
+        }
+
+        assertThat(fullContent.toString()).isEqualTo("## 标题\n\n内容");
+        assertThat(streamedChunks)
+                .containsExactly("##", " ", "标题", "\n", "\n", "内容");
+    }
 
     @Test
     void shouldIgnoreEmptyResponseFramesAndEmitEveryAssistantTextChunkBeforePersistingFullMessage() {
@@ -76,7 +107,8 @@ class JChatMindStreamingSseTest {
                 sseService,
                 chatMessageFacadeService,
                 chatMessageConverter,
-                mock(HarnessRunner.class)
+                mock(HarnessRunner.class),
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
 
         agent.run();

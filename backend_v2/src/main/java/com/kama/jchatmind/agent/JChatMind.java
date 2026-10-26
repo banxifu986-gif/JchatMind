@@ -31,14 +31,11 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
-import org.springframework.web.context.request.RequestAttributes;
-import org.springframework.web.context.request.RequestContextHolder;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -47,8 +44,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -64,15 +64,13 @@ public class JChatMind {
     private List<ToolCallback> availableTools;
     private List<KnowledgeBaseDTO> availableKbs;
     private ToolCallingManager toolCallingManager;
+    private AgentToolExecutor toolExecutor;
     private ChatMemory chatMemory;
     private String chatSessionId;
 
     private static final Integer MAX_STEPS = 20;
     private static final Integer DEFAULT_MAX_MESSAGES = 20;
     private static final Integer DEFAULT_TOOL_TIMEOUT_SECONDS = 30;
-    private static final int COMPRESSION_CHAR_THRESHOLD = 8000;
-    private static final int KEEP_RECENT_MESSAGES = 8;
-    private static final int CONVERSATION_SUMMARY_CHAR_LIMIT = 4000;
 
     private ChatOptions chatOptions;
     private SseService sseService;
@@ -90,6 +88,10 @@ public class JChatMind {
     private IntentDecisionMetadata currentIntentDecisionMetadata;
     private final Set<String> executedToolCallSignatures = new HashSet<>();
     private Set<String> currentTurnAllowedToolNames = Set.of();
+    private String runEndReason;
+    private String runOriginalGoal;
+    private final List<String> completedToolSteps = new ArrayList<>();
+    private boolean toolFailureObserved;
 
     public JChatMind() {
         this.toolTimeoutSeconds = DEFAULT_TOOL_TIMEOUT_SECONDS;
@@ -111,7 +113,8 @@ public class JChatMind {
             SseService sseService,
             ChatMessageFacadeService chatMessageFacadeService,
             ChatMessageConverter chatMessageConverter,
-            HarnessRunner harnessRunner
+            HarnessRunner harnessRunner,
+            AgentToolExecutor toolExecutor
     ) {
         this.userId = userId;
         this.agentId = agentId;
@@ -126,6 +129,7 @@ public class JChatMind {
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.chatMessageConverter = chatMessageConverter;
         this.harnessRunner = harnessRunner;
+        this.toolExecutor = toolExecutor;
         this.agentState = AgentState.IDLE;
         this.currentStepNumber = 0;
 
@@ -164,7 +168,8 @@ public class JChatMind {
             ChatMessageFacadeService chatMessageFacadeService,
             ChatMessageConverter chatMessageConverter,
             HarnessRunner harnessRunner,
-            ToolSelectionPolicy toolSelectionPolicy
+            ToolSelectionPolicy toolSelectionPolicy,
+            AgentToolExecutor toolExecutor
     ) {
         this(
                 userId,
@@ -181,7 +186,8 @@ public class JChatMind {
                 sseService,
                 chatMessageFacadeService,
                 chatMessageConverter,
-                harnessRunner
+                harnessRunner,
+                toolExecutor
         );
         this.toolSelectionPolicy = toolSelectionPolicy == null
                 ? new ToolSelectionPolicy()
@@ -197,14 +203,17 @@ public class JChatMind {
                 .mapToObj(i -> {
                     AssistantMessage.ToolCall call = toolCalls.get(i);
                     return String.format(
-                            "[ToolCalling #%d]\n- name      : %s\n- arguments : %s",
+                            "[ToolCalling #%d]\n- id        : %s\n- name      : %s",
                             i + 1,
-                            call.name(),
-                            call.arguments()
+                            call.id(),
+                            call.name()
                     );
                 })
                 .collect(Collectors.joining("\n\n"));
-        log.info("\n\n========== Tool Calling ==========\n{}\n=================================\n", logMessage);
+        log.info("Agent tool calls: traceId={}, step={}, calls={}",
+                currentTraceId,
+                currentStepNumber,
+                logMessage);
     }
 
     private void saveMessage(Message message) {
@@ -277,6 +286,13 @@ public class JChatMind {
                 intentDecision,
                 selectedToolNames
         );
+        log.info("Agent decision: traceId={}, step={}, intent={}, route={}, reason={}, allowedTools={}",
+                currentTraceId,
+                currentStepNumber,
+                intentDecision.businessIntent(),
+                intentDecision.route(),
+                intentDecision.reasonCode(),
+                selectedToolNames);
         String thinkPrompt = buildThinkPrompt();
 
         Prompt prompt = Prompt.builder()
@@ -367,7 +383,7 @@ public class JChatMind {
 
         AssistantMessage output = response.getResult().getOutput();
         String contentDelta = output.getText();
-        if (!StringUtils.hasText(contentDelta)) {
+        if (contentDelta == null || contentDelta.isEmpty()) {
             return;
         }
 
@@ -416,6 +432,13 @@ public class JChatMind {
                 3. 完成回答：
                    - 任务完成或无需进一步操作时，直接向用户输出最终自然语言答复，不要调用工具
 
+                【最终回答排版要求】
+                - 最终答复使用规范 Markdown。复杂内容使用标题和列表分层，简单问题用简短段落。
+                - 标题单独成行，格式为“## 标题”，标题、段落和列表之间留空行。
+                - 代码示例使用独立的三反引号代码块，语言标记后换行写代码；不要输出空代码块。
+                - 列表中的每一项单独成行；表格的表头、分隔行和每一行数据也必须分别单独成行。
+                - 不要把多个标题、编号条目或表格行连写在同一段/同一行，也不要输出没有换行的伪表格。
+
                 【额外信息】
                 - 你当前可访问的知识库：%s
                 - 调用 KnowledgeTool 时，可以显式传入 kbIds 指定搜索范围；如果不传 kbIds，默认搜索当前 Agent 全部可访问知识库
@@ -431,7 +454,26 @@ public class JChatMind {
                     """.formatted(previousToolCallSignature));
         }
 
-        String boundedConversationSummary = limitConversationSummary(conversationSummary);
+        if (!completedToolSteps.isEmpty()) {
+            prompt.append("""
+
+                    【本次运行进度】
+                    已返回的工具步骤（结果正文见对话中的工具消息）：
+                    %s
+                    尚余工具执行预算：%d
+                    """.formatted(String.join("\n", completedToolSteps), Math.max(0, MAX_STEPS - currentStepNumber)));
+        }
+
+        if (StringUtils.hasText(runOriginalGoal)) {
+            prompt.append("""
+
+                    【本次运行原始目标】
+                    %s
+                    请围绕此目标使用当前轮的最新用户请求和工具结果作答；若最新请求已切换话题，以最新请求为准。
+                    """.formatted(runOriginalGoal));
+        }
+
+        String boundedConversationSummary = AgentMemoryCompressor.limitSummary(conversationSummary);
         if (StringUtils.hasText(boundedConversationSummary)) {
             prompt.append("""
 
@@ -445,112 +487,8 @@ public class JChatMind {
     }
 
     private void compressMemoryIfNeeded() {
-        List<Message> allMessages = this.chatMemory.get(this.chatSessionId);
-        int totalChars = allMessages.stream()
-                .mapToInt(m -> messageText(m) != null ? messageText(m).length() : 0)
-                .sum();
-        if (totalChars < COMPRESSION_CHAR_THRESHOLD) {
-            return;
-        }
-
-        int keepFrom = Math.max(1, allMessages.size() - KEEP_RECENT_MESSAGES);
-        if (keepFrom <= 1) {
-            return;
-        }
-        keepFrom = adjustKeepFromForToolPairs(allMessages, keepFrom);
-        if (keepFrom <= 1) {
-            return;
-        }
-
-        try {
-            List<Message> toCompress = new ArrayList<>(allMessages.subList(1, keepFrom));
-            String newSummary = generateSummary(toCompress);
-            if (!StringUtils.hasText(newSummary)) {
-                return;
-            }
-            conversationSummary = limitConversationSummary(StringUtils.hasText(conversationSummary)
-                    ? conversationSummary + "\n" + newSummary
-                    : newSummary);
-
-            allMessages.subList(1, keepFrom).clear();
-            allMessages.add(1, new SystemMessage("【对话历史摘要】\n" + conversationSummary));
-            log.info("Memory compressed: {} messages summarized, total chars before: {}", toCompress.size(), totalChars);
-        } catch (Exception e) {
-            log.warn("Failed to compress memory", e);
-        }
-    }
-
-    private int adjustKeepFromForToolPairs(List<Message> messages, int keepFrom) {
-        int adjusted = keepFrom;
-        for (int i = keepFrom; i < messages.size(); i++) {
-            if (messages.get(i) instanceof ToolResponseMessage) {
-                for (int j = i - 1; j >= 1; j--) {
-                    if (messages.get(j) instanceof AssistantMessage am
-                            && am.getToolCalls() != null
-                            && !am.getToolCalls().isEmpty()) {
-                        adjusted = Math.min(adjusted, j);
-                        break;
-                    }
-                }
-            }
-        }
-        return adjusted;
-    }
-
-    private String messageText(Message msg) {
-        if (msg instanceof AssistantMessage am) {
-            return am.getText();
-        }
-        if (msg instanceof UserMessage um) {
-            return um.getText();
-        }
-        if (msg instanceof SystemMessage sm) {
-            return sm.getText();
-        }
-        if (msg instanceof ToolResponseMessage trm) {
-            return trm.getResponses().stream()
-                    .map(ToolResponseMessage.ToolResponse::responseData)
-                    .collect(java.util.stream.Collectors.joining("\n"));
-        }
-        return "";
-    }
-
-    private String generateSummary(List<Message> toSummarize) {
-        StringBuilder messagesText = new StringBuilder();
-        for (Message msg : toSummarize) {
-            String content = messageText(msg);
-            if (content == null || content.isEmpty()) {
-                continue;
-            }
-            if (content.length() > 1000) {
-                content = content.substring(0, 1000) + "...";
-            }
-            messagesText.append(content).append("\n");
-        }
-
-        String boundedConversationSummary = limitConversationSummary(conversationSummary);
-        String summaryPrompt = StringUtils.hasText(boundedConversationSummary)
-                ? "上一轮总结: " + boundedConversationSummary + "\n\n对话:\n" + messagesText
-                : "对话:\n" + messagesText;
-
-        try {
-            String response = this.chatClient.prompt()
-                    .system("将以下对话总结为2-3句话，聚焦关键话题、用户意图和重要决策。只输出总结文本。")
-                    .user(summaryPrompt)
-                    .call()
-                    .content();
-            return response != null ? response.trim() : null;
-        } catch (Exception e) {
-            log.warn("Failed to generate summary", e);
-            return null;
-        }
-    }
-
-    private String limitConversationSummary(String summary) {
-        if (!StringUtils.hasText(summary) || summary.length() <= CONVERSATION_SUMMARY_CHAR_LIMIT) {
-            return summary;
-        }
-        return summary.substring(summary.length() - CONVERSATION_SUMMARY_CHAR_LIMIT);
+        conversationSummary = AgentMemoryCompressor.compress(
+                chatClient, chatMemory.get(chatSessionId), conversationSummary);
     }
 
     private String formatKbSummary() {
@@ -631,19 +569,44 @@ public class JChatMind {
 
         this.chatMemory.add(this.chatSessionId, toolResponseMessage);
 
-        String collect = toolResponseMessage.getResponses()
-                .stream()
-                .map(resp -> "工具" + resp.name() + " 的返回结果为: " + resp.responseData())
-                .collect(Collectors.joining("\n"));
-        log.info("工具调用结果: {}", collect);
-
         saveMessage(toolResponseMessage);
         refreshPendingMessages();
+        toolFailureObserved = toolResponseMessage.getResponses().stream()
+                .anyMatch(response -> "FAILED".equals(classifyToolOutcome(response.responseData())));
+        for (ToolResponseMessage.ToolResponse response : toolResponseMessage.getResponses()) {
+            String outcome = classifyToolOutcome(response.responseData());
+            log.info("Agent tool result: traceId={}, step={}, toolCallId={}, tool={}, outcome={}",
+                    currentTraceId,
+                    currentStepNumber,
+                    response.id(),
+                    response.name(),
+                    outcome);
+            completedToolSteps.add("step=%d call=%s tool=%s outcome=%s".formatted(
+                    currentStepNumber,
+                    response.id(),
+                    response.name(),
+                    outcome
+            ));
+            if (completedToolSteps.size() > MAX_STEPS) {
+                completedToolSteps.remove(0);
+            }
+        }
 
         if (toolResponseMessage.getResponses().stream().anyMatch(resp -> resp.name().equals("terminate"))) {
             this.agentState = AgentState.FINISHED;
             log.info("任务结束");
         }
+    }
+
+    private String classifyToolOutcome(String responseData) {
+        if (responseData != null && responseData.startsWith("错误：")) {
+            return "FAILED";
+        }
+        if (responseData != null
+                && (responseData.startsWith("[TOOL_") || responseData.startsWith("[APPROVAL_"))) {
+            return "REJECTED";
+        }
+        return "RETURNED";
     }
 
     private Set<String> registerToolCallSignatures(List<AssistantMessage.ToolCall> toolCalls) {
@@ -677,41 +640,37 @@ public class JChatMind {
 
         ChatResponse responseToExecute = buildFilteredChatResponse(allowedToolCalls);
         try {
-            RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
-            ToolExecutionResult result = CompletableFuture
-                    .supplyAsync(() -> {
-                        RequestContextHolder.setRequestAttributes(requestAttributes);
-                        try {
-                            HarnessExecutionContextHolder.bind(
-                                    allowedContexts,
-                                    new HarnessExecutionContextHolder.BatchMetadata(
-                                            chatSessionId,
-                                            agentId,
-                                            userId,
-                                            currentStepNumber
-                                    )
-                            );
-                            try {
-                                return toolCallingManager.executeToolCalls(prompt, responseToExecute);
-                            } finally {
-                                HarnessExecutionContextHolder.clear();
-                            }
-                        } finally {
-                            RequestContextHolder.resetRequestAttributes();
-                        }
-                    })
-                    .orTimeout(toolTimeoutSeconds, TimeUnit.SECONDS)
-                    .join();
-            return extractToolResponse(result);
-        } catch (Exception e) {
-            log.error("工具执行异常（疑似调用了不存在的工具或超时）: {}", e.getMessage());
-            return buildErrorResponse(allowedToolCalls, e.getMessage());
+            return toolExecutor.execute(
+                    toolCallingManager, prompt, responseToExecute, allowedContexts,
+                    new HarnessExecutionContextHolder.BatchMetadata(chatSessionId, agentId, userId, currentStepNumber),
+                    Duration.ofSeconds(toolTimeoutSeconds)
+            );
+        } catch (TimeoutException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return unconfirmedToolResponse(allowedToolCalls);
+        } catch (RejectedExecutionException exception) {
+            runEndReason = "TOOL_EXECUTOR_BUSY";
+            agentState = AgentState.FINISHED;
+            return buildErrorResponse(allowedToolCalls, "工具执行资源已满，本次调用未执行，请稍后重试");
+        } catch (ExecutionException exception) {
+            if (exception.getCause() instanceof CancellationException) {
+                return unconfirmedToolResponse(allowedToolCalls);
+            }
+            log.error("工具执行异常: traceId={}, step={}", currentTraceId, currentStepNumber);
+            return buildErrorResponse(allowedToolCalls, "工具执行失败");
+        } catch (Exception exception) {
+            log.error("工具执行异常: traceId={}, step={}, exceptionType={}",
+                    currentTraceId, currentStepNumber, exception.getClass().getSimpleName());
+            return buildErrorResponse(allowedToolCalls, "工具执行失败");
         }
     }
 
-    private ToolResponseMessage extractToolResponse(ToolExecutionResult result) {
-        List<Message> history = result.conversationHistory();
-        return (ToolResponseMessage) history.get(history.size() - 1);
+    private ToolResponseMessage unconfirmedToolResponse(List<AssistantMessage.ToolCall> calls) {
+        runEndReason = "TOOL_OUTCOME_UNKNOWN";
+        agentState = AgentState.FINISHED;
+        return buildErrorResponse(calls, "工具等待已结束，执行结果未确认，请核实后再操作");
     }
 
     private ToolResponseMessage buildErrorResponse(List<AssistantMessage.ToolCall> toolCalls, String errorMessage) {
@@ -733,8 +692,27 @@ public class JChatMind {
         if (think()) {
             execute();
         } else {
-            agentState = AgentState.FINISHED;
+            finishWithoutToolCalls();
         }
+    }
+
+    private void finishWithoutToolCalls() {
+        agentState = AgentState.FINISHED;
+        if (currentIntentDecisionMetadata != null && currentIntentDecisionMetadata.requiresClarification()) {
+            runEndReason = "CLARIFICATION_REQUIRED";
+        } else if (toolFailureObserved) {
+            runEndReason = "TOOL_FAILURE";
+        }
+    }
+
+    private void handleFinalBudgetDecision(boolean moreToolsRequested) {
+        if (!moreToolsRequested) {
+            finishWithoutToolCalls();
+            return;
+        }
+        runEndReason = "BUDGET_EXHAUSTED";
+        agentState = AgentState.FINISHED;
+        sendStatus(SseMessage.Type.AI_ERROR, "执行步数已用尽，任务尚未确认完成", currentStepNumber);
     }
 
     public void run() {
@@ -742,24 +720,53 @@ public class JChatMind {
             throw new IllegalStateException("Agent is not idle");
         }
         currentTraceId = UUID.randomUUID().toString();
+        runEndReason = null;
+        runOriginalGoal = latestUserQuery();
+        completedToolSteps.clear();
+        toolFailureObserved = false;
 
         try {
             this.agentState = AgentState.PLANNING;
             sendStatus(SseMessage.Type.AI_PLANNING, "Agent 正在分析请求...", 0);
-            for (int i = 0; i < MAX_STEPS && agentState != AgentState.FINISHED; i++) {
+            for (int i = 0; i <= MAX_STEPS && agentState != AgentState.FINISHED; i++) {
                 int currentStep = i + 1;
                 this.currentStepNumber = currentStep;
-                step();
-                if (currentStep >= MAX_STEPS) {
-                    agentState = AgentState.FINISHED;
-                    log.warn("Max steps reached, stopping agent");
+                if (currentStep > MAX_STEPS) {
+                    handleFinalBudgetDecision(think());
+                } else {
+                    step();
                 }
             }
-            agentState = AgentState.FINISHED;
-            sendStatus(SseMessage.Type.AI_DONE, "任务完成", currentStepNumber);
+            if (agentState != AgentState.FINISHED) {
+                runEndReason = "BUDGET_EXHAUSTED";
+                agentState = AgentState.FINISHED;
+                log.warn("Max steps reached, stopping agent with budget exhausted");
+                sendStatus(SseMessage.Type.AI_ERROR, "执行步数已用尽，任务尚未确认完成", currentStepNumber);
+            } else if (runEndReason == null) {
+                runEndReason = "COMPLETED";
+                sendStatus(SseMessage.Type.AI_DONE, "任务完成", currentStepNumber);
+            } else if ("TOOL_OUTCOME_UNKNOWN".equals(runEndReason)) {
+                sendStatus(SseMessage.Type.AI_ERROR, "工具执行结果未确认，请核实后再操作", currentStepNumber);
+            } else if ("TOOL_EXECUTOR_BUSY".equals(runEndReason)) {
+                sendStatus(SseMessage.Type.AI_ERROR, "工具执行资源已满，本次调用未执行，请稍后重试", currentStepNumber);
+            } else if ("TOOL_FAILURE".equals(runEndReason)) {
+                sendStatus(SseMessage.Type.AI_ERROR, "工具执行失败，任务未确认完成", currentStepNumber);
+            } else {
+                sendStatus(SseMessage.Type.AI_DONE, "需要补充信息后继续", currentStepNumber);
+            }
+            log.info("Agent run ended: traceId={}, reason={}, steps={}, toolResults={}",
+                    currentTraceId,
+                    runEndReason,
+                    currentStepNumber,
+                    completedToolSteps.size());
         } catch (Exception e) {
             agentState = AgentState.ERROR;
-            log.error("Error running agent", e);
+            runEndReason = "RUN_FAILURE";
+            log.error("Agent run failed: traceId={}, reason={}, step={}",
+                    currentTraceId,
+                    runEndReason,
+                    currentStepNumber,
+                    e);
             sendStatus(SseMessage.Type.AI_ERROR, "Agent 执行失败，请稍后重试", currentStepNumber);
             throw new RuntimeException("Error running agent", e);
         }

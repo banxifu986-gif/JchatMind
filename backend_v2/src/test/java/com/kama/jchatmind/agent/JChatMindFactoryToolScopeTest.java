@@ -61,7 +61,7 @@ class JChatMindFactoryToolScopeTest {
 
         JChatMind runtime = factory(List.of(), properties).create("user-1", "agent-1", "session-1");
 
-        assertThat(toolSelectionPolicy(runtime).decide("帮我处理一下这个").decisionSource())
+        assertThat(toolSelectionPolicy(runtime).decide("我想了解 Redis 事务").decisionSource())
                 .isEqualTo(IntentDecisionSource.LLM_FALLBACK);
     }
 
@@ -126,7 +126,8 @@ class JChatMindFactoryToolScopeTest {
                 externalProvider,
                 mock(HarnessRunner.class),
                 mock(HarnessInterceptorChain.class),
-                intentRoutingProperties
+                intentRoutingProperties,
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
     }
 

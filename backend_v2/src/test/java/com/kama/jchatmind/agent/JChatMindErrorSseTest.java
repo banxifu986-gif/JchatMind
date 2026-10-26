@@ -45,7 +45,8 @@ class JChatMindErrorSseTest {
                 sseService,
                 mock(ChatMessageFacadeService.class),
                 mock(ChatMessageConverter.class),
-                mock(HarnessRunner.class)
+                mock(HarnessRunner.class),
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
 
         assertThatThrownBy(agent::run)

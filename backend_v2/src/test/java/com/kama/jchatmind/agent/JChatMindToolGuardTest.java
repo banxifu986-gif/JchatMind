@@ -70,7 +70,8 @@ class JChatMindToolGuardTest {
                 sseService,
                 messageService,
                 messageConverter,
-                mock(HarnessRunner.class)
+                mock(HarnessRunner.class),
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
 
         agent.run();
@@ -120,7 +121,8 @@ class JChatMindToolGuardTest {
                 sseService,
                 messageService,
                 messageConverter,
-                mock(HarnessRunner.class)
+                mock(HarnessRunner.class),
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
 
         agent.run();
@@ -133,7 +135,7 @@ class JChatMindToolGuardTest {
     }
 
     @Test
-    void shouldUseInjectedFallbackPolicyForAmbiguousRequest() {
+    void shouldUseInjectedFallbackPolicyForUnclassifiedRequest() {
         ChatClient chatClient = mock(ChatClient.class);
         ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
         ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
@@ -172,7 +174,7 @@ class JChatMindToolGuardTest {
                 "",
                 chatClient,
                 10,
-                List.of(new UserMessage("帮我处理一下这个")),
+                List.of(new UserMessage("我想了解 Redis 事务")),
                 List.of(callback("KnowledgeTool"), callback("sendEmail")),
                 List.of(),
                 "session-1",
@@ -180,7 +182,8 @@ class JChatMindToolGuardTest {
                 messageService,
                 messageConverter,
                 mock(HarnessRunner.class),
-                injectedPolicy
+                injectedPolicy,
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
 
         agent.run();

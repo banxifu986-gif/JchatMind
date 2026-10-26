@@ -295,7 +295,8 @@ public class G1ModelDrivenSessionScopeRuntimeL2TestConfig {
                 userMemoryMapper,
                 userMemoryCandidateMapper,
                 chatMessageFacadeService,
-                requestScopeData
+                requestScopeData,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, userMemoryCandidateMapper, null)
         );
     }
 
@@ -414,7 +415,8 @@ public class G1ModelDrivenSessionScopeRuntimeL2TestConfig {
                 userMemoryFacadeService,
                 externalToolCallbackProvider,
                 harnessRunner,
-                harnessInterceptorChain
+                harnessInterceptorChain,
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
     }
 

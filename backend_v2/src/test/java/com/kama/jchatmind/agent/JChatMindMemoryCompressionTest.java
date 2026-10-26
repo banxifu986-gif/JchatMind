@@ -90,7 +90,8 @@ class JChatMindMemoryCompressionTest {
                 mock(SseService.class),
                 mock(ChatMessageFacadeService.class),
                 mock(ChatMessageConverter.class),
-                mock(HarnessRunner.class)
+                mock(HarnessRunner.class),
+                new com.kama.jchatmind.agent.AgentToolExecutor()
         );
     }
 
