@@ -803,7 +803,7 @@ Agent 创建
 
 **Q5：当前前端如何验证？**
 
-**A：** `ui/package.json` 当前入口是 `npm run lint` 和 `npm run build`，另有多条基于 Node/Playwright 的契约或 Edge 测试文件，但没有统一的 `npm test` 脚本。面试中可以说“以 lint/build 和显式契约/Playwright 入口校验”，不要虚构不存在的 test script。
+**A：** `ui/package.json` 的统一入口是 `npm run check`，依次执行 lint、`npm test` 和 build。`npm test` 覆盖 Node 源码契约与 TypeScript 类型契约；`npm run test:e2e` 显式执行 Playwright/Edge 浏览器测试，需要先准备前端服务及相应用例的隔离 fixture。面试中应区分静态契约、浏览器 mock 旅程与真实后端验收，不把列出或跳过用例当作验收通过。
 
 ### 4.7 SSE 与实时反馈
 

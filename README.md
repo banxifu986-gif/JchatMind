@@ -71,6 +71,17 @@ npm install
 npm run dev
 ```
 
+### 校验
+
+在 `ui` 目录执行 `npm run check`，依次运行 lint、契约测试和生产构建，任一步失败即停止。
+`npm test` 可单独执行 Node 源码契约与 TypeScript 类型契约，`npm run test:contracts` 是其显式入口。
+
+浏览器测试使用 `npm run test:e2e`，需要先启动前端并准备 Playwright 配置使用的 Microsoft Edge。
+默认前端地址为 `http://127.0.0.1:5173`，可通过 `G1_UI_BASE_URL` 指定；需要真实后端的用例仍须显式准备各自的隔离 fixture，条件不足时跳过不代表验收通过。
+`npm run test:e2e -- --list` 仅列出浏览器用例，不执行验收。
+
+后端在 `backend_v2` 目录执行 `mvnw.cmd test`；真实基础设施和模型测试的启用条件及跳过边界见 [后端测试基线](docs/项目架构与关键链路.md#71-后端测试基线)。
+
 ### 可选 BGE 重排序
 
 `docker compose up -d` 会额外启动本地 CPU TEI 服务 `jchatmind-reranker`，使用

@@ -7,6 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "npm run test:contracts",
+    "test:contracts": "node --test tests/*.contract.mjs && tsc -p tsconfig.contracts.json",
+    "test:e2e": "playwright test",
+    "check": "npm run lint && npm test && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
