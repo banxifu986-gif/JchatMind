@@ -35,9 +35,14 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
     private final AgentKnowledgeBaseBindingService agentKnowledgeBaseBindingService;
 
     @Override
+    @Transactional
     public GetAgentsResponse getAgents() {
         String userId = requireUserId();
+        agentMapper.lockUserAgentsForProvisioning(userId);
         List<Agent> agents = agentMapper.selectByUserId(userId);
+        if (agents.isEmpty()) {
+            agents = List.of(createDefaultAgent(userId));
+        }
         List<AgentVO> result = new ArrayList<>();
         for (Agent agent : agents) {
             try {
@@ -51,6 +56,31 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
         return GetAgentsResponse.builder()
                 .agents(result.toArray(new AgentVO[0]))
                 .build();
+    }
+
+    private Agent createDefaultAgent(String userId) {
+        LocalDateTime now = LocalDateTime.now();
+        AgentDTO agentDTO = AgentDTO.builder()
+                .userId(userId)
+                .name("默认助手")
+                .description("可以直接开始对话，之后也能按需自定义。")
+                .systemPrompt("你是 JChatMind 的默认助手。请用清晰、准确、友好的中文回答；如果需求信息不足，先询问必要的问题。")
+                .model(AgentDTO.ModelType.DEEPSEEK_CHAT)
+                .allowedTools(List.of())
+                .allowedKbs(List.of())
+                .chatOptions(AgentDTO.ChatOptions.defaultOptions())
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        try {
+            Agent agent = agentConverter.toEntity(agentDTO);
+            if (agentMapper.insert(agent) <= 0) {
+                throw new BizException("创建默认智能体失败");
+            }
+            return agent;
+        } catch (JsonProcessingException e) {
+            throw new BizException("创建默认智能体失败");
+        }
     }
 
     @Override

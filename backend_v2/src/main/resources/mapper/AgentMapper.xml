@@ -93,6 +93,15 @@
         ORDER BY created_at DESC
     </select>
 
+    <select id="lockUserAgentsForProvisioning" resultType="java.lang.Integer">
+        SELECT 1
+        FROM (
+            SELECT pg_advisory_xact_lock(
+                hashtextextended(CONCAT('agent-default:', #{userId}), 0)
+            )
+        ) lock_guard
+    </select>
+
     <delete id="deleteById">
         DELETE
         FROM agent

@@ -2,6 +2,7 @@ package com.kama.jchatmind.mapper;
 
 import com.kama.jchatmind.model.entity.Agent;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -20,6 +21,8 @@ public interface AgentMapper {
     List<Agent> selectAll();
 
     List<Agent> selectByUserId(String userId);
+
+    Integer lockUserAgentsForProvisioning(@Param("userId") String userId);
 
     int deleteById(String id);
 
