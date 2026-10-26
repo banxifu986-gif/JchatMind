@@ -37,6 +37,9 @@ public class RedisChatSseEventStore {
     private static final DefaultRedisScript<String> READ_SNAPSHOT_SCRIPT = new DefaultRedisScript<>("""
             local sequence = tonumber(redis.call('GET', KEYS[1]) or '0')
             local events = redis.call('LRANGE', KEYS[2], 0, -1)
+            if #events == 0 then
+                return '{"latestSequence":' .. tostring(sequence) .. ',"events":[]}'
+            end
             return cjson.encode({latestSequence = sequence, events = events})
             """, String.class);
 
