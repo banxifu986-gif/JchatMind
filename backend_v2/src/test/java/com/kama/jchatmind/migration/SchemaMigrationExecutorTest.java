@@ -1,6 +1,8 @@
 package com.kama.jchatmind.migration;
 
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -41,14 +43,17 @@ class SchemaMigrationExecutorTest {
         SchemaMigrationExecutor.MigrationRunResult replayResult = firstRun.migrate();
 
         assertThat(firstResult.cleanInstall()).isTrue();
-        assertThat(firstResult.appliedMigrationIds()).hasSize(16);
+        List<String> expectedIds = new ArrayList<>();
+        new ObjectMapper().readTree(MANIFEST.toFile()).path("migrations")
+                .forEach(migration -> expectedIds.add(migration.path("id").asText()));
+        assertThat(firstResult.appliedMigrationIds()).containsExactlyElementsOf(expectedIds);
         assertThat(firstResult.appliedMigrationIds()).isSortedAccordingTo((left, right) ->
                 Integer.compare(store.orders.get(left), store.orders.get(right)));
         assertThat(replayResult.cleanInstall()).isFalse();
         assertThat(replayResult.appliedMigrationIds()).isEmpty();
         assertThat(store.operations).startsWith("baseline");
         assertThat(store.baselineSql).isEqualTo(Files.readString(baseline, StandardCharsets.UTF_8));
-        assertThat(store.operations).hasSize(17);
+        assertThat(store.operations).hasSize(expectedIds.size() + 1);
         assertThat(store.lockCalls).isEqualTo(2);
     }
 
@@ -115,12 +120,11 @@ class SchemaMigrationExecutorTest {
     @Test
     void shouldRejectFutureMigrationDependencyBeforeInstallingBaseline() throws Exception {
         Path manifest = Files.createTempFile("jchatmind-invalid-manifest-", ".json");
-        String original = Files.readString(MANIFEST, StandardCharsets.UTF_8);
-        String invalid = original.replace(
-                "\"requires\": [\"auth.create-user-table\"]",
-                "\"requires\": [\"mcp.create-principal-access\"]"
-        );
-        Files.writeString(manifest, invalid, StandardCharsets.UTF_8);
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode invalid = (ObjectNode) mapper.readTree(MANIFEST.toFile());
+        ObjectNode firstMigration = (ObjectNode) invalid.path("migrations").get(0);
+        firstMigration.putArray("requires").add("mcp.create-principal-access");
+        mapper.writeValue(manifest.toFile(), invalid);
         Path baseline = Files.createTempFile("jchatmind-approved-baseline-", ".sql");
         Files.writeString(baseline, "CREATE TABLE approved_baseline_marker(id INTEGER);", StandardCharsets.UTF_8);
         RecordingStore store = new RecordingStore(SchemaMigrationExecutor.MigrationState.empty());
@@ -141,11 +145,10 @@ class SchemaMigrationExecutorTest {
     @Test
     void shouldRejectManifestWithWrongJsonFieldTypesBeforeOpeningStore() throws Exception {
         Path manifest = Files.createTempFile("jchatmind-invalid-manifest-", ".json");
-        String original = Files.readString(MANIFEST, StandardCharsets.UTF_8);
-        Files.writeString(manifest, original.replace(
-                "\"schemaVersion\": \"2026-08-30\"",
-                "\"schemaVersion\": 20260830"
-        ), StandardCharsets.UTF_8);
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode invalid = (ObjectNode) mapper.readTree(MANIFEST.toFile());
+        invalid.put("schemaVersion", 20260830);
+        mapper.writeValue(manifest.toFile(), invalid);
         RecordingStore store = new RecordingStore(SchemaMigrationExecutor.MigrationState.empty());
 
         assertThatThrownBy(() -> new SchemaMigrationExecutor(

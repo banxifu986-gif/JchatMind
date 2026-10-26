@@ -179,7 +179,8 @@ class LongMemEvalReplayHistoryImportRuntimeL2Test {
                 chatMessageService,
                 requestScopeData,
                 registryProvider,
-                null
+                null,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, candidateMapper, null)
         );
 
         assertThat(memoryService.extractMemoryCandidates(userId, firstSession.sessionId()))
@@ -437,8 +438,9 @@ class LongMemEvalReplayHistoryImportRuntimeL2Test {
                             chatMessageService,
                             requestScopeData,
                             registryProvider,
-                            null
-                    );
+                            null,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, candidateMapper, null)
+        );
 
                     List<LongMemEvalReplayHistoryDatabaseImporter.ExtractionAttempt> attempts =
                             LongMemEvalReplayHistoryDatabaseImporter.replayHistory(
@@ -588,6 +590,8 @@ class LongMemEvalReplayHistoryImportRuntimeL2Test {
         return """
                 [
                   {
+                    "scope": "persistent",
+                    "confidence": "medium",
                     "type": "PREFERENCE",
                     "content": "%s",
                     "importance": "medium",

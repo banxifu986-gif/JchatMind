@@ -28,7 +28,7 @@ test("G3 browser journey confirms, edits, expires, and clears only the current u
   const candidates: Candidate[] = [candidate];
   const requests: { method: string; path: string; body?: unknown }[] = [];
 
-  await stubUserMemoryApi(page, memories, candidates, requests);
+  await stubUserMemoryApi(page, candidate, memories, candidates, requests);
   await page.addInitScript(() => {
     window.localStorage.setItem("jchatmind.token", "g3-browser-token");
   });
@@ -36,7 +36,7 @@ test("G3 browser journey confirms, edits, expires, and clears only the current u
   await page.goto("/user-memory");
 
   const candidatePanel = page.locator(".ant-card").filter({ hasText: "待确认候选" }).first();
-  await expect(page.getByText("g3-user", { exact: true })).toBeVisible();
+  await expect(page.getByText("g3-user", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(candidate.content, { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "确认保存" }).click();
@@ -45,16 +45,17 @@ test("G3 browser journey confirms, edits, expires, and clears only the current u
 
   await page.getByRole("button", { name: "编辑" }).click();
   await page.locator(".ant-modal textarea").fill("偏好 Spring Boot 方案");
-  await page.getByRole("button", { name: "保存" }).click();
-  await expect(page.getByText("偏好 Spring Boot 方案", { exact: true })).toBeVisible();
+  await page.locator(".ant-modal-footer .ant-btn-primary").click();
+  await expect(page.getByText("偏好 Spring Boot 方案", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "有效期" }).click();
   await page.locator(".ant-modal input[type='datetime-local']").fill("2030-01-02T03:04");
-  await page.getByRole("button", { name: "保存" }).click();
-  await expect(page.getByText("有效至 2030-01-02 03:04", { exact: true })).toBeVisible();
+  await page.locator(".ant-modal-footer .ant-btn-primary").click();
+  await expect(page.getByText("有效期: 有效至 2030-01-02 03:04", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "清空" }).first().click();
-  await page.getByRole("button", { name: "清空" }).last().click();
+  await page.getByRole("button", { name: "清空" }).click();
+  await expect(page.getByText("确认清空全部长期记忆？")).toBeVisible();
+  await page.locator(".ant-popconfirm-buttons .ant-btn-primary").click();
   await expect(page.getByText("暂无已保存记忆")).toBeVisible();
 
   expect(requests).toEqual(expect.arrayContaining([
@@ -67,6 +68,7 @@ test("G3 browser journey confirms, edits, expires, and clears only the current u
 
 async function stubUserMemoryApi(
   page: Page,
+  candidate: Candidate,
   memories: Memory[],
   candidates: Candidate[],
   requests: { method: string; path: string; body?: unknown }[],
@@ -75,6 +77,10 @@ async function stubUserMemoryApi(
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+    if (!path.startsWith("/api/")) {
+      await route.continue();
+      return;
+    }
     const method = request.method();
     const body = request.postData() ? request.postDataJSON() : undefined;
     requests.push({ method, path, ...(body ? { body } : {}) });
@@ -98,6 +104,14 @@ async function stubUserMemoryApi(
     }
     if (method === "GET" && path === "/api/users/memory-candidates") {
       await respond(route, { candidates });
+      return;
+    }
+    if (method === "GET" && path === "/api/users/memory-automation") {
+      await respond(route, { mode: "BALANCED" });
+      return;
+    }
+    if (method === "GET" && path === "/api/users/memory-consolidation-proposals") {
+      await respond(route, { proposals: [] });
       return;
     }
     if (method === "POST" && path === "/api/users/memory-candidates/candidate-1/confirm") {

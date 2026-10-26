@@ -40,7 +40,10 @@
     "agent_execution_session_sequence",
     "agent_execution_turn_message",
     "agent_execution_task",
-    "builtin_skill_execution_task"
+    "builtin_skill_execution_task",
+    "user_memory_automation_settings",
+    "user_memory_extraction_state",
+    "user_memory_consolidation_proposal"
   ],
   "allowedTables": [
     "jchatmind_schema_migration_ledger",
@@ -72,7 +75,10 @@
     "agent_execution_session_sequence",
     "agent_execution_turn_message",
     "agent_execution_task",
-    "builtin_skill_execution_task"
+    "builtin_skill_execution_task",
+    "user_memory_automation_settings",
+    "user_memory_extraction_state",
+    "user_memory_consolidation_proposal"
   ],
   "requiredColumns": {
     "jchatmind_schema_migration_ledger": [
@@ -363,6 +369,33 @@
       "updated_at",
       "started_at",
       "completed_at"
+    ],
+    "user_memory_automation_settings": [
+      "user_id",
+      "automation_mode",
+      "updated_at"
+    ],
+    "user_memory_extraction_state": [
+      "session_id",
+      "user_id",
+      "last_extracted_user_message_count",
+      "last_attempt_at",
+      "last_success_at",
+      "last_failure_type",
+      "failure_count",
+      "updated_at"
+    ],
+    "user_memory_consolidation_proposal": [
+      "id",
+      "user_id",
+      "source_memory_ids",
+      "source_fingerprint",
+      "proposed_type",
+      "proposed_content",
+      "status",
+      "applied_memory_id",
+      "created_at",
+      "updated_at"
     ]
   },
   "allowedColumns": {
@@ -705,6 +738,33 @@
       "updated_at",
       "started_at",
       "completed_at"
+    ],
+    "user_memory_automation_settings": [
+      "user_id",
+      "automation_mode",
+      "updated_at"
+    ],
+    "user_memory_extraction_state": [
+      "session_id",
+      "user_id",
+      "last_extracted_user_message_count",
+      "last_attempt_at",
+      "last_success_at",
+      "last_failure_type",
+      "failure_count",
+      "updated_at"
+    ],
+    "user_memory_consolidation_proposal": [
+      "id",
+      "user_id",
+      "source_memory_ids",
+      "source_fingerprint",
+      "proposed_type",
+      "proposed_content",
+      "status",
+      "applied_memory_id",
+      "created_at",
+      "updated_at"
     ]
   },
   "forbiddenColumns": {
@@ -827,7 +887,13 @@
     { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_attempt_count", "type": "c", "validated": true },
     { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_max_attempts", "type": "c", "validated": true },
     { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_dispatch_attempt_count", "type": "c", "validated": true },
-    { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_request_sha256", "type": "c", "validated": true }
+    { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_request_sha256", "type": "c", "validated": true },
+    { "table": "user_memory_automation_settings", "name": "user_memory_automation_settings_pkey", "type": "p", "validated": true },
+    { "table": "user_memory_automation_settings", "name": "user_memory_automation_mode_chk", "type": "c", "validated": true },
+    { "table": "user_memory_extraction_state", "name": "user_memory_extraction_state_pkey", "type": "p", "validated": true },
+    { "table": "user_memory_extraction_state", "name": "user_memory_extraction_state_session_id_fkey", "type": "f", "validated": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_proposal_pkey", "type": "p", "validated": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_status_chk", "type": "c", "validated": true }
   ],
   "allowedConstraints": [
     { "table": "knowledge_base", "name": "knowledge_base_pkey", "type": "p", "validated": true },
@@ -866,7 +932,13 @@
     { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_attempt_count", "type": "c", "validated": true },
     { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_max_attempts", "type": "c", "validated": true },
     { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_dispatch_attempt_count", "type": "c", "validated": true },
-    { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_request_sha256", "type": "c", "validated": true }
+    { "table": "builtin_skill_execution_task", "name": "chk_builtin_skill_task_request_sha256", "type": "c", "validated": true },
+    { "table": "user_memory_automation_settings", "name": "user_memory_automation_settings_pkey", "type": "p", "validated": true },
+    { "table": "user_memory_automation_settings", "name": "user_memory_automation_mode_chk", "type": "c", "validated": true },
+    { "table": "user_memory_extraction_state", "name": "user_memory_extraction_state_pkey", "type": "p", "validated": true },
+    { "table": "user_memory_extraction_state", "name": "user_memory_extraction_state_session_id_fkey", "type": "f", "validated": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_proposal_pkey", "type": "p", "validated": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_status_chk", "type": "c", "validated": true }
   ],
   "requiredIndexes": [
     { "table": "jchatmind_user", "name": "idx_user_account", "method": "btree", "unique": true },
@@ -913,7 +985,12 @@
     { "table": "builtin_skill_execution_task", "name": "uq_builtin_skill_task_requester_idempotency", "method": "btree", "unique": true },
     { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_dispatch", "method": "btree", "unique": false },
     { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_requester_created_at", "method": "btree", "unique": false },
-    { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_running_lease", "method": "btree", "unique": false }
+    { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_running_lease", "method": "btree", "unique": false },
+    { "table": "user_memory_automation_settings", "name": "user_memory_automation_settings_pkey", "method": "btree", "unique": true },
+    { "table": "user_memory_extraction_state", "name": "user_memory_extraction_state_pkey", "method": "btree", "unique": true },
+    { "table": "user_memory_candidate", "name": "user_memory_candidate_idempotency_uq", "method": "btree", "unique": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_proposal_pkey", "method": "btree", "unique": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_pending_idx", "method": "btree", "unique": false }
   ],
   "allowedIndexes": [
     { "table": "jchatmind_schema_migration_ledger", "name": "jchatmind_schema_migration_ledger_pkey", "method": "btree", "unique": true },
@@ -962,7 +1039,12 @@
     { "table": "builtin_skill_execution_task", "name": "uq_builtin_skill_task_requester_idempotency", "method": "btree", "unique": true },
     { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_dispatch", "method": "btree", "unique": false },
     { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_requester_created_at", "method": "btree", "unique": false },
-    { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_running_lease", "method": "btree", "unique": false }
+    { "table": "builtin_skill_execution_task", "name": "idx_builtin_skill_task_running_lease", "method": "btree", "unique": false },
+    { "table": "user_memory_automation_settings", "name": "user_memory_automation_settings_pkey", "method": "btree", "unique": true },
+    { "table": "user_memory_extraction_state", "name": "user_memory_extraction_state_pkey", "method": "btree", "unique": true },
+    { "table": "user_memory_candidate", "name": "user_memory_candidate_idempotency_uq", "method": "btree", "unique": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_proposal_pkey", "method": "btree", "unique": true },
+    { "table": "user_memory_consolidation_proposal", "name": "user_memory_consolidation_pending_idx", "method": "btree", "unique": false }
   ],
   "requiredDefinitions": [
     { "kind": "column", "table": "knowledge_base", "name": "owner_id", "matchType": "contains", "match": "bigint:false" },

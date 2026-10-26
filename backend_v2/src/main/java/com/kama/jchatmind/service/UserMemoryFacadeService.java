@@ -3,6 +3,8 @@ package com.kama.jchatmind.service;
 import com.kama.jchatmind.model.entity.UserMemory;
 import com.kama.jchatmind.model.response.GetUserMemoriesResponse;
 import com.kama.jchatmind.model.response.GetUserMemoryCandidatesResponse;
+import com.kama.jchatmind.model.response.UserMemoryAutomationResponse;
+import com.kama.jchatmind.model.response.GetUserMemoryConsolidationProposalsResponse;
 
 import java.util.List;
 
@@ -11,6 +13,18 @@ public interface UserMemoryFacadeService {
     GetUserMemoriesResponse getUserMemories();
 
     GetUserMemoryCandidatesResponse getUserMemoryCandidates();
+
+    UserMemoryAutomationResponse getMemoryAutomationMode();
+
+    void updateMemoryAutomationMode(String mode);
+
+    void createMemoryConsolidationProposal();
+
+    GetUserMemoryConsolidationProposalsResponse getMemoryConsolidationProposals();
+
+    void confirmMemoryConsolidationProposal(String proposalId);
+
+    void discardMemoryConsolidationProposal(String proposalId);
 
     void confirmUserMemoryCandidate(String candidateId);
 

@@ -41,7 +41,8 @@ class MigrationManifestContractTest {
             "sql/knowledge-base/2026-10-21-create-rag-index-revision.sql",
             "sql/chat/2026-10-21-create-agent-execution-queue.sql",
             "sql/skill/2026-10-22-create-builtin-skill-task.sql",
-            "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql"
+            "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql",
+            "sql/user-memory/2026-10-22-add-memory-governance.sql"
     );
 
     @Test
@@ -162,7 +163,13 @@ class MigrationManifestContractTest {
             root = new ObjectMapper().readTree(input);
         }
 
-        JsonNode migration = root.path("migrations").get(root.path("migrations").size() - 1);
+        JsonNode migration = null;
+        for (JsonNode entry : root.path("migrations")) {
+            if (entry.path("order").asInt() == 220) {
+                migration = entry;
+                break;
+            }
+        }
         String path = "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql";
         assertThat(migration.path("id").asText()).isEqualTo("skill.add-builtin-execution-task-lease-index");
         assertThat(migration.path("order").asInt()).isEqualTo(220);
@@ -184,6 +191,23 @@ class MigrationManifestContractTest {
                 .contains("CREATE INDEX idx_builtin_skill_task_running_lease")
                 .contains("ON builtin_skill_execution_task (lease_expires_at, task_id)")
                 .contains("WHERE status = 'RUNNING' AND lease_expires_at IS NOT NULL");
+    }
+
+    @Test
+    void shouldRegisterMemoryGovernanceMigrationAfterExecutionQueue() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = root.path("migrations").get(root.path("migrations").size() - 1);
+        String path = "sql/user-memory/2026-10-22-add-memory-governance.sql";
+        assertThat(migration.path("id").asText()).isEqualTo("user-memory.add-governance-state");
+        assertThat(migration.path("order").asInt()).isEqualTo(230);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+        assertThat(root.path("catalogContractSha256").asText())
+                .isEqualTo(sha256(Path.of("..", root.path("catalogContract").asText())));
     }
 
     private String sha256(Path path) throws Exception {

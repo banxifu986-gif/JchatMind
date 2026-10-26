@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.UserMemoryConsolidationProposalMapper">
+
+    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.UserMemoryConsolidationProposal">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="userId" column="user_id" jdbcType="VARCHAR"/>
+        <result property="sourceMemoryIdsJson" column="source_memory_ids_json" jdbcType="VARCHAR"/>
+        <result property="sourceFingerprint" column="source_fingerprint" jdbcType="VARCHAR"/>
+        <result property="proposedType" column="proposed_type" jdbcType="VARCHAR"/>
+        <result property="proposedContent" column="proposed_content" jdbcType="VARCHAR"/>
+        <result property="status" column="status" jdbcType="VARCHAR"/>
+        <result property="appliedMemoryId" column="applied_memory_id" jdbcType="VARCHAR"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="ProposalColumns">
+        id::text AS id,
+        user_id,
+        source_memory_ids::text AS source_memory_ids_json,
+        source_fingerprint,
+        proposed_type,
+        proposed_content,
+        status,
+        applied_memory_id::text AS applied_memory_id,
+        created_at,
+        updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.UserMemoryConsolidationProposal"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO user_memory_consolidation_proposal
+            (user_id, source_memory_ids, source_fingerprint, proposed_type, proposed_content, status, created_at, updated_at)
+        VALUES
+            (#{userId}, CAST(#{sourceMemoryIdsJson} AS jsonb), #{sourceFingerprint}, #{proposedType}, #{proposedContent}, 'PENDING', NOW(), NOW())
+    </insert>
+
+    <select id="selectPendingByUserId" resultMap="BaseResultMap">
+        SELECT <include refid="ProposalColumns"/>
+        FROM user_memory_consolidation_proposal
+        WHERE user_id = #{userId} AND status = 'PENDING'
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="selectPendingByIdAndUserId" resultMap="BaseResultMap">
+        SELECT <include refid="ProposalColumns"/>
+        FROM user_memory_consolidation_proposal
+        WHERE id = CAST(#{id} AS uuid) AND user_id = #{userId} AND status = 'PENDING'
+    </select>
+
+    <update id="markStatus">
+        UPDATE user_memory_consolidation_proposal
+        SET status = #{status},
+            applied_memory_id = CASE WHEN CAST(#{appliedMemoryId} AS uuid) IS NULL THEN applied_memory_id ELSE CAST(#{appliedMemoryId} AS uuid) END,
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid) AND user_id = #{userId} AND status = 'PENDING'
+    </update>
+</mapper>

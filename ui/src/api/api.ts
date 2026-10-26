@@ -581,6 +581,9 @@ export interface UserMemoryVO {
     sessionId?: string;
     memoryType: string;
     content: string;
+    evidenceMessageId?: string;
+    evidenceText?: string;
+    supersededByMemoryId?: string;
     expiresAt?: string;
 }
 
@@ -601,6 +604,24 @@ export interface GetUserMemoryCandidatesResponse {
   candidates: UserMemoryCandidateVO[];
 }
 
+export type UserMemoryAutomationMode = "REVIEW_ALL" | "BALANCED" | "AUTOMATIC";
+
+export interface UserMemoryAutomationResponse {
+  mode: UserMemoryAutomationMode;
+}
+
+export interface UserMemoryConsolidationProposalVO {
+  id: string;
+  sourceMemoryIds: string[];
+  proposedType: string;
+  proposedContent: string;
+  status: string;
+}
+
+export interface GetUserMemoryConsolidationProposalsResponse {
+  proposals: UserMemoryConsolidationProposalVO[];
+}
+
 export interface UpdateUserMemoryRequest {
   content: string;
 }
@@ -615,6 +636,30 @@ export async function getUserMemories(): Promise<GetUserMemoriesResponse> {
 
 export async function getUserMemoryCandidates(): Promise<GetUserMemoryCandidatesResponse> {
   return get<GetUserMemoryCandidatesResponse>("/users/memory-candidates");
+}
+
+export async function getUserMemoryAutomation(): Promise<UserMemoryAutomationResponse> {
+  return get<UserMemoryAutomationResponse>("/users/memory-automation");
+}
+
+export async function updateUserMemoryAutomation(mode: UserMemoryAutomationMode): Promise<void> {
+  return patch<void>("/users/memory-automation", { mode });
+}
+
+export async function getUserMemoryConsolidationProposals(): Promise<GetUserMemoryConsolidationProposalsResponse> {
+  return get<GetUserMemoryConsolidationProposalsResponse>("/users/memory-consolidation-proposals");
+}
+
+export async function createUserMemoryConsolidationProposal(): Promise<void> {
+  return post<void>("/users/memory-consolidation-proposals");
+}
+
+export async function confirmUserMemoryConsolidationProposal(proposalId: string): Promise<void> {
+  return post<void>(`/users/memory-consolidation-proposals/${proposalId}/confirm`);
+}
+
+export async function discardUserMemoryConsolidationProposal(proposalId: string): Promise<void> {
+  return post<void>(`/users/memory-consolidation-proposals/${proposalId}/discard`);
 }
 
 export async function confirmUserMemoryCandidate(

@@ -145,8 +145,9 @@ class LongMemEvalCandidatePersistenceRuntimeL2Test {
                         chatMessageFacadeService,
                         requestScopeData,
                         registryProvider,
-                        null
-                );
+                        null,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(memoryMapper, candidateMapper, null)
+        );
 
                 assertThat(memoryService.extractMemoryCandidates(userId, sessionId))
                         .isEqualTo(MemoryExtractionResult.EXTRACTED);

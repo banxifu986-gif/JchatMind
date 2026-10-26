@@ -1,8 +1,8 @@
 {
   "manifestVersion": "1",
-  "schemaVersion": "2026-10-22-g8",
+  "schemaVersion": "2026-10-22-g9",
   "catalogContract": "sql/migrations/catalog-contract.json",
-  "catalogContractSha256": "fafaee6a29b32bf2c0865afa7d98eebcdcccbadb171b9ff0dec2d9ee96eb2cd7",
+  "catalogContractSha256": "c942e6cd95e9b2e6f2770c82e522e89e0135fcd8c333217a8156b066404d9671",
   "baseline": {
     "required": true,
     "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",
@@ -244,6 +244,17 @@
       "transactional": true,
       "requires": [
         "skill.create-builtin-execution-task"
+      ]
+    },
+    {
+      "order": 230,
+      "id": "user-memory.add-governance-state",
+      "path": "sql/user-memory/2026-10-22-add-memory-governance.sql",
+      "sha256": "856b6d77fe2b3b6b078216e1cae8ca6a058248bfd62acc7d4aaec4c995816e3b",
+      "transactional": true,
+      "requires": [
+        "user-memory.add-candidate-status",
+        "chat.create-agent-execution-queue"
       ]
     }
   ]

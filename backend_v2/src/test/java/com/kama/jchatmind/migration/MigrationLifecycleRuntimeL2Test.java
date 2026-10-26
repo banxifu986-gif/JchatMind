@@ -4,7 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
+import com.kama.jchatmind.mapper.UserMemoryCandidateMapper;
+import com.kama.jchatmind.mapper.UserMemoryConsolidationProposalMapper;
+import com.kama.jchatmind.mapper.UserMemoryMapper;
 import com.kama.jchatmind.model.dto.RagKbIndexRevision;
+import com.kama.jchatmind.model.entity.UserMemory;
+import com.kama.jchatmind.model.entity.UserMemoryCandidate;
+import com.kama.jchatmind.model.entity.UserMemoryConsolidationProposal;
 import com.kama.jchatmind.typehandler.PgVectorTypeHandler;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.Environment;
@@ -31,9 +37,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -101,8 +109,8 @@ class MigrationLifecycleRuntimeL2Test {
                     Map.entry("executionMode", "isolated_postgresql_runtime"),
                     Map.entry("testClass", MigrationLifecycleRuntimeL2Test.class.getName()),
                     Map.entry("manifestPath", "sql/migrations/manifest.json"),
-                    Map.entry("schemaVersion", "2026-10-22-g8"),
-                    Map.entry("migrationCount", 22),
+                    Map.entry("schemaVersion", "2026-10-22-g9"),
+                    Map.entry("migrationCount", 23),
                     Map.entry("containerImage", IMAGE),
                     Map.entry("containerName", CONTAINER),
                     Map.entry("result", executionResult),
@@ -148,8 +156,8 @@ class MigrationLifecycleRuntimeL2Test {
 
             assertThat(release.status()).isEqualTo(SchemaMigrationReleaseEntry.ReleaseStatus.SUCCEEDED);
             assertThat(result.cleanInstall()).isTrue();
-            assertThat(result.schemaVersion()).isEqualTo("2026-10-22-g8");
-            assertThat(result.appliedMigrationIds()).hasSize(22);
+            assertThat(result.schemaVersion()).isEqualTo("2026-10-22-g9");
+            assertThat(result.appliedMigrationIds()).hasSize(23);
             assertThat(catalog.verified())
                     .withFailMessage("迁移后 catalog 对账失败: missing=%s, forbidden=%s",
                             catalog.missingObjects(), catalog.forbiddenObjects())
@@ -157,12 +165,14 @@ class MigrationLifecycleRuntimeL2Test {
             catalogVerified = true;
             catalogFingerprint = catalog.observedFingerprint();
             assertThat(queryForLong(dataSource,
-                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(23);
+                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(24);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger WHERE status = 'APPLIED'"))
-                    .isEqualTo(23);
+                    .isEqualTo(24);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.builtin_skill_execution_task")).isZero();
+            assertThat(queryForLong(dataSource,
+                    "SELECT COUNT(*) FROM public.user_memory_extraction_state")).isZero();
             verifyRagIndexRevisionTriggers(dataSource);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM pg_catalog.pg_constraint "
@@ -238,11 +248,11 @@ class MigrationLifecycleRuntimeL2Test {
             assertThat(prefix.cleanInstall()).isTrue();
             assertThat(prefix.appliedMigrationIds()).hasSize(8);
             assertThat(upgrade.cleanInstall()).isFalse();
-            assertThat(upgrade.appliedMigrationIds()).hasSize(14);
+            assertThat(upgrade.appliedMigrationIds()).hasSize(15);
             assertThat(replay.appliedMigrationIds()).isEmpty();
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger"))
-                    .isEqualTo(23);
+                    .isEqualTo(24);
             executionResult = "passed";
         } finally {
             dropDatabase(database);
@@ -343,6 +353,138 @@ class MigrationLifecycleRuntimeL2Test {
             Files.deleteIfExists(clockSkewManifest);
             Files.deleteIfExists(futureStartedSql);
         }
+    }
+
+    @Test
+    @Order(5)
+    void shouldExerciseMemoryGovernanceMappersInIsolatedPostgres() throws Exception {
+        String database = createDatabase();
+        String userId = "governance-l2-" + UUID.randomUUID();
+        String sessionId = UUID.randomUUID().toString();
+        try {
+            DataSource dataSource = dataSource(database);
+            runner(dataSource, MANIFEST).migrate();
+            try (Connection connection = dataSource.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(
+                         "INSERT INTO public.chat_session (id, user_id) VALUES (?::uuid, ?)")) {
+                statement.setString(1, sessionId);
+                statement.setString(2, userId);
+                statement.executeUpdate();
+            }
+
+            SqlSessionFactory sessionFactory = memoryGovernanceSqlSessionFactory(dataSource);
+            try (SqlSession session = sessionFactory.openSession(false)) {
+                UserMemoryMapper memoryMapper = session.getMapper(UserMemoryMapper.class);
+                UserMemoryCandidateMapper candidateMapper = session.getMapper(UserMemoryCandidateMapper.class);
+                UserMemoryConsolidationProposalMapper proposalMapper =
+                        session.getMapper(UserMemoryConsolidationProposalMapper.class);
+
+                assertThat(memoryMapper.selectAutomationMode(userId)).isNull();
+                assertThat(memoryMapper.upsertAutomationMode(userId, "BALANCED")).isEqualTo(1);
+                assertThat(memoryMapper.selectAutomationMode(userId)).isEqualTo("BALANCED");
+                assertThat(memoryMapper.selectLastExtractedUserMessageCount(userId, sessionId)).isZero();
+                assertThat(memoryMapper.markExtractionAttempt(userId, sessionId)).isEqualTo(1);
+                assertThat(memoryMapper.markExtractionFailure(userId, sessionId, "IllegalStateException")).isEqualTo(1);
+                assertThat(memoryMapper.markExtractionSuccess(userId, sessionId, 3)).isEqualTo(1);
+                assertThat(memoryMapper.selectLastExtractedUserMessageCount(userId, sessionId)).isEqualTo(3);
+
+                String evidenceId = UUID.randomUUID().toString();
+                UserMemoryCandidate candidate = UserMemoryCandidate.builder()
+                        .userId(userId)
+                        .sessionId(sessionId)
+                        .memoryType("PREFERENCE")
+                        .content("明确偏好简洁回答")
+                        .evidence("我长期偏好简洁回答")
+                        .importance("medium")
+                        .evidenceMessageId(evidenceId)
+                        .status(UserMemoryCandidate.STATUS_PENDING)
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                assertThat(candidateMapper.insert(candidate)).isEqualTo(1);
+                assertThat(candidateMapper.insert(UserMemoryCandidate.builder()
+                        .userId(candidate.getUserId())
+                        .sessionId(candidate.getSessionId())
+                        .memoryType(candidate.getMemoryType())
+                        .content(candidate.getContent())
+                        .evidence(candidate.getEvidence())
+                        .importance(candidate.getImportance())
+                        .evidenceMessageId(candidate.getEvidenceMessageId())
+                        .status(UserMemoryCandidate.STATUS_PENDING)
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build())).isZero();
+                assertThat(candidateMapper.selectByUserId(userId)).hasSize(1);
+
+                List<String> sourceIds = new java.util.ArrayList<>();
+                for (int index = 0; index < 2; index++) {
+                    UserMemory source = UserMemory.builder()
+                            .userId(userId)
+                            .sessionId(sessionId)
+                            .memoryType("PREFERENCE")
+                            .content("来源偏好 " + index)
+                            .importance("medium")
+                            .expiresAt(LocalDateTime.now().plusDays(30))
+                            .createdAt(LocalDateTime.now())
+                            .updatedAt(LocalDateTime.now())
+                            .build();
+                    assertThat(memoryMapper.insert(source)).isEqualTo(1);
+                    sourceIds.add(source.getId());
+                }
+                assertThat(memoryMapper.selectActiveByIdsForUpdate(userId, sourceIds)).hasSize(2);
+
+                UserMemoryConsolidationProposal proposal = UserMemoryConsolidationProposal.builder()
+                        .userId(userId)
+                        .sourceMemoryIdsJson("[\"" + sourceIds.get(0) + "\",\"" + sourceIds.get(1) + "\"]")
+                        .sourceFingerprint("a".repeat(64))
+                        .proposedType("PREFERENCE")
+                        .proposedContent("整理后的偏好")
+                        .build();
+                assertThat(proposalMapper.insert(proposal)).isEqualTo(1);
+                assertThat(proposal.getId()).isNotBlank();
+                assertThat(proposalMapper.selectPendingByIdAndUserId(proposal.getId(), userId)).isNotNull();
+
+                UserMemory consolidated = UserMemory.builder()
+                        .userId(userId)
+                        .memoryType("PREFERENCE")
+                        .content("整理后的偏好")
+                        .importance("medium")
+                        .expiresAt(LocalDateTime.now().plusDays(365))
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                assertThat(memoryMapper.insert(consolidated)).isEqualTo(1);
+                assertThat(memoryMapper.markSupersededByIds(sourceIds, userId, consolidated.getId())).isEqualTo(2);
+                assertThat(memoryMapper.selectActiveByUserId(userId)).hasSize(1)
+                        .extracting(UserMemory::getId)
+                        .containsExactly(consolidated.getId());
+                assertThat(proposalMapper.markStatus(proposal.getId(), userId, "APPLIED", consolidated.getId()))
+                        .isEqualTo(1);
+                assertThat(proposalMapper.selectPendingByUserId(userId)).isEmpty();
+                session.rollback();
+            }
+        } finally {
+            dropDatabase(database);
+        }
+    }
+
+    private SqlSessionFactory memoryGovernanceSqlSessionFactory(DataSource dataSource) throws IOException {
+        Configuration configuration = new Configuration(new Environment(
+                "memory-governance-l2",
+                new JdbcTransactionFactory(),
+                dataSource
+        ));
+        configuration.getTypeHandlerRegistry().register(float[].class, PgVectorTypeHandler.class);
+        for (String resource : List.of(
+                "mapper/UserMemoryMapper.xml",
+                "mapper/UserMemoryCandidateMapper.xml",
+                "mapper/UserMemoryConsolidationProposalMapper.xml"
+        )) {
+            try (InputStream input = org.apache.ibatis.io.Resources.getResourceAsStream(resource)) {
+                new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+            }
+        }
+        return new SqlSessionFactoryBuilder().build(configuration);
     }
 
     private static SchemaMigrationExecutor runner(DataSource dataSource, Path manifest) {
@@ -631,7 +773,7 @@ class MigrationLifecycleRuntimeL2Test {
             );
 
             CREATE TABLE user_memory (
-                id UUID PRIMARY KEY,
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id VARCHAR(64) NOT NULL,
                 session_id UUID,
                 memory_type VARCHAR(32),
@@ -642,7 +784,7 @@ class MigrationLifecycleRuntimeL2Test {
             );
 
             CREATE TABLE user_memory_candidate (
-                id UUID PRIMARY KEY,
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id VARCHAR(64) NOT NULL,
                 session_id UUID,
                 memory_type VARCHAR(32),

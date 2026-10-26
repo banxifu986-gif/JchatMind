@@ -16,5 +16,6 @@ public class UserMemoryVO {
     private String importance;
     private String evidenceMessageId;
     private String evidenceText;
+    private String supersededByMemoryId;
     private LocalDateTime expiresAt;
 }

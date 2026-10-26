@@ -4,6 +4,59 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.kama.jchatmind.mapper.UserMemoryMapper">
 
+    <select id="selectAutomationMode" resultType="string">
+        SELECT automation_mode
+        FROM user_memory_automation_settings
+        WHERE user_id = #{userId}
+    </select>
+
+    <insert id="upsertAutomationMode">
+        INSERT INTO user_memory_automation_settings (user_id, automation_mode, updated_at)
+        VALUES (#{userId}, #{mode}, NOW())
+        ON CONFLICT (user_id) DO UPDATE
+        SET automation_mode = EXCLUDED.automation_mode,
+            updated_at = NOW()
+    </insert>
+
+    <select id="selectLastExtractedUserMessageCount" resultType="int">
+        SELECT COALESCE((
+            SELECT last_extracted_user_message_count
+            FROM user_memory_extraction_state
+            WHERE user_id = #{userId} AND session_id = CAST(#{sessionId} AS uuid)
+        ), 0)
+    </select>
+
+    <insert id="markExtractionAttempt">
+        INSERT INTO user_memory_extraction_state (user_id, session_id, last_attempt_at, updated_at)
+        VALUES (#{userId}, CAST(#{sessionId} AS uuid), NOW(), NOW())
+        ON CONFLICT (session_id) DO UPDATE
+        SET last_attempt_at = NOW(), updated_at = NOW()
+    </insert>
+
+    <insert id="markExtractionSuccess">
+        INSERT INTO user_memory_extraction_state
+            (user_id, session_id, last_extracted_user_message_count, last_attempt_at, last_success_at, last_failure_type, failure_count, updated_at)
+        VALUES (#{userId}, CAST(#{sessionId} AS uuid), #{messageCount}, NOW(), NOW(), NULL, 0, NOW())
+        ON CONFLICT (session_id) DO UPDATE
+        SET user_id = EXCLUDED.user_id,
+            last_extracted_user_message_count = EXCLUDED.last_extracted_user_message_count,
+            last_success_at = NOW(),
+            last_failure_type = NULL,
+            failure_count = 0,
+            updated_at = NOW()
+    </insert>
+
+    <insert id="markExtractionFailure">
+        INSERT INTO user_memory_extraction_state
+            (user_id, session_id, last_attempt_at, last_failure_type, failure_count, updated_at)
+        VALUES (#{userId}, CAST(#{sessionId} AS uuid), NOW(), #{failureType}, 1, NOW())
+        ON CONFLICT (session_id) DO UPDATE
+        SET last_attempt_at = NOW(),
+            last_failure_type = #{failureType},
+            failure_count = user_memory_extraction_state.failure_count + 1,
+            updated_at = NOW()
+    </insert>
+
     <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.UserMemory">
         <id property="id" column="id" jdbcType="VARCHAR"/>
         <result property="userId" column="user_id" jdbcType="VARCHAR"/>
@@ -69,6 +122,19 @@
             updated_at = NOW()
         WHERE id = CAST(#{id} AS uuid)
           AND superseded_by_memory_id IS NULL
+    </update>
+
+    <update id="markSupersededByIds">
+        UPDATE user_memory
+        SET superseded_by_memory_id = CAST(#{supersededByMemoryId} AS uuid),
+            updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND id IN
+          <foreach collection="ids" item="id" open="(" separator="," close=")">
+              CAST(#{id} AS uuid)
+          </foreach>
+          AND superseded_by_memory_id IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; NOW())
     </update>
 
     <update id="updateEmbedding">
@@ -169,6 +235,33 @@
           AND superseded_by_memory_id IS NULL
           AND (expires_at IS NULL OR expires_at &gt; NOW())
         ORDER BY updated_at DESC
+    </select>
+
+    <select id="selectActiveByIdsForUpdate" resultMap="BaseResultMap">
+        SELECT
+            id,
+            user_id,
+            session_id,
+            memory_type,
+            content,
+            importance,
+            evidence_message_id,
+            evidence_text,
+            superseded_by_memory_id,
+            expires_at,
+            embedding,
+            created_at,
+            updated_at
+        FROM user_memory
+        WHERE user_id = #{userId}
+          AND id IN
+          <foreach collection="ids" item="id" open="(" separator="," close=")">
+              CAST(#{id} AS uuid)
+          </foreach>
+          AND superseded_by_memory_id IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; NOW())
+        ORDER BY id
+        FOR UPDATE
     </select>
 
     <select id="selectByUserIdAndContent" resultMap="BaseResultMap">

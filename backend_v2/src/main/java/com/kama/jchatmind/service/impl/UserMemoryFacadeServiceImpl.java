@@ -1,32 +1,36 @@
 package com.kama.jchatmind.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.event.ChatSessionDeletedEvent;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.UserMemoryCandidateMapper;
+import com.kama.jchatmind.mapper.UserMemoryConsolidationProposalMapper;
 import com.kama.jchatmind.mapper.UserMemoryMapper;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.entity.UserMemory;
 import com.kama.jchatmind.model.entity.UserMemoryCandidate;
+import com.kama.jchatmind.model.entity.UserMemoryConsolidationProposal;
 import com.kama.jchatmind.model.response.GetUserMemoriesResponse;
 import com.kama.jchatmind.model.response.GetUserMemoryCandidatesResponse;
+import com.kama.jchatmind.model.response.UserMemoryAutomationResponse;
+import com.kama.jchatmind.model.response.GetUserMemoryConsolidationProposalsResponse;
 import com.kama.jchatmind.model.vo.UserMemoryCandidateVO;
 import com.kama.jchatmind.model.vo.UserMemoryVO;
+import com.kama.jchatmind.model.vo.UserMemoryConsolidationProposalVO;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
 import com.kama.jchatmind.service.MemoryExtractionResult;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
+import com.kama.jchatmind.service.impl.UserMemoryModelClient.ExtractedMemory;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
+
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -34,41 +38,31 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
+
+import static com.kama.jchatmind.service.impl.UserMemoryWriteService.DEFAULT_MEMORY_EXPIRATION_DAYS;
+import static com.kama.jchatmind.service.impl.UserMemoryWriteService.fingerprintMemories;
+import static com.kama.jchatmind.service.impl.UserMemoryWriteService.parseSourceMemoryIds;
+import static com.kama.jchatmind.service.impl.UserMemoryModelClient.containsAny;
+import static com.kama.jchatmind.service.impl.UserMemoryModelClient.normalizeImportance;
+import static com.kama.jchatmind.service.impl.UserMemoryModelClient.normalizeSegment;
 
 @Service
 @Slf4j
 public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
 
     private static final String MEMORY_UPDATE_PREFIX = "更新：";
+    private static final String AUTOMATION_REVIEW_ALL = "REVIEW_ALL";
+    private static final String AUTOMATION_BALANCED = "BALANCED";
+    private static final String AUTOMATION_AUTOMATIC = "AUTOMATIC";
     private static final int RECENT_MESSAGES_FOR_EXTRACTION = 8;
     private static final int MIN_NEW_USER_MESSAGES_FOR_EXTRACTION = 3;
-    private static final long DEFAULT_MEMORY_EXPIRATION_DAYS = 365L;
-    private static final double SEMANTIC_DUPLICATE_MAX_COSINE_DISTANCE = 0.05D;
-    private static final String MEMORY_EXTRACTION_SYSTEM_PROMPT = """
-            你负责从对话中提取值得长期保存的用户信息。
-            对每条提取的信息，输出包含以下字段的 JSON 对象：
-            - type: 类型，取值为 BACKGROUND / PREFERENCE / CONSTRAINT / GOAL / FACT
-            - content: 简洁的陈述句，不超过 120 字
-            - importance: 重要程度，取值为 high / medium / low
-            - should_persist: 是否应该写入长期记忆，取值 true / false
-            - evidence_message_index: 来源消息在输入中的序号，从 0 开始
-
-            规则：
-            - 只提取稳定、可复用、对未来回答有帮助的信息
-            - 不要保存一次性任务、短期上下文、敏感信息、纯闲聊信息
-            - 不要提取可以从对话中直接推断出的通用信息
-            - 如果与已有记忆存在冲突，content 使用"更新："前缀
-            - 如果没有值得提取的信息，返回空数组 []
-
-            只输出 JSON 数组，不要输出 markdown 代码块或解释文字。
-            """;
-
+    private static final int MAX_RECALL_CONTEXT_CHARACTERS = 20_000;
     private final UserMemoryMapper userMemoryMapper;
+    private final UserMemoryWriteService memoryWriter;
     private final UserMemoryCandidateMapper userMemoryCandidateMapper;
+    private final UserMemoryConsolidationProposalMapper consolidationProposalMapper;
     private final ChatMessageFacadeService chatMessageFacadeService;
-    private final ObjectMapper objectMapper;
-    private final ChatClient memoryExtractionChatClient;
+    private final UserMemoryModelClient memoryModel;
     private final RagService ragService;
     private final RequestScopeData requestScopeData;
     private final ConcurrentHashMap<String, ExtractionState> extractionStates = new ConcurrentHashMap<>();
@@ -77,9 +71,23 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             UserMemoryMapper userMemoryMapper,
             UserMemoryCandidateMapper userMemoryCandidateMapper,
             ChatMessageFacadeService chatMessageFacadeService,
-            RequestScopeData requestScopeData
+            RequestScopeData requestScopeData,
+            UserMemoryWriteService memoryWriter
     ) {
-        this(userMemoryMapper, userMemoryCandidateMapper, chatMessageFacadeService, requestScopeData, null, null);
+        this(userMemoryMapper, userMemoryCandidateMapper, chatMessageFacadeService, requestScopeData, null, null, memoryWriter);
+    }
+
+    public UserMemoryFacadeServiceImpl(
+            UserMemoryMapper userMemoryMapper,
+            UserMemoryCandidateMapper userMemoryCandidateMapper,
+            ChatMessageFacadeService chatMessageFacadeService,
+            RequestScopeData requestScopeData,
+            ObjectProvider<ChatClientRegistry> chatClientRegistryProvider,
+            ObjectProvider<RagService> ragServiceProvider,
+            UserMemoryWriteService memoryWriter
+    ) {
+        this(userMemoryMapper, userMemoryCandidateMapper, chatMessageFacadeService, requestScopeData,
+                chatClientRegistryProvider, ragServiceProvider, null, memoryWriter);
     }
 
     @Autowired
@@ -89,34 +97,18 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             ChatMessageFacadeService chatMessageFacadeService,
             RequestScopeData requestScopeData,
             ObjectProvider<ChatClientRegistry> chatClientRegistryProvider,
-            ObjectProvider<RagService> ragServiceProvider
+            ObjectProvider<RagService> ragServiceProvider,
+            UserMemoryConsolidationProposalMapper consolidationProposalMapper,
+            UserMemoryWriteService memoryWriter
     ) {
         this.userMemoryMapper = userMemoryMapper;
+        this.memoryWriter = memoryWriter;
         this.userMemoryCandidateMapper = userMemoryCandidateMapper;
+        this.consolidationProposalMapper = consolidationProposalMapper;
         this.chatMessageFacadeService = chatMessageFacadeService;
         this.requestScopeData = requestScopeData;
-        this.objectMapper = new ObjectMapper();
-        this.memoryExtractionChatClient = resolveChatClient(chatClientRegistryProvider);
+        this.memoryModel = new UserMemoryModelClient(chatClientRegistryProvider);
         this.ragService = ragServiceProvider != null ? ragServiceProvider.getIfAvailable() : null;
-    }
-
-    private static ChatClient resolveChatClient(ObjectProvider<ChatClientRegistry> chatClientRegistryProvider) {
-        if (chatClientRegistryProvider == null) {
-            return null;
-        }
-        ChatClientRegistry registry = chatClientRegistryProvider.getIfAvailable();
-        if (registry == null) {
-            return null;
-        }
-        ChatClient client = registry.get("deepseek-chat");
-        if (client == null) {
-            for (ChatClient fallback : registry.getAllClients()) {
-                if (fallback != null) {
-                    return fallback;
-                }
-            }
-        }
-        return client;
     }
 
     @Override
@@ -144,7 +136,90 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
     }
 
     @Override
-    @Transactional
+    public UserMemoryAutomationResponse getMemoryAutomationMode() {
+        String mode = userMemoryMapper.selectAutomationMode(requireUserId());
+        if (!isAutomationMode(mode)) {
+            mode = AUTOMATION_BALANCED;
+        }
+        return UserMemoryAutomationResponse.builder().mode(mode).build();
+    }
+
+    @Override
+    public void updateMemoryAutomationMode(String mode) {
+        String normalizedMode = mode == null ? "" : mode.trim().toUpperCase(Locale.ROOT);
+        if (!isAutomationMode(normalizedMode)) {
+            throw new BizException("记忆自动化模式无效");
+        }
+        if (userMemoryMapper.upsertAutomationMode(requireUserId(), normalizedMode) <= 0) {
+            throw new BizException("更新记忆自动化模式失败");
+        }
+    }
+
+    private boolean isAutomationMode(String mode) {
+        return AUTOMATION_REVIEW_ALL.equals(mode)
+                || AUTOMATION_BALANCED.equals(mode)
+                || AUTOMATION_AUTOMATIC.equals(mode);
+    }
+
+    @Override
+    public void createMemoryConsolidationProposal() {
+        String userId = requireUserId();
+        List<UserMemory> memories = getConfirmedMemoriesInternal(userId);
+        if (memories.size() < 10) {
+            throw new BizException("至少需要 10 条已确认记忆才能生成整理建议");
+        }
+        UserMemoryConsolidationProposal proposal = memoryModel.proposeConsolidation(
+                userId, memories.stream().limit(10).toList());
+        if (consolidationProposalMapper.insert(proposal) <= 0) {
+            throw new BizException("保存记忆整理建议失败");
+        }
+    }
+
+    @Override
+    public GetUserMemoryConsolidationProposalsResponse getMemoryConsolidationProposals() {
+        String userId = requireUserId();
+        List<UserMemoryConsolidationProposalVO> proposals = consolidationProposalMapper
+                .selectPendingByUserId(userId).stream()
+                .map(this::toConsolidationProposalVO)
+                .toList();
+        return GetUserMemoryConsolidationProposalsResponse.builder()
+                .proposals(proposals.toArray(new UserMemoryConsolidationProposalVO[0]))
+                .build();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public void confirmMemoryConsolidationProposal(String proposalId) {
+        String userId = requireUserId();
+        UserMemoryConsolidationProposal proposal = consolidationProposalMapper
+                .selectPendingByIdAndUserId(proposalId, userId);
+        if (proposal == null) {
+            throw new BizException("待处理的整理建议不存在");
+        }
+        float[] embedding = generateEmbedding(proposal.getProposedContent());
+        memoryWriter.confirmConsolidation(userId, proposal, embedding);
+    }
+
+    @Override
+    public void discardMemoryConsolidationProposal(String proposalId) {
+        String userId = requireUserId();
+        if (consolidationProposalMapper.markStatus(proposalId, userId, "DISCARDED", null) <= 0) {
+            throw new BizException("待处理的整理建议不存在");
+        }
+    }
+
+    private UserMemoryConsolidationProposalVO toConsolidationProposalVO(UserMemoryConsolidationProposal proposal) {
+        return UserMemoryConsolidationProposalVO.builder()
+                .id(proposal.getId())
+                .sourceMemoryIds(parseSourceMemoryIds(proposal.getSourceMemoryIdsJson()))
+                .proposedType(proposal.getProposedType())
+                .proposedContent(proposal.getProposedContent())
+                .status(proposal.getStatus())
+                .build();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void confirmUserMemoryCandidate(String candidateId) {
         String userId = requireUserId();
         UserMemoryCandidate candidate = userMemoryCandidateMapper.selectByIdAndUserId(candidateId, userId);
@@ -152,9 +227,6 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             throw new BizException("候选记忆不存在: " + candidateId);
         }
         if (!UserMemoryCandidate.STATUS_PENDING.equals(candidate.getStatus())) {
-            throw new BizException("候选记忆状态不可确认");
-        }
-        if (userMemoryCandidateMapper.markPersistedIfPending(candidateId, userId) <= 0) {
             throw new BizException("候选记忆状态不可确认");
         }
 
@@ -169,18 +241,8 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         if (!StringUtils.hasText(effectiveContent)) {
             throw new BizException("候选记忆内容为空");
         }
-        if (findConfirmedMemoryByContent(userId, effectiveContent) != null) {
-            return;
-        }
-        if (isUpdate) {
-            handleConflictUpdate(userId, candidate, effectiveContent);
-        } else {
-            float[] contentEmbedding = generateEmbedding(effectiveContent);
-            if (hasSemanticDuplicate(userId, candidate.getMemoryType(), contentEmbedding)) {
-                return;
-            }
-            insertConfirmedMemory(userId, candidate, effectiveContent, contentEmbedding);
-        }
+        float[] embedding = generateEmbedding(effectiveContent);
+        memoryWriter.confirmCandidate(userId, candidate, effectiveContent, isUpdate, embedding);
     }
 
     @Override
@@ -271,9 +333,9 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         if (ragService == null) {
             log.debug("RagService not available, falling back to recent memories");
             try {
-                return getConfirmedMemoriesInternal(userId).stream()
+                return fitRecallCharacterBudget(getConfirmedMemoriesInternal(userId).stream()
                         .limit(topK)
-                        .toList();
+                        .toList());
             } catch (Exception e) {
                 log.warn("Failed to load confirmed memories as fallback, returning empty", e);
                 return List.of();
@@ -285,7 +347,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             String vectorLiteral = toPgVector(queryEmbedding);
             List<UserMemory> semanticResults = similaritySearchMemories(userId, vectorLiteral, topK);
             if (semanticResults.size() >= topK) {
-                return semanticResults;
+                return fitRecallCharacterBudget(semanticResults);
             }
 
             List<UserMemory> fallback;
@@ -296,23 +358,37 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                         .toList();
             } catch (Exception e) {
                 log.warn("Failed to load non-embedding memories as fallback, returning semantic results only", e);
-                return semanticResults;
+                return fitRecallCharacterBudget(semanticResults);
             }
 
             List<UserMemory> combined = new ArrayList<>(semanticResults);
             combined.addAll(fallback);
-            return combined;
+            return fitRecallCharacterBudget(combined);
         } catch (Exception e) {
             log.warn("Semantic memory recall failed, falling back to recent memories", e);
             try {
-                return getConfirmedMemoriesInternal(userId).stream()
+                return fitRecallCharacterBudget(getConfirmedMemoriesInternal(userId).stream()
                         .limit(topK)
-                        .toList();
+                        .toList());
             } catch (Exception fallbackException) {
                 log.warn("All memory recall paths failed, returning empty", fallbackException);
                 return List.of();
             }
         }
+    }
+
+    private List<UserMemory> fitRecallCharacterBudget(List<UserMemory> memories) {
+        List<UserMemory> included = new ArrayList<>();
+        int usedCharacters = 0;
+        for (UserMemory memory : memories) {
+            String rendered = "- [" + memory.getMemoryType() + "] " + memory.getContent() + "\n";
+            if (usedCharacters + rendered.length() > MAX_RECALL_CONTEXT_CHARACTERS) {
+                continue;
+            }
+            included.add(memory);
+            usedCharacters += rendered.length();
+        }
+        return included;
     }
 
     @Override
@@ -321,49 +397,78 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             return MemoryExtractionResult.SKIPPED;
         }
 
-        ExtractionState state = extractionStates.computeIfAbsent(sessionId, ignored -> new ExtractionState());
-        synchronized (state) {
+        ExtractionState localState = extractionStates.computeIfAbsent(sessionId, ignored -> new ExtractionState());
+        synchronized (localState) {
             int userMessageCount;
             try {
                 userMessageCount = chatMessageFacadeService.countUserMessagesBySessionId(sessionId, userId);
+            } catch (RuntimeException exception) {
+                localState.lastExtractedUserMessageCount = 0;
+                extractionStates.remove(sessionId, localState);
+                throw exception;
+            }
+            if (userMessageCount <= 0) {
+                return MemoryExtractionResult.SKIPPED;
+            }
+            int persistedCount = userMemoryMapper.selectLastExtractedUserMessageCount(userId, sessionId);
+            int lastExtractedMessageCount = Math.max(persistedCount, localState.lastExtractedUserMessageCount);
+            if (!shouldExtract(lastExtractedMessageCount, userMessageCount)) {
+                return MemoryExtractionResult.SKIPPED;
+            }
+            userMemoryMapper.markExtractionAttempt(userId, sessionId);
+            try {
+                List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
+                        sessionId,
+                        RECENT_MESSAGES_FOR_EXTRACTION,
+                        userId
+                );
+                List<ChatMessageDTO> userMessages = recentMessages.stream()
+                        .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)
+                        .toList();
+                if (userMessages.isEmpty()) {
+                    if (userMessageCount > 0) {
+                        throw new IllegalStateException("No user messages available for memory extraction");
+                    }
+                    userMemoryMapper.markExtractionSuccess(userId, sessionId, userMessageCount);
+                    localState.lastExtractedUserMessageCount = userMessageCount;
+                    return MemoryExtractionResult.SKIPPED;
+                }
+
+                if (!memoryModel.isAvailable()) {
+                    throw new IllegalStateException("No ChatClient available for memory extraction");
+                }
+                List<ExtractedMemory> extracted = memoryModel.extract(getConfirmedMemoriesInternal(userId), userMessages);
+
+                for (ExtractedMemory memory : extracted) {
+                    persistAutomatically(userId, sessionId, memory);
+                }
+                userMemoryMapper.markExtractionSuccess(userId, sessionId, userMessageCount);
+                localState.lastExtractedUserMessageCount = userMessageCount;
+                return MemoryExtractionResult.EXTRACTED;
             } catch (RuntimeException e) {
-                extractionStates.remove(sessionId, state);
+                try {
+                    userMemoryMapper.markExtractionFailure(userId, sessionId, e.getClass().getSimpleName());
+                } catch (RuntimeException stateFailure) {
+                    log.warn("Failed to persist memory extraction failure state: {}", stateFailure.getClass().getSimpleName());
+                }
                 throw e;
             }
-            if (!state.shouldExtract(userMessageCount)) {
-                return MemoryExtractionResult.SKIPPED;
-            }
-
-            List<ChatMessageDTO> recentMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(
-                    sessionId,
-                    RECENT_MESSAGES_FOR_EXTRACTION,
-                    userId
-            );
-            List<ChatMessageDTO> userMessages = recentMessages.stream()
-                    .filter(msg -> msg.getRole() == ChatMessageDTO.RoleType.USER)
-                    .toList();
-            if (userMessages.isEmpty()) {
-                return MemoryExtractionResult.SKIPPED;
-            }
-
-            List<ExtractedMemory> extracted = memoryExtractionChatClient != null
-                    ? extractWithLlm(userId, userMessages)
-                    : extractWithKeywords(userMessages);
-            if (memoryExtractionChatClient == null) {
-                log.warn("No ChatClient available for memory extraction, using keyword-based fallback");
-            }
-
-            for (ExtractedMemory memory : extracted) {
-                persistAutomatically(userId, sessionId, memory);
-            }
-            state.markExtracted(userMessageCount);
-            return MemoryExtractionResult.EXTRACTED;
         }
     }
 
     @EventListener
     public void onChatSessionDeleted(ChatSessionDeletedEvent event) {
         extractionStates.remove(event.sessionId());
+    }
+
+    private static class ExtractionState {
+        private int lastExtractedUserMessageCount;
+    }
+
+    private boolean shouldExtract(int previousCount, int currentCount) {
+        return previousCount == 0
+                || currentCount < previousCount
+                || currentCount - previousCount >= MIN_NEW_USER_MESSAGES_FOR_EXTRACTION;
     }
 
     private String toPgVector(float[] vector) {
@@ -378,179 +483,12 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         return sb.toString();
     }
 
-    private List<ExtractedMemory> extractWithLlm(String userId, List<ChatMessageDTO> userMessages) {
-        try {
-            String existingMemoriesText = formatExistingMemories(userId);
-            String messagesText = formatMessagesForExtraction(userMessages);
-            String userPrompt = buildExtractionUserPrompt(existingMemoriesText, messagesText);
-            String response = memoryExtractionChatClient.prompt()
-                    .system(MEMORY_EXTRACTION_SYSTEM_PROMPT)
-                    .user(userPrompt)
-                    .call()
-                    .content();
-            if (!StringUtils.hasText(response)) {
-                throw new IllegalStateException("LLM memory extraction response is blank");
-            }
-            return parseExtractionResponse(response, userMessages);
-        } catch (Exception e) {
-            log.warn("LLM memory extraction failed, falling back to keyword-based: {}", e.getClass().getName());
-            return extractWithKeywords(userMessages);
-        }
-    }
-
-    private String formatExistingMemories(String userId) {
-        List<UserMemory> memories = getConfirmedMemoriesInternal(userId);
-        if (memories.isEmpty()) {
-            return "无";
-        }
-        return memories.stream()
-                .map(memory -> "- [" + memory.getMemoryType() + "] " + memory.getContent())
-                .collect(Collectors.joining("\n"));
-    }
-
-    private String formatMessagesForExtraction(List<ChatMessageDTO> userMessages) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < userMessages.size(); i++) {
-            sb.append("[").append(i).append("] ").append(userMessages.get(i).getContent()).append("\n");
-        }
-        return sb.toString();
-    }
-
-    private String buildExtractionUserPrompt(String existingMemories, String messagesText) {
-        return "已有记忆（用于避免重复或判断冲突）：\n"
-                + existingMemories
-                + "\n\n对话消息（格式：[序号] 内容）：\n"
-                + messagesText
-                + "\n请从以上消息中提取值得长期保存的用户信息。";
-    }
-
-    private List<ExtractedMemory> parseExtractionResponse(String response, List<ChatMessageDTO> userMessages) {
-        String json = response.trim()
-                .replaceAll("^```(?:json)?\\s*", "")
-                .replaceAll("\\s*```$", "")
-                .trim();
-        if (!json.startsWith("[")) {
-            throw new IllegalStateException("LLM memory extraction response must be a JSON array");
-        }
-
-        try {
-            JsonNode root = objectMapper.readTree(json);
-            if (!root.isArray()) {
-                throw new IllegalStateException("LLM memory extraction response must be a JSON array");
-            }
-
-            List<ExtractedMemory> result = new ArrayList<>();
-            for (JsonNode node : root) {
-                String type = getTextField(node, "type");
-                String content = getTextField(node, "content");
-                String importance = getTextField(node, "importance");
-                boolean shouldPersist = node.has("should_persist") && node.get("should_persist").asBoolean(false);
-                int evidenceIndex = node.has("evidence_message_index")
-                        ? node.get("evidence_message_index").asInt(-1)
-                        : -1;
-
-                if (!StringUtils.hasText(type) || !StringUtils.hasText(content)) {
-                    continue;
-                }
-                if (content.length() > 300) {
-                    content = content.substring(0, 300);
-                }
-
-                String evidenceText = content;
-                String evidenceMessageId = null;
-                if (evidenceIndex >= 0 && evidenceIndex < userMessages.size()) {
-                    ChatMessageDTO sourceMsg = userMessages.get(evidenceIndex);
-                    evidenceMessageId = sourceMsg.getId();
-                    evidenceText = sourceMsg.getContent();
-                    if (evidenceText != null && evidenceText.length() > 500) {
-                        evidenceText = evidenceText.substring(0, 500);
-                    }
-                }
-
-                result.add(new ExtractedMemory(
-                        type.toUpperCase(Locale.ROOT),
-                        content,
-                        normalizeImportance(importance),
-                        shouldPersist,
-                        evidenceMessageId,
-                        evidenceText != null ? evidenceText : content
-                ));
-            }
-            return result;
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("LLM memory extraction response is invalid", e);
-        }
-    }
-
-    private String getTextField(JsonNode node, String fieldName) {
-        JsonNode field = node.get(fieldName);
-        if (field == null || !field.isTextual()) {
-            return null;
-        }
-        return field.asText().trim();
-    }
-
-    private List<ExtractedMemory> extractWithKeywords(List<ChatMessageDTO> userMessages) {
-        List<ExtractedMemory> result = new ArrayList<>();
-        for (ChatMessageDTO chatMessage : userMessages) {
-            result.addAll(extractFromText(chatMessage));
-        }
-        return result;
-    }
-
-    private List<ExtractedMemory> extractFromText(ChatMessageDTO chatMessage) {
-        List<ExtractedMemory> result = new ArrayList<>();
-        String content = chatMessage.getContent();
-        if (!StringUtils.hasText(content)) {
-            return result;
-        }
-
-        String[] segments = content.replace('\r', '\n').split("[\\n。！？；;]");
-        for (String rawSegment : segments) {
-            String segment = normalizeSegment(rawSegment);
-            if (!StringUtils.hasText(segment) || segment.length() < 4 || segment.length() > 120) {
-                continue;
-            }
-            String memoryType = detectMemoryType(segment);
-            if (memoryType == null || segment.contains("?") || segment.contains("？")) {
-                continue;
-            }
-            result.add(new ExtractedMemory(memoryType, segment, "medium", true, chatMessage.getId(), segment));
-        }
-        return result;
-    }
-
-    private String detectMemoryType(String segment) {
-        if (containsAny(segment, "记住", "以后", "请始终", "请用", "不要", "希望你")) {
-            return "CONSTRAINT";
-        }
-        if (containsAny(segment, "学习目标", "目标", "想学", "正在学", "计划学", "学习")) {
-            return "GOAL";
-        }
-        if (containsAny(segment, "喜欢", "不喜欢", "偏好", "习惯")) {
-            return "PREFERENCE";
-        }
-        if (containsAny(segment, "我是", "我在", "我做", "来自", "背景", "职业")) {
-            return "BACKGROUND";
-        }
-        return null;
-    }
-
-    private boolean containsAny(String segment, String... keywords) {
-        String normalized = segment.toLowerCase(Locale.ROOT);
-        for (String keyword : keywords) {
-            if (normalized.contains(keyword.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private String normalizeSegment(String segment) {
-        return segment == null ? null : segment.trim().replaceAll("\\s+", " ");
-    }
-
     private void persistAutomatically(String userId, String sessionId, ExtractedMemory extractedMemory) {
+        if (!"PERSISTENT".equals(extractedMemory.scope())
+                || !extractedMemory.shouldPersist()
+                || !isImportancePersistable(extractedMemory.importance())) {
+            return;
+        }
         String originalContent = normalizeSegment(extractedMemory.content());
         if (!StringUtils.hasText(originalContent)) {
             return;
@@ -571,10 +509,54 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
             return;
         }
 
-        UserMemoryCandidate candidate = insertCandidate(userId, sessionId, extractedMemory, originalContent);
-        if (!shouldPersist(extractedMemory)) {
-            updateCandidateStatus(candidate.getId(), UserMemoryCandidate.STATUS_DISCARDED);
+        if (shouldAutomaticallySave(userId, extractedMemory, originalContent)) {
+            UserMemoryCandidate automaticMemory = UserMemoryCandidate.builder()
+                    .userId(userId)
+                    .sessionId(sessionId)
+                    .memoryType(extractedMemory.memoryType())
+                    .content(originalContent)
+                    .evidence(extractedMemory.evidenceText())
+                    .importance(extractedMemory.importance())
+                    .evidenceMessageId(extractedMemory.evidenceMessageId())
+                    .build();
+            float[] embedding = generateEmbedding(effectiveContent);
+            if (memoryWriter.hasSemanticDuplicate(userId, extractedMemory.memoryType(), embedding)) {
+                return;
+            }
+            memoryWriter.insertConfirmedMemory(userId, automaticMemory, effectiveContent, embedding);
+            return;
         }
+        insertCandidate(userId, sessionId, extractedMemory, originalContent);
+    }
+
+    private boolean shouldAutomaticallySave(String userId, ExtractedMemory memory, String content) {
+        String mode = userMemoryMapper.selectAutomationMode(userId);
+        if (!StringUtils.hasText(mode)) {
+            mode = AUTOMATION_BALANCED;
+        }
+        if (!isAutomationMode(mode)
+                || AUTOMATION_REVIEW_ALL.equals(mode)
+                || !"high".equals(memory.confidence())
+                || content.startsWith(MEMORY_UPDATE_PREFIX)
+                || "CONSTRAINT".equals(memory.memoryType())
+                || "FACT".equals(memory.memoryType())
+                || "GOAL".equals(memory.memoryType())
+                || containsSensitiveMemoryContent(content + " " + memory.evidenceText())) {
+            return false;
+        }
+        if (AUTOMATION_BALANCED.equals(mode)) {
+            return "PREFERENCE".equals(memory.memoryType()) && isExplicitPreference(memory.evidenceText());
+        }
+        return AUTOMATION_AUTOMATIC.equals(mode);
+    }
+
+    private boolean isExplicitPreference(String evidence) {
+        return containsAny(evidence, "偏好", "喜欢", "更喜欢", "习惯", "希望", "prefer", "preference", "i like");
+    }
+
+    private boolean containsSensitiveMemoryContent(String content) {
+        return containsAny(content, "密码", "口令", "密钥", "token", "身份证", "银行卡", "信用卡", "手机号",
+                "电话号码", "邮箱", "住址", "病史", "诊断", "药物", "医疗", "收入", "财务", "政治立场");
     }
 
     private UserMemoryCandidate insertCandidate(
@@ -597,92 +579,15 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .updatedAt(now)
                 .build();
         int result = userMemoryCandidateMapper.insert(candidate);
-        if (result <= 0) {
+        if (result < 0) {
             throw new BizException("写入候选记忆失败");
         }
         return candidate;
     }
 
-    private boolean shouldPersist(ExtractedMemory extractedMemory) {
-        return extractedMemory.shouldPersist() && isImportancePersistable(extractedMemory.importance());
-    }
-
     private boolean isImportancePersistable(String importance) {
         String normalized = normalizeImportance(importance);
         return "high".equals(normalized) || "medium".equals(normalized);
-    }
-
-    private String normalizeImportance(String importance) {
-        if (!StringUtils.hasText(importance)) {
-            return "medium";
-        }
-        String normalized = importance.trim().toLowerCase(Locale.ROOT);
-        return switch (normalized) {
-            case "high", "medium", "low" -> normalized;
-            default -> "medium";
-        };
-    }
-
-    private void insertConfirmedMemory(
-            String userId,
-            UserMemoryCandidate candidate,
-            String content,
-            float[] embedding
-    ) {
-        if (findConfirmedMemoryByContent(userId, content) != null) {
-            return;
-        }
-
-        LocalDateTime now = LocalDateTime.now();
-        UserMemory userMemory = UserMemory.builder()
-                .userId(userId)
-                .sessionId(candidate.getSessionId())
-                .memoryType(candidate.getMemoryType())
-                .content(content)
-                .importance(candidate.getImportance())
-                .evidenceMessageId(candidate.getEvidenceMessageId())
-                .evidenceText(candidate.getEvidence())
-                .expiresAt(now.plusDays(DEFAULT_MEMORY_EXPIRATION_DAYS))
-                .embedding(embedding)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        int result = userMemoryMapper.insert(userMemory);
-        if (result <= 0) {
-            throw new BizException("写入用户长期记忆失败");
-        }
-    }
-
-    private void handleConflictUpdate(String userId, UserMemoryCandidate candidate, String newContent) {
-        List<UserMemory> existingMemories = getConfirmedMemoriesInternal(userId);
-        UserMemory match = existingMemories.stream()
-                .filter(memory -> memory.getMemoryType().equals(candidate.getMemoryType()))
-                .findFirst()
-                .orElse(null);
-
-        LocalDateTime now = LocalDateTime.now();
-        float[] embedding = generateEmbedding(newContent);
-        UserMemory userMemory = UserMemory.builder()
-                .userId(userId)
-                .sessionId(candidate.getSessionId())
-                .memoryType(candidate.getMemoryType())
-                .content(newContent)
-                .importance(candidate.getImportance())
-                .evidenceMessageId(candidate.getEvidenceMessageId())
-                .evidenceText(candidate.getEvidence())
-                .expiresAt(now.plusDays(DEFAULT_MEMORY_EXPIRATION_DAYS))
-                .embedding(embedding)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        int result = userMemoryMapper.insert(userMemory);
-        if (result <= 0) {
-            throw new BizException("写入冲突更新记忆失败");
-        }
-        if (match != null && (!StringUtils.hasText(userMemory.getId())
-                || userMemoryMapper.markSupersededById(match.getId(), userMemory.getId()) <= 0)) {
-            throw new BizException("保存记忆冲突关系失败");
-        }
     }
 
     private float[] generateEmbedding(String text) {
@@ -694,59 +599,6 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         } catch (Exception e) {
             log.warn("Failed to generate embedding for memory: {}", e.getMessage());
             return null;
-        }
-    }
-
-    private boolean hasSemanticDuplicate(String userId, String memoryType, float[] contentEmbedding) {
-        if (contentEmbedding == null) {
-            return false;
-        }
-        try {
-            return getConfirmedMemoriesInternal(userId).stream()
-                    .filter(memory -> memoryType != null && memoryType.equals(memory.getMemoryType()))
-                    .anyMatch(memory -> cosineDistance(contentEmbedding, memory.getEmbedding())
-                            <= SEMANTIC_DUPLICATE_MAX_COSINE_DISTANCE);
-        } catch (Exception e) {
-            log.warn("Failed to check semantic memory duplicates: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    private double cosineDistance(float[] first, float[] second) {
-        if (first == null || second == null || first.length == 0 || first.length != second.length) {
-            return Double.POSITIVE_INFINITY;
-        }
-        double dotProduct = 0D;
-        double firstMagnitude = 0D;
-        double secondMagnitude = 0D;
-        for (int i = 0; i < first.length; i++) {
-            double firstValue = first[i];
-            double secondValue = second[i];
-            if (!Double.isFinite(firstValue) || !Double.isFinite(secondValue)) {
-                return Double.POSITIVE_INFINITY;
-            }
-            dotProduct += firstValue * secondValue;
-            firstMagnitude += firstValue * firstValue;
-            secondMagnitude += secondValue * secondValue;
-        }
-        if (!Double.isFinite(dotProduct)
-                || !Double.isFinite(firstMagnitude)
-                || !Double.isFinite(secondMagnitude)
-                || firstMagnitude == 0D
-                || secondMagnitude == 0D) {
-            return Double.POSITIVE_INFINITY;
-        }
-        double similarity = dotProduct / (Math.sqrt(firstMagnitude) * Math.sqrt(secondMagnitude));
-        if (!Double.isFinite(similarity)) {
-            return Double.POSITIVE_INFINITY;
-        }
-        return 1D - Math.max(-1D, Math.min(1D, similarity));
-    }
-
-    private void updateCandidateStatus(String candidateId, String status) {
-        int result = userMemoryCandidateMapper.updateStatusById(candidateId, status);
-        if (result <= 0) {
-            throw new BizException("更新候选记忆状态失败");
         }
     }
 
@@ -790,6 +642,7 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
                 .importance(memory.getImportance())
                 .evidenceMessageId(memory.getEvidenceMessageId())
                 .evidenceText(memory.getEvidenceText())
+                .supersededByMemoryId(memory.getSupersededByMemoryId())
                 .expiresAt(memory.getExpiresAt())
                 .build();
     }
@@ -816,27 +669,4 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
         return String.valueOf(userId);
     }
 
-    private record ExtractedMemory(
-            String memoryType,
-            String content,
-            String importance,
-            boolean shouldPersist,
-            String evidenceMessageId,
-            String evidenceText
-    ) {
-    }
-
-    private static class ExtractionState {
-        private int lastExtractedUserMessageCount;
-
-        private boolean shouldExtract(int userMessageCount) {
-            return lastExtractedUserMessageCount == 0
-                    || userMessageCount < lastExtractedUserMessageCount
-                    || userMessageCount - lastExtractedUserMessageCount >= MIN_NEW_USER_MESSAGES_FOR_EXTRACTION;
-        }
-
-        private void markExtracted(int userMessageCount) {
-            lastExtractedUserMessageCount = userMessageCount;
-        }
-    }
 }

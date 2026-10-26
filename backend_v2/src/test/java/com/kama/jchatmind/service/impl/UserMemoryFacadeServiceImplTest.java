@@ -8,10 +8,12 @@ import com.kama.jchatmind.config.ChatClientRegistry;
 import com.kama.jchatmind.event.ChatSessionDeletedEvent;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.UserMemoryCandidateMapper;
+import com.kama.jchatmind.mapper.UserMemoryConsolidationProposalMapper;
 import com.kama.jchatmind.mapper.UserMemoryMapper;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.entity.UserMemory;
 import com.kama.jchatmind.model.entity.UserMemoryCandidate;
+import com.kama.jchatmind.model.entity.UserMemoryConsolidationProposal;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
 import com.kama.jchatmind.service.MemoryExtractionResult;
 import com.kama.jchatmind.service.RagService;
@@ -65,6 +67,189 @@ class UserMemoryFacadeServiceImplTest {
         MemoryExtractionResult result = extractionService.service().extractMemoryCandidates("7", "session-1");
 
         assertThat(result).isEqualTo(MemoryExtractionResult.EXTRACTED);
+    }
+
+    @Test
+    void shouldDefaultAutomationToBalancedAndAllowUserToChangeIt() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        when(userMemoryMapper.upsertAutomationMode("7", "REVIEW_ALL")).thenReturn(1);
+        UserMemoryFacadeServiceImpl service = createService(
+                userMemoryMapper,
+                mock(UserMemoryCandidateMapper.class),
+                mock(ChatMessageFacadeService.class),
+                loggedInUser(7L)
+        );
+
+        assertThat(service.getMemoryAutomationMode().getMode()).isEqualTo("BALANCED");
+        service.updateMemoryAutomationMode("REVIEW_ALL");
+
+        verify(userMemoryMapper).upsertAutomationMode("7", "REVIEW_ALL");
+        assertThatThrownBy(() -> service.updateMemoryAutomationMode("unknown"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("记忆自动化模式无效");
+    }
+
+    @Test
+    void shouldAutomaticallySaveOnlyClearHighConfidencePreferenceInBalancedMode() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        when(userMemoryMapper.selectByUserId("7")).thenReturn(List.of());
+        when(userMemoryMapper.selectByUserIdAndContent("7", "长期偏好中文回答")).thenReturn(null);
+        when(userMemoryMapper.insert(any(UserMemory.class))).thenReturn(1);
+        UserMemoryCandidateMapper candidateMapper = mock(UserMemoryCandidateMapper.class);
+        ChatMessageFacadeService chatMessageFacadeService = mock(ChatMessageFacadeService.class);
+        when(chatMessageFacadeService.countUserMessagesBySessionId("session-1", "7")).thenReturn(1);
+        when(chatMessageFacadeService.getChatMessagesBySessionIdRecently("session-1", 8, "7"))
+                .thenReturn(List.of(ChatMessageDTO.builder()
+                        .id("message-1")
+                        .role(ChatMessageDTO.RoleType.USER)
+                        .content("我长期偏好中文回答，请记住")
+                        .build()));
+        RagService ragService = mock(RagService.class);
+        when(ragService.embed("长期偏好中文回答")).thenReturn(new float[]{1.0F, 0.0F});
+        ExtractionService extractionService = createExtractionService(
+                userMemoryMapper,
+                candidateMapper,
+                chatMessageFacadeService,
+                loggedInUser(7L),
+                ragService
+        );
+        when(extractionService.callResponseSpec().content()).thenReturn("""
+                [{"scope":"persistent","type":"PREFERENCE","content":"长期偏好中文回答","importance":"medium","confidence":"high","should_persist":true,"evidence_message_index":0}]
+                """);
+
+        extractionService.service().extractMemoryCandidates("7", "session-1");
+
+        verify(userMemoryMapper).insert(any(UserMemory.class));
+        verify(candidateMapper, never()).insert(any(UserMemoryCandidate.class));
+    }
+
+    @Test
+    void shouldRequireTenActiveMemoriesBeforeCreatingConsolidationProposal() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(memory("memory-1", "7", "一条记忆")));
+        UserMemoryFacadeServiceImpl service = createService(
+                userMemoryMapper,
+                mock(UserMemoryCandidateMapper.class),
+                mock(ChatMessageFacadeService.class),
+                loggedInUser(7L)
+        );
+
+        assertThatThrownBy(service::createMemoryConsolidationProposal)
+                .isInstanceOf(BizException.class)
+                .hasMessage("至少需要 10 条已确认记忆才能生成整理建议");
+    }
+
+    @Test
+    void shouldCreateConsolidationPreviewWithoutChangingSourceMemories() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        List<UserMemory> memories = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(index -> memory("memory-" + index, "7", "偏好记录 " + index))
+                .toList();
+        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(memories);
+        UserMemoryConsolidationProposalMapper proposalMapper = mock(UserMemoryConsolidationProposalMapper.class);
+        when(proposalMapper.insert(any(UserMemoryConsolidationProposal.class))).thenReturn(1);
+        ExtractionService extractionService = createExtractionService(
+                userMemoryMapper,
+                mock(UserMemoryCandidateMapper.class),
+                mock(ChatMessageFacadeService.class),
+                loggedInUser(7L),
+                null,
+                proposalMapper
+        );
+        when(extractionService.callResponseSpec().content()).thenReturn("""
+                {"source_indexes":[0,1],"memory_type":"PREFERENCE","content":"整理后的偏好"}
+                """);
+
+        extractionService.service().createMemoryConsolidationProposal();
+
+        ArgumentCaptor<UserMemoryConsolidationProposal> proposalCaptor = ArgumentCaptor.forClass(UserMemoryConsolidationProposal.class);
+        verify(proposalMapper).insert(proposalCaptor.capture());
+        assertThat(proposalCaptor.getValue().getSourceMemoryIdsJson()).contains("memory-0", "memory-1");
+        verify(userMemoryMapper, never()).markSupersededByIds(any(), anyString(), anyString());
+        verify(userMemoryMapper, never()).insert(any(UserMemory.class));
+    }
+
+    @Test
+    void shouldApplyConsolidationOnlyAfterConfirmationAndSupersedeSources() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        List<UserMemory> sourceMemories = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(index -> memory("memory-" + index, "7", "偏好记录 " + index))
+                .toList();
+        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(sourceMemories);
+        when(userMemoryMapper.selectActiveByIdsForUpdate("7", List.of("memory-0", "memory-1")))
+                .thenReturn(sourceMemories.subList(0, 2));
+        when(userMemoryMapper.insert(any(UserMemory.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, UserMemory.class).setId("memory-merged");
+            return 1;
+        });
+        when(userMemoryMapper.markSupersededByIds(List.of("memory-0", "memory-1"), "7", "memory-merged"))
+                .thenReturn(2);
+        UserMemoryConsolidationProposalMapper proposalMapper = mock(UserMemoryConsolidationProposalMapper.class);
+        AtomicReference<UserMemoryConsolidationProposal> storedProposal = new AtomicReference<>();
+        when(proposalMapper.insert(any(UserMemoryConsolidationProposal.class))).thenAnswer(invocation -> {
+            UserMemoryConsolidationProposal proposal = invocation.getArgument(0, UserMemoryConsolidationProposal.class);
+            proposal.setId("proposal-1");
+            storedProposal.set(proposal);
+            return 1;
+        });
+        when(proposalMapper.selectPendingByIdAndUserId("proposal-1", "7"))
+                .thenAnswer(invocation -> storedProposal.get());
+        when(proposalMapper.markStatus("proposal-1", "7", "APPLIED", "memory-merged")).thenReturn(1);
+        ExtractionService extractionService = createExtractionService(
+                userMemoryMapper,
+                mock(UserMemoryCandidateMapper.class),
+                mock(ChatMessageFacadeService.class),
+                loggedInUser(7L),
+                null,
+                proposalMapper
+        );
+        when(extractionService.callResponseSpec().content()).thenReturn("""
+                {"source_indexes":[0,1],"memory_type":"PREFERENCE","content":"整理后的偏好"}
+                """);
+
+        extractionService.service().createMemoryConsolidationProposal();
+        verify(userMemoryMapper, never()).insert(any(UserMemory.class));
+        extractionService.service().confirmMemoryConsolidationProposal("proposal-1");
+
+        verify(userMemoryMapper).insert(any(UserMemory.class));
+        verify(userMemoryMapper).markSupersededByIds(List.of("memory-0", "memory-1"), "7", "memory-merged");
+        verify(proposalMapper).markStatus("proposal-1", "7", "APPLIED", "memory-merged");
+    }
+
+    @Test
+    void shouldMarkConsolidationProposalStaleWhenSourcesChanged() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        List<UserMemory> sources = List.of(memory("memory-0", "7", "偏好 0"), memory("memory-1", "7", "偏好 1"));
+        when(userMemoryMapper.selectActiveByIdsForUpdate("7", List.of("memory-0", "memory-1")))
+                .thenReturn(sources);
+        UserMemoryConsolidationProposal proposal = UserMemoryConsolidationProposal.builder()
+                .id("proposal-1")
+                .userId("7")
+                .sourceMemoryIdsJson("[\"memory-0\",\"memory-1\"]")
+                .sourceFingerprint("stale-fingerprint")
+                .proposedType("PREFERENCE")
+                .proposedContent("整理后的偏好")
+                .status("PENDING")
+                .build();
+        UserMemoryConsolidationProposalMapper proposalMapper = mock(UserMemoryConsolidationProposalMapper.class);
+        when(proposalMapper.selectPendingByIdAndUserId("proposal-1", "7")).thenReturn(proposal);
+        when(proposalMapper.markStatus("proposal-1", "7", "STALE", null)).thenReturn(1);
+        UserMemoryFacadeServiceImpl service = new UserMemoryFacadeServiceImpl(
+                userMemoryMapper,
+                mock(UserMemoryCandidateMapper.class),
+                mock(ChatMessageFacadeService.class),
+                loggedInUser(7L),
+                null,
+                null,
+                proposalMapper,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, mock(UserMemoryCandidateMapper.class), proposalMapper)
+        );
+
+        service.confirmMemoryConsolidationProposal("proposal-1");
+
+        verify(proposalMapper).markStatus("proposal-1", "7", "STALE", null);
+        verify(userMemoryMapper, never()).insert(any(UserMemory.class));
+        verify(userMemoryMapper, never()).markSupersededByIds(any(), anyString(), anyString());
     }
 
     @Test
@@ -177,6 +362,25 @@ class UserMemoryFacadeServiceImplTest {
     }
 
     @Test
+    void shouldKeepRecallRecordsWholeWithinCharacterBudget() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        UserMemory oversizedMemory = memory("memory-large", "7", "x".repeat(20_000));
+        UserMemory compactMemory = memory("memory-small", "7", "简洁偏好");
+        when(userMemoryMapper.selectActiveByUserId("7"))
+                .thenReturn(List.of(oversizedMemory, compactMemory));
+        UserMemoryFacadeServiceImpl service = createService(
+                userMemoryMapper,
+                mock(UserMemoryCandidateMapper.class),
+                mock(ChatMessageFacadeService.class),
+                loggedInUser(7L)
+        );
+
+        List<UserMemory> memories = service.recallRelevantMemories("7", "用户偏好", 5);
+
+        assertThat(memories).containsExactly(compactMemory);
+    }
+
+    @Test
     void shouldUseActiveMemoriesToSupplementIncompleteVectorRecall() {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         UserMemory semanticMemory = memory("memory-semantic", "7", "匹配记忆");
@@ -280,6 +484,7 @@ class UserMemoryFacadeServiceImplTest {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         UserMemoryCandidateMapper candidateMapper = mock(UserMemoryCandidateMapper.class);
         ChatMessageFacadeService chatMessageFacadeService = mock(ChatMessageFacadeService.class);
+        when(chatMessageFacadeService.countUserMessagesBySessionId("session-1", "7")).thenReturn(1);
         when(chatMessageFacadeService.getChatMessagesBySessionIdRecently("session-1", 8, "7"))
                 .thenReturn(List.of(ChatMessageDTO.builder()
                         .id("message-1")
@@ -293,14 +498,17 @@ class UserMemoryFacadeServiceImplTest {
         when(candidateMapper.updateStatusById(any(), any())).thenReturn(1);
         when(userMemoryMapper.insert(any(UserMemory.class))).thenReturn(1);
 
-        UserMemoryFacadeServiceImpl service = createService(
+        ExtractionService extractionService = createExtractionService(
                 userMemoryMapper,
                 candidateMapper,
                 chatMessageFacadeService,
                 loggedInUser(7L)
         );
+        when(extractionService.callResponseSpec().content()).thenReturn("""
+                [{"scope":"persistent","type":"PREFERENCE","content":"喜欢简洁回答","importance":"medium","confidence":"medium","should_persist":true,"evidence_message_index":0}]
+                """);
 
-        service.extractMemoryCandidates("7", "session-1");
+        extractionService.service().extractMemoryCandidates("7", "session-1");
 
         ArgumentCaptor<UserMemoryCandidate> candidateCaptor = ArgumentCaptor.forClass(UserMemoryCandidate.class);
         verify(candidateMapper).insert(candidateCaptor.capture());
@@ -377,7 +585,7 @@ class UserMemoryFacadeServiceImplTest {
                 loggedInUser(7L)
         );
         when(extractionService.callResponseSpec().content()).thenReturn("""
-                [{"type":"PREFERENCE","content":"偏好简洁回答","importance":"medium","should_persist":true,"evidence_message_index":0}]
+                [{"scope":"persistent","type":"PREFERENCE","content":"偏好简洁回答","importance":"medium","confidence":"high","should_persist":true,"evidence_message_index":0}]
                 """);
 
         assertThatThrownBy(() -> extractionService.service().extractMemoryCandidates("7", "session-1"))
@@ -391,7 +599,7 @@ class UserMemoryFacadeServiceImplTest {
     }
 
     @Test
-    void shouldFallBackToKeywordExtractionWhenLlmResponseIsInvalid() {
+    void shouldFailClosedWhenLlmResponseIsInvalid() {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         when(userMemoryMapper.selectByUserId("7")).thenReturn(List.of());
         UserMemoryCandidateMapper candidateMapper = mock(UserMemoryCandidateMapper.class);
@@ -413,16 +621,13 @@ class UserMemoryFacadeServiceImplTest {
         );
         when(extractionService.callResponseSpec().content()).thenReturn("[invalid");
 
-        assertThat(extractionService.service().extractMemoryCandidates("7", "session-1"))
-                .isEqualTo(MemoryExtractionResult.EXTRACTED);
-
-        ArgumentCaptor<UserMemoryCandidate> candidateCaptor = ArgumentCaptor.forClass(UserMemoryCandidate.class);
-        verify(candidateMapper).insert(candidateCaptor.capture());
-        assertThat(candidateCaptor.getValue().getContent()).isEqualTo("请记住我喜欢简洁回答");
+        assertThatThrownBy(() -> extractionService.service().extractMemoryCandidates("7", "session-1"))
+                .isInstanceOf(IllegalStateException.class);
+        verify(candidateMapper, never()).insert(any(UserMemoryCandidate.class));
     }
 
     @Test
-    void shouldFallBackToKeywordExtractionWhenLlmResponseIsBlank() {
+    void shouldFailClosedWhenLlmResponseIsBlank() {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         when(userMemoryMapper.selectByUserId("7")).thenReturn(List.of());
         UserMemoryCandidateMapper candidateMapper = mock(UserMemoryCandidateMapper.class);
@@ -444,16 +649,13 @@ class UserMemoryFacadeServiceImplTest {
         );
         when(extractionService.callResponseSpec().content()).thenReturn("  ");
 
-        assertThat(extractionService.service().extractMemoryCandidates("7", "session-1"))
-                .isEqualTo(MemoryExtractionResult.EXTRACTED);
-
-        ArgumentCaptor<UserMemoryCandidate> candidateCaptor = ArgumentCaptor.forClass(UserMemoryCandidate.class);
-        verify(candidateMapper).insert(candidateCaptor.capture());
-        assertThat(candidateCaptor.getValue().getContent()).isEqualTo("请记住我喜欢简洁回答");
+        assertThatThrownBy(() -> extractionService.service().extractMemoryCandidates("7", "session-1"))
+                .isInstanceOf(IllegalStateException.class);
+        verify(candidateMapper, never()).insert(any(UserMemoryCandidate.class));
     }
 
     @Test
-    void shouldNotLogInvalidLlmResponseWhenKeywordFallbackSucceeds() {
+    void shouldFailClosedWithoutLoggingModelResponse() {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         when(userMemoryMapper.selectByUserId("7")).thenReturn(List.of());
         UserMemoryCandidateMapper candidateMapper = mock(UserMemoryCandidateMapper.class);
@@ -480,7 +682,8 @@ class UserMemoryFacadeServiceImplTest {
         logger.addAppender(appender);
 
         try {
-            extractionService.service().extractMemoryCandidates("7", "session-1");
+            assertThatThrownBy(() -> extractionService.service().extractMemoryCandidates("7", "session-1"))
+                    .isInstanceOf(IllegalStateException.class);
         } finally {
             logger.detachAppender(appender);
             appender.stop();
@@ -488,8 +691,36 @@ class UserMemoryFacadeServiceImplTest {
 
         assertThat(appender.list).allSatisfy(event -> {
             assertThat(event.getFormattedMessage()).doesNotContain("UNIQUE_MODEL_RESPONSE_MARKER");
-            assertThat(event.getThrowableProxy()).isNull();
         });
+        verify(candidateMapper, never()).insert(any(UserMemoryCandidate.class));
+    }
+
+    @Test
+    void shouldNotCreateCandidateForCurrentTaskExtraction() {
+        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
+        when(userMemoryMapper.selectByUserId("7")).thenReturn(List.of());
+        UserMemoryCandidateMapper candidateMapper = mock(UserMemoryCandidateMapper.class);
+        ChatMessageFacadeService chatMessageFacadeService = mock(ChatMessageFacadeService.class);
+        when(chatMessageFacadeService.countUserMessagesBySessionId("session-1", "7")).thenReturn(1);
+        when(chatMessageFacadeService.getChatMessagesBySessionIdRecently("session-1", 8, "7"))
+                .thenReturn(List.of(ChatMessageDTO.builder()
+                        .id("message-1")
+                        .role(ChatMessageDTO.RoleType.USER)
+                        .content("这次请用英文回答 2+2")
+                        .build()));
+        ExtractionService extractionService = createExtractionService(
+                userMemoryMapper,
+                candidateMapper,
+                chatMessageFacadeService,
+                loggedInUser(7L)
+        );
+        when(extractionService.callResponseSpec().content()).thenReturn("""
+                [{"scope":"persistent","type":"CONSTRAINT","content":"用户临时要求英文回答","importance":"high","confidence":"high","should_persist":true,"evidence_message_index":0}]
+                """);
+
+        assertThat(extractionService.service().extractMemoryCandidates("7", "session-1"))
+                .isEqualTo(MemoryExtractionResult.EXTRACTED);
+        verify(candidateMapper, never()).insert(any(UserMemoryCandidate.class));
     }
 
     @Test
@@ -1011,7 +1242,8 @@ class UserMemoryFacadeServiceImplTest {
                 userMemoryMapper,
                 candidateMapper,
                 chatMessageFacadeService,
-                requestScopeData
+                requestScopeData,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, candidateMapper, null)
         );
     }
 
@@ -1031,7 +1263,8 @@ class UserMemoryFacadeServiceImplTest {
                 chatMessageFacadeService,
                 requestScopeData,
                 null,
-                ragServiceProvider
+                ragServiceProvider,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, candidateMapper, null)
         );
     }
 
@@ -1040,6 +1273,34 @@ class UserMemoryFacadeServiceImplTest {
             UserMemoryCandidateMapper candidateMapper,
             ChatMessageFacadeService chatMessageFacadeService,
             RequestScopeData requestScopeData
+    ) {
+        return createExtractionService(
+                userMemoryMapper,
+                candidateMapper,
+                chatMessageFacadeService,
+                requestScopeData,
+                null
+        );
+    }
+
+    private ExtractionService createExtractionService(
+            UserMemoryMapper userMemoryMapper,
+            UserMemoryCandidateMapper candidateMapper,
+            ChatMessageFacadeService chatMessageFacadeService,
+            RequestScopeData requestScopeData,
+            RagService ragService
+    ) {
+        return createExtractionService(userMemoryMapper, candidateMapper, chatMessageFacadeService,
+                requestScopeData, ragService, null);
+    }
+
+    private ExtractionService createExtractionService(
+            UserMemoryMapper userMemoryMapper,
+            UserMemoryCandidateMapper candidateMapper,
+            ChatMessageFacadeService chatMessageFacadeService,
+            RequestScopeData requestScopeData,
+            RagService ragService,
+            UserMemoryConsolidationProposalMapper proposalMapper
     ) {
         ChatClient chatClient = mock(ChatClient.class);
         ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
@@ -1053,13 +1314,18 @@ class UserMemoryFacadeServiceImplTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<ChatClientRegistry> registryProvider = mock(ObjectProvider.class);
         when(registryProvider.getIfAvailable()).thenReturn(new ChatClientRegistry(Map.of("deepseek-chat", chatClient)));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<RagService> ragServiceProvider = mock(ObjectProvider.class);
+        when(ragServiceProvider.getIfAvailable()).thenReturn(ragService);
         UserMemoryFacadeServiceImpl service = new UserMemoryFacadeServiceImpl(
                 userMemoryMapper,
                 candidateMapper,
                 chatMessageFacadeService,
                 requestScopeData,
                 registryProvider,
-                null
+                ragServiceProvider,
+                proposalMapper,
+                new com.kama.jchatmind.service.impl.UserMemoryWriteService(userMemoryMapper, candidateMapper, proposalMapper)
         );
         return new ExtractionService(service, requestSpec, callResponseSpec);
     }

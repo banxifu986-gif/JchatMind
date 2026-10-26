@@ -3,6 +3,7 @@ package com.kama.jchatmind.controller;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.UpdateUserMemoryRequest;
 import com.kama.jchatmind.model.request.UpdateUserMemoryExpirationRequest;
+import com.kama.jchatmind.model.request.UpdateUserMemoryAutomationRequest;
 import com.kama.jchatmind.service.UserMemoryFacadeService;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +23,40 @@ public class UserMemoryController {
     @GetMapping("/memory-candidates")
     public ApiResponse<com.kama.jchatmind.model.response.GetUserMemoryCandidatesResponse> getUserMemoryCandidates() {
         return ApiResponse.success(userMemoryFacadeService.getUserMemoryCandidates());
+    }
+
+    @GetMapping("/memory-automation")
+    public ApiResponse<com.kama.jchatmind.model.response.UserMemoryAutomationResponse> getMemoryAutomationMode() {
+        return ApiResponse.success(userMemoryFacadeService.getMemoryAutomationMode());
+    }
+
+    @PatchMapping("/memory-automation")
+    public ApiResponse<Void> updateMemoryAutomationMode(@RequestBody UpdateUserMemoryAutomationRequest request) {
+        userMemoryFacadeService.updateMemoryAutomationMode(request.getMode());
+        return ApiResponse.success();
+    }
+
+    @GetMapping("/memory-consolidation-proposals")
+    public ApiResponse<com.kama.jchatmind.model.response.GetUserMemoryConsolidationProposalsResponse> getMemoryConsolidationProposals() {
+        return ApiResponse.success(userMemoryFacadeService.getMemoryConsolidationProposals());
+    }
+
+    @PostMapping("/memory-consolidation-proposals")
+    public ApiResponse<Void> createMemoryConsolidationProposal() {
+        userMemoryFacadeService.createMemoryConsolidationProposal();
+        return ApiResponse.success();
+    }
+
+    @PostMapping("/memory-consolidation-proposals/{proposalId}/confirm")
+    public ApiResponse<Void> confirmMemoryConsolidationProposal(@PathVariable String proposalId) {
+        userMemoryFacadeService.confirmMemoryConsolidationProposal(proposalId);
+        return ApiResponse.success();
+    }
+
+    @PostMapping("/memory-consolidation-proposals/{proposalId}/discard")
+    public ApiResponse<Void> discardMemoryConsolidationProposal(@PathVariable String proposalId) {
+        userMemoryFacadeService.discardMemoryConsolidationProposal(proposalId);
+        return ApiResponse.success();
     }
 
     @PostMapping("/memory-candidates/{candidateId}/confirm")

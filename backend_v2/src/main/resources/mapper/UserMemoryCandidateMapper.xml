@@ -49,6 +49,9 @@
             #{createdAt},
             #{updatedAt}
         )
+        ON CONFLICT (user_id, memory_type, evidence_message_id, content)
+            WHERE evidence_message_id IS NOT NULL
+        DO NOTHING
     </insert>
 
     <select id="selectByUserId" resultMap="BaseResultMap">
