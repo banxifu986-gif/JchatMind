@@ -511,6 +511,12 @@ export async function getIngestionTask(
   return get<IngestionTaskVO>(`/ingestion/tasks/${taskId}`);
 }
 
+export async function getRetryableIngestionTasks(
+  kbId: string,
+): Promise<IngestionTaskVO[]> {
+  return get<IngestionTaskVO[]>(`/ingestion/tasks?kbId=${encodeURIComponent(kbId)}`);
+}
+
 export async function cancelIngestionTask(taskId: string): Promise<void> {
   return post<void>(`/ingestion/tasks/${taskId}/cancel`);
 }

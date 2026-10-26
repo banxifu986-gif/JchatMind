@@ -42,6 +42,17 @@
         WHERE task_id = CAST(#{taskId} AS uuid)
     </select>
 
+    <select id="selectRetryableByOwnerIdAndKbId" resultMap="BaseResultMap">
+        SELECT task_id, owner_id, kb_id, document_id, idempotency_key, task_type,
+               status, attempt_count, max_attempts, error_summary,
+               created_at, updated_at, started_at, completed_at
+        FROM ingestion_task
+        WHERE owner_id = #{ownerId}
+          AND kb_id = CAST(#{kbId} AS uuid)
+          AND status IN ('FAILED', 'DEAD_LETTER')
+        ORDER BY updated_at DESC, created_at DESC
+    </select>
+
     <select id="selectByOwnerIdAndIdempotencyKey" resultMap="BaseResultMap">
         SELECT task_id, owner_id, kb_id, document_id, idempotency_key, task_type,
                status, attempt_count, max_attempts, error_summary,

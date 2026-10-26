@@ -4,6 +4,7 @@ import com.kama.jchatmind.model.entity.IngestionTask;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
 import java.util.UUID;
 
 @Mapper
@@ -12,6 +13,11 @@ public interface IngestionTaskMapper {
     int insert(IngestionTask task);
 
     IngestionTask selectById(@Param("taskId") String taskId);
+
+    List<IngestionTask> selectRetryableByOwnerIdAndKbId(
+            @Param("ownerId") Long ownerId,
+            @Param("kbId") String kbId
+    );
 
     IngestionTask selectByOwnerIdAndIdempotencyKey(
             @Param("ownerId") Long ownerId,

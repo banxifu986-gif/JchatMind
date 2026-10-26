@@ -2,6 +2,7 @@ package com.kama.jchatmind.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.DirectExchange;
@@ -341,6 +342,7 @@ public class RabbitMQConfig {
         if (configurer != null) {
             configurer.configure(factory, connectionFactory);
         }
+        factory.setAcknowledgeMode(AcknowledgeMode.AUTO);
         factory.setConcurrentConsumers(INGESTION_CONCURRENT_CONSUMERS);
         factory.setMaxConcurrentConsumers(INGESTION_CONCURRENT_CONSUMERS);
         factory.setPrefetchCount(INGESTION_PREFETCH_COUNT);

@@ -18,6 +18,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -93,6 +94,15 @@ public class IngestionTaskServiceImpl {
     @Transactional(readOnly = true)
     public IngestionTask getTask(String taskId) {
         return requireOwnedTask(taskId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<IngestionTask> getRetryableTasksForKnowledgeBase(String kbId) {
+        Long ownerId = requireUserId();
+        requireText(kbId, "知识库不能为空");
+        String normalizedKbId = kbId.trim();
+        knowledgeBaseAccessService.requireAccessibleKnowledgeBase(normalizedKbId, String.valueOf(ownerId));
+        return ingestionTaskMapper.selectRetryableByOwnerIdAndKbId(ownerId, normalizedKbId);
     }
 
     @Transactional
