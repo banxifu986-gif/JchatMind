@@ -57,7 +57,8 @@ public class IntentRouter {
             "列出文件", "列出目录", "查看目录", "list files", "list directory"
     );
     private static final List<String> KNOWLEDGE_FOLLOW_UP_REFERENCES = List.of(
-            "前面提到", "前面说", "刚才提到", "刚才说", "上文", "前文", "上一轮", "之前提到", "之前说"
+            "前面提到", "前面说", "刚才提到", "刚才说", "上文", "前文", "上一轮", "之前提到", "之前说",
+            "重试", "再试一次", "重新检索", "retry"
     );
     private static final List<String> KNOWLEDGE_FOLLOW_UP_SUBJECTS = List.of(
             "回滚", "超时", "限制", "架构", "发布", "配置", "缓存", "接口", "规范", "知识库", "项目"

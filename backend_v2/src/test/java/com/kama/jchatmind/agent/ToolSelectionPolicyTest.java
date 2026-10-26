@@ -122,7 +122,7 @@ class ToolSelectionPolicyTest {
     }
 
     @Test
-    void shouldUseInjectedFallbackRouterForAmbiguousDecision() {
+    void shouldUseInjectedFallbackRouterForUnclassifiedRequest() {
         IntentFallbackRouter fallbackRouter = new IntentFallbackRouter(
                 new IntentRouter(),
                 new ObjectMapper(),
@@ -136,8 +136,13 @@ class ToolSelectionPolicyTest {
                 new IntentPolicyEngine()
         );
 
-        assertThat(injectedPolicy.decide("帮我处理一下这个").businessIntent())
+        assertThat(injectedPolicy.decide("我想了解 Redis 事务").businessIntent())
                 .isEqualTo(BusinessIntent.KNOWLEDGE_QA);
+    }
+
+    @Test
+    void shouldKeepLowInformationRequestToolFreeDespiteModelFallback() {
+        assertThat(policy.select(callbacks, "帮我处理一下这个")).isEmpty();
     }
 
     private ToolCallback callback(String name) {

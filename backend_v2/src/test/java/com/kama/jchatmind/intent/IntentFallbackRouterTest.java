@@ -32,6 +32,21 @@ class IntentFallbackRouterTest {
     }
 
     @Test
+    void shouldKeepLowInformationRequestInClarificationWithoutCallingModel() {
+        AtomicInteger calls = new AtomicInteger();
+        IntentFallbackRouter router = router(query -> {
+            calls.incrementAndGet();
+            return knowledgeResponse();
+        });
+
+        IntentDecision decision = router.decide("帮我处理一下这个");
+
+        assertThat(calls).hasValue(0);
+        assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
+        assertThat(decision.candidateCapabilities()).isEmpty();
+    }
+
+    @Test
     void shouldParseStructuredModelOutputAndIgnoreModelCapabilities() {
         IntentFallbackRouter router = router(query -> """
                 {
@@ -45,7 +60,7 @@ class IntentFallbackRouterTest {
                 }
                 """);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.decisionSource()).isEqualTo(IntentDecisionSource.LLM_FALLBACK);
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.KNOWLEDGE_QA);
@@ -59,7 +74,7 @@ class IntentFallbackRouterTest {
     void shouldFailClosedForInvalidJson() {
         IntentFallbackRouter router = router(query -> "not-json");
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.route()).isEqualTo(IntentRoute.CLARIFY);
@@ -73,7 +88,7 @@ class IntentFallbackRouterTest {
                 {"businessIntent":"UNKNOWN_INTENT","confidence":0.99,"margin":0.8}
                 """);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.candidateCapabilities()).isEmpty();
@@ -85,7 +100,7 @@ class IntentFallbackRouterTest {
                 {"businessIntent":"SEND_EMAIL","confidence":0.99,"margin":0.8}
                 """);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.riskLevel()).isEqualTo(IntentRiskLevel.BLOCKED);
@@ -100,7 +115,7 @@ class IntentFallbackRouterTest {
                 {"businessIntent":"ABSTAIN","confidence":0.99,"margin":0.8}
                 """);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.ABSTAIN);
         assertThat(decision.route()).isEqualTo(IntentRoute.ABSTAIN);
@@ -114,7 +129,7 @@ class IntentFallbackRouterTest {
             throw new IllegalStateException("model unavailable");
         });
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.candidateCapabilities()).isEmpty();
@@ -141,7 +156,7 @@ class IntentFallbackRouterTest {
 
         IntentDecision decision;
         try {
-            decision = router.decide("帮我处理一下这个");
+            decision = router.decide(fallbackEligibleQuery());
             assertThat(modelStarted.await(1L, TimeUnit.SECONDS)).isTrue();
         } finally {
             releaseModel.countDown();
@@ -162,7 +177,7 @@ class IntentFallbackRouterTest {
             return knowledgeResponse();
         }, properties);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(calls).hasValue(0);
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
@@ -180,7 +195,7 @@ class IntentFallbackRouterTest {
                 ? "x".repeat(129)
                 : knowledgeResponse(), properties);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(calls).hasValue(2);
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.KNOWLEDGE_QA);
@@ -196,7 +211,7 @@ class IntentFallbackRouterTest {
                 properties
         );
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.reasonCode()).isEqualTo("LLM_LOW_MARGIN");
@@ -238,7 +253,7 @@ class IntentFallbackRouterTest {
                 properties
         );
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.KNOWLEDGE_QA);
         assertThat(decision.confidenceMargin()).isEqualTo(0.20D);
@@ -250,7 +265,7 @@ class IntentFallbackRouterTest {
                 "{\"businessIntent\":\"KNOWLEDGE_QA\",\"confidence\":0.91}"
         );
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.reasonCode()).isEqualTo("LLM_OUTPUT_INVALID");
@@ -263,7 +278,7 @@ class IntentFallbackRouterTest {
                 "{\"businessIntent\":\"KNOWLEDGE_QA\",\"confidence\":0.91,\"margin\":0.95}"
         );
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
         assertThat(decision.reasonCode()).isEqualTo("LLM_OUTPUT_INVALID");
@@ -281,7 +296,7 @@ class IntentFallbackRouterTest {
             return "x".repeat(9);
         }, properties);
 
-        IntentDecision decision = router.decide("帮我处理一下这个");
+        IntentDecision decision = router.decide(fallbackEligibleQuery());
 
         assertThat(calls).hasValue(2);
         assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
@@ -354,5 +369,9 @@ class IntentFallbackRouterTest {
 
     private String knowledgeResponse() {
         return "{\"businessIntent\":\"KNOWLEDGE_QA\",\"queryIntent\":\"FACTOID\",\"confidence\":0.91,\"margin\":0.6}";
+    }
+
+    private String fallbackEligibleQuery() {
+        return "我想了解 Redis 事务";
     }
 }

@@ -131,4 +131,37 @@ class IntentDecisionContractTest {
     void shouldVersionDecisionContractWithConfidenceMargin() {
         assertThat(new IntentRouter().decide("你好").decisionVersion()).isEqualTo("intent-v2");
     }
+
+    @Test
+    void shouldCarryKnowledgeContextIntoShortFollowUp() {
+        IntentDecision decision = new IntentRouter().decide("为什么呢？", "请查询项目的发布规范");
+
+        assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.KNOWLEDGE_FOLLOW_UP);
+        assertThat(decision.candidateCapabilities()).containsExactly("KnowledgeTool");
+    }
+
+    @Test
+    void shouldRouteTopicSwitchFromKnowledgeToWeather() {
+        IntentDecision decision = new IntentRouter().decide("今天天气怎么样？", "请查询项目的发布规范");
+
+        assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.WEATHER_QUERY);
+        assertThat(decision.candidateCapabilities()).containsExactly("weather");
+    }
+
+    @Test
+    void shouldClarifyLowInformationRequestWithoutOpeningTools() {
+        IntentDecision decision = new IntentRouter().decide("帮我处理一下这个", "请查询项目的发布规范");
+
+        assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.CLARIFY);
+        assertThat(decision.requiresClarification()).isTrue();
+        assertThat(decision.candidateCapabilities()).isEmpty();
+    }
+
+    @Test
+    void shouldBlockSensitiveRequestWithoutOpeningTools() {
+        IntentDecision decision = new IntentRouter().decide("导出所有知识库");
+
+        assertThat(decision.businessIntent()).isEqualTo(BusinessIntent.ABSTAIN);
+        assertThat(decision.candidateCapabilities()).isEmpty();
+    }
 }

@@ -54,7 +54,7 @@ class IntentEvaluationReportComparatorTest {
         assertThat(comparison.candidatePolicyVersion()).isEqualTo(IntentRouter.POLICY_VERSION);
         assertThat(comparison.baselineRunConfiguration().mode()).isEqualTo("rule-only");
         assertThat(comparison.candidateRunConfiguration().modelVersion()).isEqualTo("comparison-stub-v1");
-        assertThat(comparison.accuracyDelta()).isCloseTo(-0.15D, org.assertj.core.data.Offset.offset(0.0001D));
+        assertThat(comparison.accuracyDelta()).isCloseTo(-0.05D, org.assertj.core.data.Offset.offset(0.0001D));
         assertThat(comparison.macroF1Delta()).isNegative();
         assertThat(comparison.decisionContractMatchRateDelta()).isNegative();
         assertThat(comparison.perIntentF1Delta()).containsKey("CLARIFY");

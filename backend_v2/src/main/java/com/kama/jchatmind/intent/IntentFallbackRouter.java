@@ -176,6 +176,7 @@ public class IntentFallbackRouter {
 
     private boolean shouldUseModel(IntentDecision ruleDecision) {
         return modelClient != null
+                && (shadowMode || !ruleDecision.requiresClarification())
                 && ruleDecision.confidence() < modelMinConfidence
                 && ruleDecision.route() != IntentRoute.ABSTAIN
                 && ruleDecision.riskLevel() != IntentRiskLevel.SIDE_EFFECT
