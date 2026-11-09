@@ -6,11 +6,16 @@ import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.dto.RagRetrievalContext;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import com.kama.jchatmind.rag.RagRouteDecision;
+import com.kama.jchatmind.rag.ImageEvidenceClient;
+import com.kama.jchatmind.rag.VisualAssetSummaryService;
+import com.kama.jchatmind.rag.VisualEvidenceAnswerService;
+import com.kama.jchatmind.rag.VisualEvidenceHintHolder;
 import com.kama.jchatmind.rag.RagRetrievalResultCache;
 import com.kama.jchatmind.rag.RagRouter;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import com.kama.jchatmind.service.RagService;
 import org.springframework.beans.factory.annotation.Autowired;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -22,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Component
 public class KnowledgeTools implements Tool {
 
@@ -33,6 +39,9 @@ public class KnowledgeTools implements Tool {
     private final ChatSessionFacadeService chatSessionFacadeService;
     private final RagRouter ragRouter;
     private final RagRetrievalResultCache retrievalResultCache;
+    private VisualEvidenceHintHolder visualEvidenceHintHolder;
+    private VisualAssetSummaryService visualAssetSummaryService;
+    private VisualEvidenceAnswerService visualEvidenceAnswerService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String userId;
@@ -41,29 +50,41 @@ public class KnowledgeTools implements Tool {
 
     public KnowledgeTools(RagService ragService, ChatSessionFacadeService chatSessionFacadeService) {
         this(ragService, chatSessionFacadeService, new RagRouter(),
-                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES));
+                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES), null);
     }
 
     @Autowired
     public KnowledgeTools(
             RagService ragService,
             ChatSessionFacadeService chatSessionFacadeService,
+            RagRouter ragRouter,
+            VisualEvidenceAnswerService visualEvidenceAnswerService
+    ) {
+        this(ragService, chatSessionFacadeService, ragRouter,
+                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES), visualEvidenceAnswerService);
+    }
+
+    public KnowledgeTools(
+            RagService ragService,
+            ChatSessionFacadeService chatSessionFacadeService,
             RagRouter ragRouter
     ) {
         this(ragService, chatSessionFacadeService, ragRouter,
-                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES));
+                new RagRetrievalResultCache(RagRetrievalResultCache.DEFAULT_MAX_ENTRIES), null);
     }
 
     private KnowledgeTools(
             RagService ragService,
             ChatSessionFacadeService chatSessionFacadeService,
             RagRouter ragRouter,
-            RagRetrievalResultCache retrievalResultCache
+            RagRetrievalResultCache retrievalResultCache,
+            VisualEvidenceAnswerService visualEvidenceAnswerService
     ) {
         this.ragService = ragService;
         this.chatSessionFacadeService = chatSessionFacadeService;
         this.ragRouter = ragRouter;
         this.retrievalResultCache = retrievalResultCache;
+        this.visualEvidenceAnswerService = visualEvidenceAnswerService;
         this.userId = null;
         this.chatSessionId = null;
         this.allowedKbMap = Map.of();
@@ -71,10 +92,23 @@ public class KnowledgeTools implements Tool {
 
     public KnowledgeTools fork(String userId, String chatSessionId, List<KnowledgeBaseDTO> allowedKbs) {
         KnowledgeTools tool = new KnowledgeTools(ragService, chatSessionFacadeService, ragRouter,
-                retrievalResultCache);
+                retrievalResultCache, visualEvidenceAnswerService);
         tool.userId = userId;
         tool.chatSessionId = chatSessionId;
         tool.allowedKbMap = buildAllowedKbMap(allowedKbs);
+        return tool;
+    }
+
+    public KnowledgeTools fork(
+            String userId,
+            String chatSessionId,
+            List<KnowledgeBaseDTO> allowedKbs,
+            VisualEvidenceHintHolder visualEvidenceHintHolder,
+            VisualAssetSummaryService visualAssetSummaryService
+    ) {
+        KnowledgeTools tool = fork(userId, chatSessionId, allowedKbs);
+        tool.visualEvidenceHintHolder = visualEvidenceHintHolder;
+        tool.visualAssetSummaryService = visualAssetSummaryService;
         return tool;
     }
 
@@ -100,7 +134,13 @@ public class KnowledgeTools implements Tool {
     public String knowledgeQuery(String query, List<String> kbIds) {
         KnowledgeQueryResult queryResult = executeKnowledgeQuery(query, kbIds);
         if (!StringUtils.hasText(queryResult.message())) {
-            return formatResults(queryResult.results());
+            String formatted = formatResults(queryResult.results());
+            if (StringUtils.hasText(queryResult.visualEvidence())) {
+                formatted = StringUtils.hasText(formatted)
+                        ? formatted + "\n\n" + queryResult.visualEvidence()
+                        : queryResult.visualEvidence();
+            }
+            return formatted;
         }
         return queryResult.message();
     }
@@ -115,7 +155,20 @@ public class KnowledgeTools implements Tool {
         if (effectiveKbIds.isEmpty()) {
             return KnowledgeQueryResult.empty("未找到可检索的知识库，请检查当前 Agent 是否已配置可访问知识库，或传入的 kbIds 是否都在授权范围内。");
         }
-        RagRouteDecision route = ragRouter.decide(query, effectiveKbIds, true, false, true);
+        Boolean requiresVisualEvidence = visualEvidenceHintHolder == null ? null : visualEvidenceHintHolder.get();
+        RagRouteDecision route = requiresVisualEvidence != null && visualAssetSummaryService != null
+                ? ragRouter.decide(
+                        query,
+                        effectiveKbIds,
+                        true,
+                        false,
+                        true,
+                        new RagRouter.VisualEvidenceHint(
+                                requiresVisualEvidence,
+                                visualAssetSummaryService.hasVisualAssets(effectiveKbIds)
+                        )
+                )
+                : ragRouter.decide(query, effectiveKbIds, true, false, true);
         if (route.route() == RagRouteDecision.Route.ABSTAIN
                 || route.route() == RagRouteDecision.Route.CLARIFY) {
             return KnowledgeQueryResult.empty(route.reason());
@@ -148,6 +201,10 @@ public class KnowledgeTools implements Tool {
                     route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
                             ? retrievePdfPageAssets(routeScope, query, alignedRetrievalContext, route.topK())
                             : List.of();
+            List<RagRetrievalResult> imageAssetResults =
+                    route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                            ? retrieveImageAssets(routeScope, query, alignedRetrievalContext, route.topK())
+                            : List.of();
             List<RagRetrievalResult> retrievedResults = ragService.retrieve(
                     routeScope,
                     query,
@@ -158,6 +215,7 @@ public class KnowledgeTools implements Tool {
                 return mergeMultimodalResults(
                         markdownTableAssetResults,
                         pdfPageAssetResults,
+                        imageAssetResults,
                         retrievedResults,
                         route.topK()
                 );
@@ -168,8 +226,27 @@ public class KnowledgeTools implements Tool {
             return KnowledgeQueryResult.empty("当前授权知识范围内没有足够证据，无法可靠回答。");
         }
         updateRetrievalContext(results);
-        return new KnowledgeQueryResult(List.copyOf(results), null);
+        String visualEvidence = route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                && visualEvidenceAnswerService != null
+                ? visualEvidenceAnswerService.enrich(results, route.topK())
+                : null;
+        return new KnowledgeQueryResult(List.copyOf(results), null, visualEvidence);
     }
+
+    private List<RagRetrievalResult> retrieveImageAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        try {
+            return ragService.retrieveImageAssets(kbIds, query, context, limit);
+        } catch (RuntimeException e) {
+            log.warn("知识资产检索失败，跳过", e);
+            return List.of();
+        }
+    }
+
 
     private List<RagRetrievalResult> retrieveMarkdownTableAssets(
             List<String> kbIds,
@@ -180,6 +257,7 @@ public class KnowledgeTools implements Tool {
         try {
             return ragService.retrieveMarkdownTableAssets(kbIds, query, context, limit);
         } catch (RuntimeException e) {
+            log.warn("知识资产检索失败，跳过", e);
             return List.of();
         }
     }
@@ -193,6 +271,7 @@ public class KnowledgeTools implements Tool {
         try {
             return ragService.retrievePdfPageAssets(kbIds, query, context, limit);
         } catch (RuntimeException e) {
+            log.warn("知识资产检索失败，跳过", e);
             return List.of();
         }
     }
@@ -205,6 +284,7 @@ public class KnowledgeTools implements Tool {
     private List<RagRetrievalResult> mergeMultimodalResults(
             List<RagRetrievalResult> markdownTableAssetResults,
             List<RagRetrievalResult> pdfPageAssetResults,
+            List<RagRetrievalResult> imageAssetResults,
             List<RagRetrievalResult> ordinaryResults,
             int limit
     ) {
@@ -212,6 +292,7 @@ public class KnowledgeTools implements Tool {
         LinkedHashSet<String> seenChunkIds = new LinkedHashSet<>();
         appendUniqueResults(merged, seenChunkIds, markdownTableAssetResults);
         appendUniqueResults(merged, seenChunkIds, pdfPageAssetResults);
+        appendUniqueResults(merged, seenChunkIds, imageAssetResults);
         appendUniqueResults(merged, seenChunkIds, ordinaryResults);
         return merged.stream().limit(limit).toList();
     }
@@ -465,10 +546,10 @@ public class KnowledgeTools implements Tool {
         return StringUtils.hasText(value) ? value : "未知";
     }
 
-    private record KnowledgeQueryResult(List<RagRetrievalResult> results, String message) {
+    private record KnowledgeQueryResult(List<RagRetrievalResult> results, String message, String visualEvidence) {
 
         private static KnowledgeQueryResult empty(String message) {
-            return new KnowledgeQueryResult(List.of(), message);
+            return new KnowledgeQueryResult(List.of(), message, null);
         }
     }
 }
