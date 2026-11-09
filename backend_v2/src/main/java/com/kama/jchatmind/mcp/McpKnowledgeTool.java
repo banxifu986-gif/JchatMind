@@ -132,11 +132,16 @@ public class McpKnowledgeTool {
                         route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
                                 ? retrievePdfPageAssets(routeScope, query, route.topK())
                                 : List.of();
+                List<RagRetrievalResult> imageAssetResults =
+                        route.route() == RagRouteDecision.Route.MULTIMODAL_RAG
+                                ? retrieveImageAssets(routeScope, query, route.topK())
+                                : List.of();
                 List<RagRetrievalResult> retrieved = ragService.retrieve(routeScope, query, route.topK());
                 if (route.route() == RagRouteDecision.Route.MULTIMODAL_RAG) {
                     return mergeMultimodalResults(
                             markdownTableAssetResults,
                             pdfPageAssetResults,
+                            imageAssetResults,
                             retrieved,
                             route.topK()
                     );
@@ -181,6 +186,14 @@ public class McpKnowledgeTool {
         }
     }
 
+    private List<RagRetrievalResult> retrieveImageAssets(List<String> kbIds, String query, int limit) {
+        try {
+            return ragService.retrieveImageAssets(kbIds, query, null, limit);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
     private List<RagRetrievalResult> retrievePdfPageAssets(List<String> kbIds, String query, int limit) {
         try {
             return ragService.retrievePdfPageAssets(kbIds, query, null, limit);
@@ -204,6 +217,7 @@ public class McpKnowledgeTool {
     private List<RagRetrievalResult> mergeMultimodalResults(
             List<RagRetrievalResult> markdownTableAssetResults,
             List<RagRetrievalResult> pdfPageAssetResults,
+            List<RagRetrievalResult> imageAssetResults,
             List<RagRetrievalResult> ordinaryResults,
             int limit
     ) {
@@ -211,6 +225,7 @@ public class McpKnowledgeTool {
         LinkedHashSet<String> seenChunkIds = new LinkedHashSet<>();
         appendUniqueResults(merged, seenChunkIds, markdownTableAssetResults);
         appendUniqueResults(merged, seenChunkIds, pdfPageAssetResults);
+        appendUniqueResults(merged, seenChunkIds, imageAssetResults);
         appendUniqueResults(merged, seenChunkIds, ordinaryResults);
         return merged.stream().limit(limit).toList();
     }

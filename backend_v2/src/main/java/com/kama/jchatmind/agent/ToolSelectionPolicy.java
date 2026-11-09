@@ -54,6 +54,16 @@ public class ToolSelectionPolicy {
         return intentFallbackRouter.decide(query, previousUserQuery, traceId, correlationId);
     }
 
+    public IntentDecision decide(
+            String query,
+            String previousUserQuery,
+            String traceId,
+            String correlationId,
+            String visualAssetSummary
+    ) {
+        return intentFallbackRouter.decide(query, previousUserQuery, traceId, correlationId, visualAssetSummary);
+    }
+
     public List<ToolCallback> select(List<ToolCallback> availableTools, String query) {
         return select(availableTools, decide(query));
     }

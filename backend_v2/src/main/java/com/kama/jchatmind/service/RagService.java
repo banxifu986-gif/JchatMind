@@ -15,6 +15,13 @@ public interface RagService {
 
     List<RagRetrievalResult> retrieve(List<String> kbIds, String query, RagRetrievalContext context, int limit);
 
+    List<RagRetrievalResult> retrieveImageAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    );
+
     List<RagRetrievalResult> retrievePdfPageAssets(
             List<String> kbIds,
             String query,

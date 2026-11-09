@@ -127,6 +127,16 @@ public class IntentFallbackRouter {
             String traceId,
             String correlationId
     ) {
+        return decide(query, previousUserQuery, traceId, correlationId, null);
+    }
+
+    public IntentDecision decide(
+            String query,
+            String previousUserQuery,
+            String traceId,
+            String correlationId,
+            String visualAssetSummary
+    ) {
         IntentDecision ruleDecision = ruleRouter.decide(query, previousUserQuery);
         if (!shouldUseModel(ruleDecision)) {
             return ruleDecision;
@@ -136,7 +146,7 @@ public class IntentFallbackRouter {
         if (query != null && query.length() > maxInputCharacters) {
             candidateDecision = safeClarify("LLM_INPUT_TOO_LONG", IntentRiskLevel.NONE);
         } else {
-            candidateDecision = classifyWithRetries(query);
+            candidateDecision = classifyWithRetries(query, visualAssetSummary);
         }
         String telemetryInput = previousUserQuery != null && !previousUserQuery.isBlank()
                 ? previousUserQuery + "\n" + query
@@ -145,12 +155,12 @@ public class IntentFallbackRouter {
         return shadowMode ? ruleDecision : candidateDecision;
     }
 
-    private IntentDecision classifyWithRetries(String query) {
+    private IntentDecision classifyWithRetries(String query, String visualAssetSummary) {
         IntentDecision candidateDecision = null;
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 String response = CompletableFuture
-                        .supplyAsync(() -> modelClient.classify(query))
+                        .supplyAsync(() -> modelClient.classify(query, visualAssetSummary))
                         .orTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
                         .join();
                 candidateDecision = response != null && response.length() > maxOutputCharacters
@@ -257,7 +267,8 @@ public class IntentFallbackRouter {
 
             QueryIntent queryIntent = parseQueryIntent(root.path("queryIntent"));
             Map<String, String> entities = parseEntities(root.path("entities"));
-            return mapModelIntent(businessIntent, queryIntent, confidence, margin, entities);
+            return mapModelIntent(businessIntent, queryIntent, confidence, margin, entities,
+                    parseRequiresVisualEvidence(root), parseVisualTask(root));
         } catch (RuntimeException | JsonProcessingException e) {
             return safeClarify("LLM_OUTPUT_INVALID", IntentRiskLevel.NONE);
         }
@@ -321,12 +332,24 @@ public class IntentFallbackRouter {
         return entities;
     }
 
+    private Boolean parseRequiresVisualEvidence(JsonNode root) {
+        JsonNode node = root.path("requiresVisualEvidence");
+        return node.isBoolean() ? node.asBoolean() : null;
+    }
+
+    private String parseVisualTask(JsonNode root) {
+        JsonNode node = root.path("visualTask");
+        return node.isTextual() && !node.asText().isBlank() ? node.asText().trim() : null;
+    }
+
     private IntentDecision mapModelIntent(
             BusinessIntent businessIntent,
             QueryIntent queryIntent,
             double confidence,
-            double confidenceMargin,
-            Map<String, String> entities
+            Double confidenceMargin,
+            Map<String, String> entities,
+            Boolean requiresVisualEvidence,
+            String visualTask
     ) {
         if (SIDE_EFFECT_INTENTS.contains(businessIntent)) {
             return safeClarify(
@@ -336,7 +359,7 @@ public class IntentFallbackRouter {
                     confidenceMargin
             );
         }
-        return switch (businessIntent) {
+        IntentDecision base = switch (businessIntent) {
             case DIRECT_CHAT -> decision(
                     businessIntent, null, IntentRoute.DIRECT, IntentRiskLevel.NONE,
                     confidence, confidenceMargin, entities, List.of(), false, "LLM_CLASSIFIED_DIRECT"
@@ -389,6 +412,10 @@ public class IntentFallbackRouter {
                     "LLM_SIDE_EFFECT_REQUIRES_EXPLICIT_RULE", IntentRiskLevel.BLOCKED, confidence, confidenceMargin
             );
         };
+        if (requiresVisualEvidence == null && visualTask == null) {
+            return base;
+        }
+        return base.withVisualEvidence(requiresVisualEvidence, visualTask);
     }
 
     private IntentDecision safeClarify(String reasonCode, IntentRiskLevel riskLevel) {

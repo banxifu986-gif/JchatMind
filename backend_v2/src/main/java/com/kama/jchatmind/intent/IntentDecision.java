@@ -16,7 +16,9 @@ public record IntentDecision(
         boolean requiresClarification,
         IntentDecisionSource decisionSource,
         String reasonCode,
-        String policyVersion
+        String policyVersion,
+        Boolean requiresVisualEvidence,
+        String visualTask
 ) {
 
     public IntentDecision {
@@ -41,6 +43,47 @@ public record IntentDecision(
         candidateCapabilities = candidateCapabilities == null
                 ? List.of()
                 : List.copyOf(candidateCapabilities);
+        visualTask = visualTask == null || visualTask.isBlank() ? null : visualTask;
+    }
+
+    public IntentDecision(
+            String decisionVersion,
+            BusinessIntent businessIntent,
+            QueryIntent queryIntent,
+            IntentRoute route,
+            IntentRiskLevel riskLevel,
+            double confidence,
+            Double confidenceMargin,
+            Map<String, String> entities,
+            List<String> candidateCapabilities,
+            boolean requiresClarification,
+            IntentDecisionSource decisionSource,
+            String reasonCode,
+            String policyVersion
+    ) {
+        this(decisionVersion, businessIntent, queryIntent, route, riskLevel, confidence, confidenceMargin,
+                entities, candidateCapabilities, requiresClarification, decisionSource, reasonCode,
+                policyVersion, null, null);
+    }
+
+    public IntentDecision withVisualEvidence(Boolean requiresVisualEvidence, String visualTask) {
+        return new IntentDecision(
+                decisionVersion,
+                businessIntent,
+                queryIntent,
+                route,
+                riskLevel,
+                confidence,
+                confidenceMargin,
+                entities,
+                candidateCapabilities,
+                requiresClarification,
+                decisionSource,
+                reasonCode,
+                policyVersion,
+                requiresVisualEvidence,
+                visualTask
+        );
     }
 
     private static boolean isBlank(String value) {

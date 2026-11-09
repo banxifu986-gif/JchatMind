@@ -9,6 +9,9 @@ import com.kama.jchatmind.agent.harness.approval.ApprovalRequest;
 import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.intent.IntentDecision;
+import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
+import com.kama.jchatmind.rag.VisualAssetSummaryService;
+import com.kama.jchatmind.rag.VisualEvidenceHintHolder;
 import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import com.kama.jchatmind.message.SseMessage;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
@@ -86,6 +89,8 @@ public class JChatMind {
     private ToolSelectionPolicy toolSelectionPolicy;
     private String currentTraceId;
     private IntentDecisionMetadata currentIntentDecisionMetadata;
+    private VisualEvidenceHintHolder visualEvidenceHintHolder;
+    private VisualAssetSummaryService visualAssetSummaryService;
     private final Set<String> executedToolCallSignatures = new HashSet<>();
     private Set<String> currentTurnAllowedToolNames = Set.of();
     private String runEndReason;
@@ -264,17 +269,34 @@ public class JChatMind {
         pendingChatMessages.clear();
     }
 
+    public void setVisualEvidenceHintHolder(VisualEvidenceHintHolder visualEvidenceHintHolder) {
+        this.visualEvidenceHintHolder = visualEvidenceHintHolder;
+    }
+
+    public void setVisualAssetSummaryService(VisualAssetSummaryService visualAssetSummaryService) {
+        this.visualAssetSummaryService = visualAssetSummaryService;
+    }
+
     private boolean think() {
         this.agentState = AgentState.THINKING;
         sendStatus(SseMessage.Type.AI_THINKING, "思考中...", currentStepNumber);
         compressMemoryIfNeeded();
         String decisionCorrelationId = UUID.randomUUID().toString();
+        String visualAssetSummary = visualAssetSummaryService == null
+                ? null
+                : visualAssetSummaryService.summarize(availableKbs == null
+                        ? List.of()
+                        : availableKbs.stream().map(KnowledgeBaseDTO::getId).toList());
         IntentDecision intentDecision = toolSelectionPolicy.decide(
                 latestUserQuery(),
                 previousUserQuery(),
                 currentTraceId,
-                decisionCorrelationId
+                decisionCorrelationId,
+                visualAssetSummary
         );
+        if (visualEvidenceHintHolder != null) {
+            visualEvidenceHintHolder.set(intentDecision.requiresVisualEvidence());
+        }
         List<ToolCallback> turnTools = toolSelectionPolicy.select(availableTools, intentDecision);
         List<String> selectedToolNames = turnTools.stream()
                 .map(tool -> tool.getToolDefinition().name())

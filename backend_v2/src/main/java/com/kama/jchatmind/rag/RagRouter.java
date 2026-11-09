@@ -26,6 +26,33 @@ public class RagRouter {
         return decide(query, allowedKbIds, true, false, true);
     }
 
+    public record VisualEvidenceHint(boolean requiresVisualEvidence, boolean visualAssetsAvailable) {
+    }
+
+    public RagRouteDecision decide(
+            String query,
+            List<String> allowedKbIds,
+            boolean authorized,
+            boolean externalAllowed,
+            boolean privateEvidenceAvailable,
+            VisualEvidenceHint visualEvidenceHint
+    ) {
+        RagRouteDecision base = decide(query, allowedKbIds, authorized, externalAllowed, privateEvidenceAvailable);
+        if (visualEvidenceHint == null || !visualEvidenceHint.requiresVisualEvidence()) {
+            return base;
+        }
+        if (base.route() != RagRouteDecision.Route.PRIVATE_RAG && base.route() != RagRouteDecision.Route.HYBRID_RAG
+                && base.route() != RagRouteDecision.Route.MULTIMODAL_RAG) {
+            return base;
+        }
+        if (!visualEvidenceHint.visualAssetsAvailable()) {
+            return decision(RagRouteDecision.Route.CLARIFY, base.searchScope(), RagRouteDecision.RewriteMode.NONE,
+                    List.of(), 0, false, true, "授权范围内没有可用的图片资产，请确认文档中包含图片后再提问");
+        }
+        return decision(RagRouteDecision.Route.MULTIMODAL_RAG, base.searchScope(), RagRouteDecision.RewriteMode.CONTEXTUAL,
+                List.of("vector", "metadata", "location"), 5, true, false, "意图判定需要引用知识库内图片证据");
+    }
+
     public RagRouteDecision decide(
             String query,
             List<String> allowedKbIds,

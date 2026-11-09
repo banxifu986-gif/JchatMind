@@ -17,7 +17,9 @@ public record IntentDecisionMetadata(
         List<String> selectedToolNames,
         boolean requiresClarification,
         IntentDecisionSource decisionSource,
-        String reasonCode
+        String reasonCode,
+        Boolean requiresVisualEvidence,
+        String visualTask
 ) {
 
     public IntentDecisionMetadata {
@@ -37,6 +39,29 @@ public record IntentDecisionMetadata(
         selectedToolNames = selectedToolNames == null
                 ? List.of()
                 : List.copyOf(selectedToolNames);
+        visualTask = visualTask == null || visualTask.isBlank() ? null : visualTask;
+    }
+
+    public IntentDecisionMetadata(
+            String traceId,
+            String correlationId,
+            String decisionVersion,
+            String policyVersion,
+            BusinessIntent businessIntent,
+            QueryIntent queryIntent,
+            IntentRoute route,
+            IntentRiskLevel riskLevel,
+            double confidence,
+            Double confidenceMargin,
+            List<String> candidateCapabilities,
+            List<String> selectedToolNames,
+            boolean requiresClarification,
+            IntentDecisionSource decisionSource,
+            String reasonCode
+    ) {
+        this(traceId, correlationId, decisionVersion, policyVersion, businessIntent, queryIntent, route,
+                riskLevel, confidence, confidenceMargin, candidateCapabilities, selectedToolNames,
+                requiresClarification, decisionSource, reasonCode, null, null);
     }
 
     public static IntentDecisionMetadata from(
@@ -63,7 +88,9 @@ public record IntentDecisionMetadata(
                 selectedToolNames,
                 decision.requiresClarification(),
                 decision.decisionSource(),
-                decision.reasonCode()
+                decision.reasonCode(),
+                decision.requiresVisualEvidence(),
+                decision.visualTask()
         );
     }
 }

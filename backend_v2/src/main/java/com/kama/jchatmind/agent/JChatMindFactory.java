@@ -15,6 +15,8 @@ import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.intent.ChatClientIntentModelClient;
 import com.kama.jchatmind.intent.IntentFallbackRouter;
 import com.kama.jchatmind.intent.IntentDecisionTelemetry;
+import com.kama.jchatmind.rag.VisualAssetSummaryService;
+import com.kama.jchatmind.rag.VisualEvidenceHintHolder;
 import com.kama.jchatmind.intent.IntentPolicyEngine;
 import com.kama.jchatmind.intent.IntentRoutingProperties;
 import com.kama.jchatmind.intent.IntentRouter;
@@ -68,6 +70,7 @@ public class JChatMindFactory {
     private final HarnessInterceptorChain harnessInterceptorChain;
     private final IntentRoutingProperties intentRoutingProperties;
     private final IntentDecisionTelemetry intentDecisionTelemetry;
+    private final VisualAssetSummaryService visualAssetSummaryService;
 
     private AgentDTO agentConfig;
 
@@ -90,7 +93,8 @@ public class JChatMindFactory {
             HarnessInterceptorChain harnessInterceptorChain,
             IntentRoutingProperties intentRoutingProperties,
             IntentDecisionTelemetry intentDecisionTelemetry,
-            AgentToolExecutor toolExecutor
+            AgentToolExecutor toolExecutor,
+            VisualAssetSummaryService visualAssetSummaryService
     ) {
         this.chatClientRegistry = chatClientRegistry;
         this.sseService = sseService;
@@ -113,6 +117,7 @@ public class JChatMindFactory {
         this.intentDecisionTelemetry = intentDecisionTelemetry == null
                 ? IntentDecisionTelemetry.noop()
                 : intentDecisionTelemetry;
+        this.visualAssetSummaryService = visualAssetSummaryService;
     }
 
     JChatMindFactory(
@@ -150,7 +155,8 @@ public class JChatMindFactory {
                 harnessInterceptorChain,
                 new IntentRoutingProperties(),
                 IntentDecisionTelemetry.noop(),
-                toolExecutor
+                toolExecutor,
+                null
         );
     }
 
@@ -190,7 +196,8 @@ public class JChatMindFactory {
                 harnessInterceptorChain,
                 intentRoutingProperties,
                 IntentDecisionTelemetry.noop(),
-                toolExecutor
+                toolExecutor,
+                null
         );
     }
 
@@ -347,12 +354,13 @@ public class JChatMindFactory {
             List<Tool> runtimeTools,
             String userId,
             String chatSessionId,
-            List<KnowledgeBaseDTO> knowledgeBases
+            List<KnowledgeBaseDTO> knowledgeBases,
+            VisualEvidenceHintHolder visualEvidenceHintHolder
     ) {
         List<Tool> boundTools = new ArrayList<>();
         for (Tool tool : runtimeTools) {
             if (tool instanceof KnowledgeTools knowledgeTools) {
-                boundTools.add(knowledgeTools.fork(userId, chatSessionId, knowledgeBases));
+                boundTools.add(knowledgeTools.fork(userId, chatSessionId, knowledgeBases, visualEvidenceHintHolder, visualAssetSummaryService));
                 continue;
             }
             boundTools.add(tool);
@@ -481,11 +489,12 @@ public class JChatMindFactory {
         List<Message> memory = loadMemory(userId, chatSessionId, userMessageId);
         List<KnowledgeBaseDTO> knowledgeBases = resolveRuntimeKnowledgeBases(currentAgentConfig, userId);
         List<Tool> runtimeTools = resolveRuntimeTools(currentAgentConfig);
-        runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases);
+        VisualEvidenceHintHolder visualEvidenceHintHolder = new VisualEvidenceHintHolder();
+        runtimeTools = bindRuntimeToolContext(runtimeTools, userId, chatSessionId, knowledgeBases, visualEvidenceHintHolder);
         List<ToolCallback> toolCallbacks = buildToolCallbacks(runtimeTools);
         toolCallbacks.addAll(buildExternalToolCallbacks(toolCallbacks, currentAgentConfig.getAllowedTools()));
 
-        return buildAgentRuntime(
+        JChatMind jChatMind = buildAgentRuntime(
                 userId,
                 agent,
                 memory,
@@ -493,5 +502,8 @@ public class JChatMindFactory {
                 toolCallbacks,
                 chatSessionId
         );
+        jChatMind.setVisualEvidenceHintHolder(visualEvidenceHintHolder);
+        jChatMind.setVisualAssetSummaryService(visualAssetSummaryService);
+        return jChatMind;
     }
 }

@@ -178,6 +178,23 @@ public class RagServiceImpl implements RagService {
     }
 
     @Override
+    public List<RagRetrievalResult> retrieveImageAssets(
+            List<String> kbIds,
+            String query,
+            RagRetrievalContext context,
+            int limit
+    ) {
+        return retrieveAssetCandidates(
+                kbIds,
+                query,
+                context,
+                limit,
+                "asset_image",
+                chunkBgeM3Mapper::similaritySearchImageAssets
+        );
+    }
+
+    @Override
     public List<RagRetrievalResult> retrievePdfPageAssets(
             List<String> kbIds,
             String query,
