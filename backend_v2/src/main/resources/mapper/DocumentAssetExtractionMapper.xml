@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.DocumentAssetExtractionMapper">
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.DocumentAssetExtraction">
+        INSERT INTO document_asset_extraction
+        (extraction_id,
+         asset_id,
+         document_id,
+         caption,
+         ocr_text,
+         summary,
+         visual_kind,
+         model_name,
+         model_version,
+         prompt_version,
+         parser_version,
+         attempt_count,
+         confidence,
+         raw_result,
+         status,
+         created_at,
+         updated_at)
+        VALUES (CAST(#{extractionId} AS uuid),
+                CAST(#{assetId} AS uuid),
+                CAST(#{documentId} AS uuid),
+                #{caption},
+                #{ocrText},
+                #{summary},
+                #{visualKind},
+                #{modelName},
+                #{modelVersion},
+                #{promptVersion},
+                #{parserVersion},
+                #{attemptCount},
+                #{confidence},
+                COALESCE(CAST(#{rawResult} AS jsonb), NULL),
+                #{status},
+                #{createdAt},
+                #{updatedAt})
+    </insert>
+
+    <update id="markActive">
+        UPDATE document_asset_extraction
+        SET caption = #{caption},
+            ocr_text = #{ocrText},
+            summary = #{summary},
+            visual_kind = #{visualKind},
+            confidence = #{confidence},
+            raw_result = COALESCE(to_jsonb(#{rawResult}::text), NULL),
+            status = 'ACTIVE',
+            updated_at = #{updatedAt}
+        WHERE extraction_id = CAST(#{extractionId} AS uuid)
+    </update>
+
+    <update id="markFailed">
+        UPDATE document_asset_extraction
+        SET status = 'FAILED',
+            raw_result = COALESCE(to_jsonb(#{rawResult}::text), raw_result),
+            updated_at = #{updatedAt}
+        WHERE extraction_id = CAST(#{extractionId} AS uuid)
+    </update>
+
+    <update id="supersedeActiveByAssetId">
+        UPDATE document_asset_extraction
+        SET status = 'SUPERSEDED',
+            updated_at = #{updatedAt}
+        WHERE asset_id = CAST(#{assetId} AS uuid)
+          AND status = 'ACTIVE'
+    </update>
+
+    <select id="selectMaxAttemptCount" resultType="java.lang.Integer">
+        SELECT COALESCE(MAX(attempt_count), 0)
+        FROM document_asset_extraction
+        WHERE asset_id = CAST(#{assetId} AS uuid)
+    </select>
+
+    <select id="hasActiveVisualAsset" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1
+            FROM document_asset_extraction e
+            JOIN document_asset a ON a.asset_id = e.asset_id AND a.document_id = e.document_id
+            JOIN document d ON d.id = a.document_id
+            WHERE e.status = 'ACTIVE'
+              AND d.kb_id IN
+              <foreach collection="kbIds" item="kbId" open="(" separator="," close=")">
+                  CAST(#{kbId} AS uuid)
+              </foreach>
+        )
+    </select>
+
+    <select id="selectActiveVisualAssetSummaries"
+            resultType="com.kama.jchatmind.model.dto.VisualAssetSummaryItem">
+        SELECT e.visual_kind AS visualKind,
+               a.locator::text AS locator,
+               e.caption AS caption,
+               (SELECT string_agg(DISTINCT t.entity_type, ',')
+                FROM document_asset_entity t
+                WHERE t.extraction_id = e.extraction_id) AS entityTypes
+        FROM document_asset_extraction e
+        JOIN document_asset a ON a.asset_id = e.asset_id AND a.document_id = e.document_id
+        JOIN document d ON d.id = a.document_id
+        WHERE e.status = 'ACTIVE'
+          AND d.kb_id IN
+          <foreach collection="kbIds" item="kbId" open="(" separator="," close=")">
+              CAST(#{kbId} AS uuid)
+          </foreach>
+        ORDER BY e.updated_at DESC, e.extraction_id
+        LIMIT #{limit}
+    </select>
+    <update id="resetStalePending">
+        UPDATE document_asset_extraction
+        SET status = 'FAILED',
+            updated_at = #{now}
+        WHERE status = 'PENDING'
+          AND updated_at &lt; #{now} - (#{timeoutMinutes} * INTERVAL '1 minute')
+    </update>
+
+    <select id="selectImageAssetsWithoutActiveExtraction"
+            resultType="com.kama.jchatmind.model.dto.DocumentImageAssetCandidate">
+        SELECT a.asset_id       AS assetId,
+               a.document_id    AS documentId,
+               d.kb_id          AS kbId,
+               a.content_hash   AS contentHash,
+               a.page_number    AS pageNumber,
+               a.locator::text  AS locator,
+               d.filename       AS filename,
+               d.filetype       AS filetype
+        FROM document_asset a
+        JOIN document d ON d.id = a.document_id
+        WHERE a.asset_type = 'IMAGE'
+          AND a.status = 'READY'
+          AND a.locator ?? 'derivedImage'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM document_asset_extraction e
+              WHERE e.asset_id = a.asset_id
+                AND e.status IN ('PENDING', 'ACTIVE')
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM document_asset_extraction f
+              WHERE f.asset_id = a.asset_id
+                AND f.attempt_count &gt;= #{maxAttempts}
+          )
+        ORDER BY a.created_at, a.asset_id
+        LIMIT #{limit}
+    </select>
+</mapper>

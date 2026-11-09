@@ -80,6 +80,7 @@ public class DocumentImageExtractionWorker {
         if (!enabled) {
             return;
         }
+        documentAssetExtractionMapper.resetStalePending(10, LocalDateTime.now());
         List<DocumentImageAssetCandidate> candidates =
                 documentAssetExtractionMapper.selectImageAssetsWithoutActiveExtraction(maxAttempts, batchSize);
         for (DocumentImageAssetCandidate candidate : candidates) {
