@@ -11,14 +11,26 @@ import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
+import com.kama.jchatmind.ingestion.PdfImageExtractor;
 import com.kama.jchatmind.service.impl.MarkdownParserServiceImpl;
 import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -35,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -115,7 +128,7 @@ class DefaultIngestionTaskProcessorTest {
                 ragService,
                 chunkBgeM3Mapper,
                 projectionService
-        );
+            );
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
 
@@ -162,7 +175,7 @@ class DefaultIngestionTaskProcessorTest {
                 ragService,
                 chunkBgeM3Mapper,
                 projectionService
-        );
+            );
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
 
@@ -277,7 +290,8 @@ class DefaultIngestionTaskProcessorTest {
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
 
-        verifyNoInteractions(documentAssetMapper);
+        verify(documentAssetMapper).deleteByDocumentId("doc-1");
+        verify(documentAssetMapper, never()).insert(any(DocumentAsset.class));
     }
 
     @Test
@@ -479,6 +493,264 @@ class DefaultIngestionTaskProcessorTest {
     }
 
     @Test
+    void shouldPersistMarkdownImageAssetAndLinkItToGeneratedChunk() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path storedFile = temporaryDirectory.resolve("deployment.md");
+        Files.writeString(storedFile, "# 架构\n\n![架构图](./images/architecture.png)", StandardCharsets.UTF_8);
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("deployment.md")
+                .filetype("md")
+                .metadata("{\"filePath\":\"kb-1/doc-1/deployment.md\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/deployment.md")).thenReturn(storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a401");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                new MarkdownParserServiceImpl(),
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper).insert(assetCaptor.capture());
+        assertThat(assetCaptor.getValue())
+                .extracting(
+                        DocumentAsset::getDocumentId,
+                        DocumentAsset::getAssetType,
+                        DocumentAsset::getAssetKey,
+                        DocumentAsset::getPageNumber,
+                        DocumentAsset::getContentHash,
+                        DocumentAsset::getParserVersion,
+                        DocumentAsset::getStatus
+                )
+                .containsExactly("doc-1", "IMAGE", "image-1", null, sha256("./images/architecture.png"), "markdown-image-v1", "READY");
+        ObjectMapper objectMapper = new ObjectMapper();
+        com.fasterxml.jackson.databind.JsonNode locator = objectMapper.readTree(assetCaptor.getValue().getLocator());
+        assertThat(locator.path("source").asText()).isEqualTo("MARKDOWN");
+        assertThat(locator.path("sectionPath").asText()).isEqualTo("架构");
+        assertThat(locator.path("lineNumber").asInt()).isEqualTo(3);
+        assertThat(locator.path("originalRef").asText()).isEqualTo("./images/architecture.png");
+        verify(documentAssetMapper).insertChunkRelation(
+                assetCaptor.getValue().getAssetId(),
+                "00000000-0000-0000-0000-00000000a401",
+                "doc-1",
+                "doc-1"
+        );
+    }
+
+    @Test
+    void shouldPersistPdfImageAssetWithDerivedPngAndLinkItToPageChunk() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+                Files.createDirectories(temporaryDirectory.resolve("kb-1").resolve("doc-1"));
+        Path storedFile = temporaryDirectory.resolve("kb-1").resolve("doc-1").resolve("report.pdf");
+        Files.write(storedFile, pdfWithEmbeddedImage());
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("report.pdf")
+                .filetype("pdf")
+                .metadata("{\"filePath\":\"kb-1/doc-1/report.pdf\"}")
+                .build());
+        when(documentStorageService.getFilePath(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> temporaryDirectory.resolve((String) invocation.getArgument(0)));
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a501");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
+        Object processor = processorWithImageExtractor(
+                documentMapper,
+                documentStorageService,
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper, org.mockito.Mockito.times(2)).insert(assetCaptor.capture());
+        DocumentAsset pageAsset = assetCaptor.getAllValues().get(0);
+        DocumentAsset imageAsset = assetCaptor.getAllValues().get(1);
+        assertThat(pageAsset.getAssetType()).isEqualTo("PDF_PAGE_TEXT");
+        assertThat(imageAsset)
+                .extracting(
+                        DocumentAsset::getDocumentId,
+                        DocumentAsset::getAssetType,
+                        DocumentAsset::getAssetKey,
+                        DocumentAsset::getPageNumber,
+                        DocumentAsset::getParserVersion,
+                        DocumentAsset::getStatus
+                )
+                .containsExactly("doc-1", "IMAGE", "image-1", 1, "pdf-image-v1", "READY");
+        ObjectMapper objectMapper = new ObjectMapper();
+        com.fasterxml.jackson.databind.JsonNode locator = objectMapper.readTree(imageAsset.getLocator());
+        assertThat(locator.path("source").asText()).isEqualTo("PDF");
+        assertThat(locator.path("pageNumber").asInt()).isEqualTo(1);
+        assertThat(locator.path("bbox").size()).isEqualTo(4);
+        String derivedImage = locator.path("derivedImage").asText();
+        assertThat(derivedImage).startsWith("kb-1/doc-1/derived/image-");
+        assertThat(Files.exists(temporaryDirectory.resolve(derivedImage))).isTrue();
+        verify(documentAssetMapper, org.mockito.Mockito.times(2)).insertChunkRelation(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("00000000-0000-0000-0000-00000000a501"),
+                org.mockito.ArgumentMatchers.eq("doc-1"),
+                org.mockito.ArgumentMatchers.eq("doc-1")
+        );
+    }
+
+    @Test
+    void shouldResolveReferencedImageFileIntoDerivedPng() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path documentDirectory = Files.createDirectories(
+                temporaryDirectory.resolve("kb-1").resolve("doc-1").resolve("images"));
+        Path storedFile = documentDirectory.getParent().resolve("deployment.md");
+        Files.writeString(storedFile, "# 架构\n\n![架构图](./images/architecture.png)", StandardCharsets.UTF_8);
+        BufferedImage image = new BufferedImage(20, 10, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setColor(Color.BLUE);
+        graphics.fillRect(0, 0, 20, 10);
+        graphics.dispose();
+        Path referencedFile = documentDirectory.resolve("architecture.png");
+        javax.imageio.ImageIO.write(image, "png", referencedFile.toFile());
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("deployment.md")
+                .filetype("md")
+                .metadata("{\"filePath\":\"kb-1/doc-1/deployment.md\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/deployment.md")).thenReturn(storedFile);
+        when(documentStorageService.getFilePath(org.mockito.ArgumentMatchers.contains("derived")))
+                .thenAnswer(invocation -> temporaryDirectory.resolve((String) invocation.getArgument(0)));
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a601");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                new MarkdownParserServiceImpl(),
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper).insert(assetCaptor.capture());
+        ObjectMapper objectMapper = new ObjectMapper();
+        com.fasterxml.jackson.databind.JsonNode locator = objectMapper.readTree(assetCaptor.getValue().getLocator());
+        String derivedImage = locator.path("derivedImage").asText();
+        assertThat(derivedImage).startsWith("kb-1/doc-1/derived/image-");
+        assertThat(Files.exists(temporaryDirectory.resolve(derivedImage))).isTrue();
+        assertThat(assetCaptor.getValue().getContentHash())
+                .isEqualTo(sha256(Files.readAllBytes(temporaryDirectory.resolve(derivedImage))));
+    }
+
+    @Test
+    void shouldNotResolveImageRefsOutsideDocumentDirectory() throws Exception {
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
+        RagService ragService = mock(RagService.class);
+        ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
+        DocumentAssetMapper documentAssetMapper = mock(DocumentAssetMapper.class);
+        Path documentDirectory = Files.createDirectories(temporaryDirectory.resolve("kb-1").resolve("doc-1"));
+        Path storedFile = documentDirectory.resolve("deployment.md");
+        Files.writeString(storedFile, "# 架构\n\n![越权图](../secret.png)", StandardCharsets.UTF_8);
+        Files.writeString(documentDirectory.getParent().resolve("secret.png"), "not a real image");
+        when(documentMapper.selectById("doc-1")).thenReturn(Document.builder()
+                .id("doc-1")
+                .kbId("kb-1")
+                .filename("deployment.md")
+                .filetype("md")
+                .metadata("{\"filePath\":\"kb-1/doc-1/deployment.md\"}")
+                .build());
+        when(documentStorageService.getFilePath("kb-1/doc-1/deployment.md")).thenReturn(storedFile);
+        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of());
+        when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
+        when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenAnswer(invocation -> {
+            invocation.<ChunkBgeM3>getArgument(0).setId("00000000-0000-0000-0000-00000000a602");
+            return 1;
+        });
+        when(documentAssetMapper.insert(any(DocumentAsset.class))).thenReturn(1);
+        when(documentAssetMapper.insertChunkRelation(any(), any(), any(), any())).thenReturn(1);
+        Object processor = processor(
+                documentMapper,
+                documentStorageService,
+                new MarkdownParserServiceImpl(),
+                ragService,
+                chunkBgeM3Mapper,
+                documentAssetMapper
+        );
+
+        process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
+
+        ArgumentCaptor<DocumentAsset> assetCaptor = ArgumentCaptor.forClass(DocumentAsset.class);
+        verify(documentAssetMapper).insert(assetCaptor.capture());
+        ObjectMapper objectMapper = new ObjectMapper();
+        com.fasterxml.jackson.databind.JsonNode locator = objectMapper.readTree(assetCaptor.getValue().getLocator());
+        assertThat(locator.has("derivedImage")).isFalse();
+        assertThat(assetCaptor.getValue().getContentHash()).isEqualTo(sha256("../secret.png"));
+    }
+
+    private byte[] pdfWithEmbeddedImage() throws Exception {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            BufferedImage image = new BufferedImage(20, 10, BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics = image.createGraphics();
+            graphics.setColor(Color.RED);
+            graphics.fillRect(0, 0, 20, 10);
+            graphics.dispose();
+            PDImageXObject imageXObject = LosslessFactory.createFromImage(document, image);
+            try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+                contentStream.beginText();
+                contentStream.setFont(PDType1Font.HELVETICA, 12);
+                contentStream.newLineAtOffset(72, 720);
+                contentStream.showText("Page one");
+                contentStream.endText();
+                contentStream.drawImage(imageXObject, 50, 500, 200, 100);
+            }
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    @Test
     void shouldReusePdfPageAssetForMultipleChunksFromSamePage() throws Exception {
         DocumentMapper documentMapper = mock(DocumentMapper.class);
         DocumentStorageService documentStorageService = mock(DocumentStorageService.class);
@@ -646,7 +918,7 @@ class DefaultIngestionTaskProcessorTest {
             MarkdownParserService markdownParserService,
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper
-    ) {
+    ) throws IOException {
         return processor(
                 documentMapper,
                 documentStorageService,
@@ -664,7 +936,7 @@ class DefaultIngestionTaskProcessorTest {
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             VchordBm25ProjectionService projectionService
-    ) {
+    ) throws IOException {
         try {
             Class<?> processorType = Class.forName("com.kama.jchatmind.ingestion.DefaultIngestionTaskProcessor");
             return processorType.getConstructor(
@@ -675,7 +947,8 @@ class DefaultIngestionTaskProcessorTest {
                     RagService.class,
                     ChunkBgeM3Mapper.class,
                     DocumentAssetMapper.class,
-                    VchordBm25ProjectionService.class
+                    VchordBm25ProjectionService.class,
+                    PdfImageExtractor.class
             ).newInstance(
                     documentMapper,
                     documentStorageService,
@@ -684,7 +957,8 @@ class DefaultIngestionTaskProcessorTest {
                     ragService,
                     chunkBgeM3Mapper,
                     mock(DocumentAssetMapper.class),
-                    projectionService
+                    projectionService,
+                    stubbedImageExtractor()
             );
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("G2 VectorChord 投影尚未接入默认摄入处理器", e);
@@ -698,7 +972,7 @@ class DefaultIngestionTaskProcessorTest {
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             DocumentAssetMapper documentAssetMapper
-    ) {
+    ) throws IOException {
         VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
         when(projectionService.project(any(), any())).thenReturn(
                 new VchordBm25ProjectionService.Projection(null, null, null)
@@ -713,7 +987,8 @@ class DefaultIngestionTaskProcessorTest {
                     RagService.class,
                     ChunkBgeM3Mapper.class,
                     DocumentAssetMapper.class,
-                    VchordBm25ProjectionService.class
+                    VchordBm25ProjectionService.class,
+                    PdfImageExtractor.class
             ).newInstance(
                     documentMapper,
                     documentStorageService,
@@ -722,7 +997,53 @@ class DefaultIngestionTaskProcessorTest {
                     ragService,
                     chunkBgeM3Mapper,
                     documentAssetMapper,
-                    projectionService
+                    projectionService,
+                    stubbedImageExtractor()
+            );
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("G1 默认摄入处理器尚未实现", e);
+        }
+    }
+
+    private PdfImageExtractor stubbedImageExtractor() throws IOException {
+        PdfImageExtractor imageExtractor = mock(PdfImageExtractor.class);
+        when(imageExtractor.extract(any())).thenReturn(List.of());
+        return imageExtractor;
+    }
+
+    private Object processorWithImageExtractor(
+            DocumentMapper documentMapper,
+            DocumentStorageService documentStorageService,
+            RagService ragService,
+            ChunkBgeM3Mapper chunkBgeM3Mapper,
+            DocumentAssetMapper documentAssetMapper
+    ) throws IOException {
+        VchordBm25ProjectionService projectionService = mock(VchordBm25ProjectionService.class);
+        when(projectionService.project(any(), any())).thenReturn(
+                new VchordBm25ProjectionService.Projection(null, null, null)
+        );
+        try {
+            Class<?> processorType = Class.forName("com.kama.jchatmind.ingestion.DefaultIngestionTaskProcessor");
+            return processorType.getConstructor(
+                    DocumentMapper.class,
+                    DocumentStorageService.class,
+                    ObjectMapper.class,
+                    MarkdownParserService.class,
+                    RagService.class,
+                    ChunkBgeM3Mapper.class,
+                    DocumentAssetMapper.class,
+                    VchordBm25ProjectionService.class,
+                    PdfImageExtractor.class
+            ).newInstance(
+                    documentMapper,
+                    documentStorageService,
+                    new ObjectMapper(),
+                    new MarkdownParserServiceImpl(),
+                    ragService,
+                    chunkBgeM3Mapper,
+                    documentAssetMapper,
+                    projectionService,
+                    new PdfImageExtractor()
             );
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("G1 默认摄入处理器尚未实现", e);
@@ -757,6 +1078,19 @@ class DefaultIngestionTaskProcessorTest {
                 .metadata("{\"filePath\":\"kb-1/doc-1/guide.pdf\"}")
                 .build());
         when(documentStorageService.getFilePath("kb-1/doc-1/guide.pdf")).thenReturn(storedFile);
+    }
+
+    private String sha256(byte[] content) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content);
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                hex.append(String.format("%02x", value));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private String sha256(String content) {

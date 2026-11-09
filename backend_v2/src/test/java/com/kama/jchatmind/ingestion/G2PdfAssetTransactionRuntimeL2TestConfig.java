@@ -187,6 +187,15 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
             }
 
             @Override
+            public List<RagRetrievalResult> retrieveImageAssets(
+                    List<String> kbIds,
+                    String query,
+                    RagRetrievalContext context,
+                    int limit
+            ) {
+                return List.of();
+            }
+            @Override
             public List<RagRetrievalResult> retrieveMarkdownTableAssets(
                     List<String> kbIds,
                     String query,
@@ -226,7 +235,8 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             DocumentAssetMapper documentAssetMapper,
-            VchordBm25ProjectionService vchordBm25ProjectionService
+            VchordBm25ProjectionService vchordBm25ProjectionService,
+            PdfImageExtractor pdfImageExtractor
     ) {
         return new DefaultIngestionTaskProcessor(
                 documentMapper,
@@ -236,7 +246,8 @@ public class G2PdfAssetTransactionRuntimeL2TestConfig {
                 ragService,
                 chunkBgeM3Mapper,
                 documentAssetMapper,
-                vchordBm25ProjectionService
+                vchordBm25ProjectionService,
+                pdfImageExtractor
         );
     }
 

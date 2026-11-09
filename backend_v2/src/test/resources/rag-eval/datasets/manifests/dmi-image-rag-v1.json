@@ -1,0 +1,17 @@
+{
+  "datasetId": "dmi-image-rag-v1",
+  "schemaVersion": "1",
+  "status": "candidate",
+  "caseFile": "../cases/dmi-image-rag-v1.jsonl",
+  "caseSha256": "71b5759e95ff23f148ab82c5b2f59302d1e30523ffafa7fa41bff201dc6561e8",
+  "corpusFiles": [
+    "../../fixtures/dmi-image-rag-v1.md"
+  ],
+  "corpusSha256": "520fa19782bd21f2bebdac7a44f9b550137b9f9d5b2580a41ca184ccaaf2048c",
+  "sourceGenerator": "pdfbox-embedded-image-v1",
+  "chunkingVersion": "markdown-section-v1",
+  "embeddingModel": "bge-m3",
+  "embeddingInputVersion": "title-title-content-v1",
+  "defaultTopK": 5,
+  "notes": "图片证据 candidate fixture：PDF 内嵌图片运行时生成；无资产 case 验证 G3 hint 澄清路径；权限隔离 case 验证路由 ABSTAIN。Markdown 相对引用图片当前无派生字节，抽取链路暂不支持，见计划状态说明。"
+}

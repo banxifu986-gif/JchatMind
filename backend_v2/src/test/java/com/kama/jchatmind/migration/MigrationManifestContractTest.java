@@ -42,7 +42,8 @@ class MigrationManifestContractTest {
             "sql/chat/2026-10-21-create-agent-execution-queue.sql",
             "sql/skill/2026-10-22-create-builtin-skill-task.sql",
             "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql",
-            "sql/user-memory/2026-10-22-add-memory-governance.sql"
+            "sql/user-memory/2026-10-22-add-memory-governance.sql",
+            "sql/ingestion/2026-11-05-create-document-asset-extraction.sql"
     );
 
     @Test
@@ -200,7 +201,13 @@ class MigrationManifestContractTest {
             root = new ObjectMapper().readTree(input);
         }
 
-        JsonNode migration = root.path("migrations").get(root.path("migrations").size() - 1);
+        JsonNode migration = null;
+        for (JsonNode entry : root.path("migrations")) {
+            if (entry.path("order").asInt() == 230) {
+                migration = entry;
+                break;
+            }
+        }
         String path = "sql/user-memory/2026-10-22-add-memory-governance.sql";
         assertThat(migration.path("id").asText()).isEqualTo("user-memory.add-governance-state");
         assertThat(migration.path("order").asInt()).isEqualTo(230);
@@ -208,6 +215,42 @@ class MigrationManifestContractTest {
         assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
         assertThat(root.path("catalogContractSha256").asText())
                 .isEqualTo(sha256(Path.of("..", root.path("catalogContract").asText())));
+    }
+
+    @Test
+    void shouldRegisterDocumentImageExtractionMigrationAfterDocumentAsset() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = root.path("migrations").get(root.path("migrations").size() - 1);
+        String path = "sql/ingestion/2026-11-05-create-document-asset-extraction.sql";
+        assertThat(migration.path("id").asText()).isEqualTo("ingestion.create-document-asset-extraction");
+        assertThat(migration.path("order").asInt()).isEqualTo(240);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("transactional").asBoolean()).isTrue();
+        assertThat(migration.path("requires").toString()).contains("ingestion.create-document-asset");
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+        assertThat(root.path("catalogContractSha256").asText())
+                .isEqualTo(sha256(Path.of("..", root.path("catalogContract").asText())));
+
+        String sql = Files.readString(Path.of("..", path));
+        assertThat(sql)
+                .contains("CREATE TABLE document_asset_extraction")
+                .contains("CREATE TABLE document_asset_entity")
+                .contains("CREATE TABLE document_asset_relation")
+                .contains("REFERENCES document_asset(asset_id, document_id) ON DELETE CASCADE")
+                .contains("REFERENCES document_asset_extraction(extraction_id) ON DELETE CASCADE")
+                .contains("REFERENCES document_asset_entity(entity_id) ON DELETE CASCADE")
+                .contains("WHERE status = 'ACTIVE'")
+                .contains("UNIQUE (extraction_id, entity_key)")
+                .contains("UNIQUE (extraction_id, subject_entity_id, predicate, object_entity_id)")
+                .contains("'PENDING'")
+                .contains("'ACTIVE'")
+                .contains("'FAILED'")
+                .contains("'SUPERSEDED'")
+                .contains("attempt_count >= 0");
     }
 
     private String sha256(Path path) throws Exception {

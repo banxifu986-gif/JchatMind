@@ -340,6 +340,15 @@ class G2KnowledgeToolsPermissionRuntimeL2Test {
         }
 
         @Override
+        public List<RagRetrievalResult> retrieveImageAssets(
+                List<String> kbIds,
+                String query,
+                RagRetrievalContext context,
+                int limit
+        ) {
+            return List.of();
+        }
+        @Override
         public List<RagRetrievalResult> retrieveMarkdownTableAssets(
                 List<String> kbIds,
                 String query,

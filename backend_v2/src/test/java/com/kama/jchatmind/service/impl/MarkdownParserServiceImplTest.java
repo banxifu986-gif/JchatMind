@@ -50,6 +50,39 @@ class MarkdownParserServiceImplTest {
         assertTrue(sections.stream().allMatch(section -> section.getContent().length() <= 2000));
     }
 
+    @Test
+    void shouldExtractRelativeMarkdownImagesWithSectionPathAndLine() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String markdown = "# 部署架构\n\n正文\n\n![架构图](./images/architecture.png)\n\n# 其他\n\n![外链](https://example.com/a.png)";
+
+        List<MarkdownParserService.MarkdownImage> images = service.parseMarkdownImages(
+                new ByteArrayInputStream(markdown.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(1, images.size());
+        assertEquals("./images/architecture.png", images.get(0).originalRef());
+        assertEquals("架构图", images.get(0).altText());
+        assertEquals("部署架构", images.get(0).sectionPath());
+        assertEquals(5, images.get(0).lineNumber());
+    }
+
+    @Test
+    void shouldExtractHtmlImagesWithSectionPath() {
+        MarkdownParserServiceImpl service = new MarkdownParserServiceImpl();
+        String html = "<h1>系统架构</h1><p>说明</p>"
+                + "<img src=\"./img/architecture.png\" alt=\"架构图\">"
+                + "<img src=\"https://example.com/a.png\">";
+
+        List<MarkdownParserService.MarkdownImage> images = service.parseHtmlImages(
+                new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(1, images.size());
+        assertEquals("./img/architecture.png", images.get(0).originalRef());
+        assertEquals("架构图", images.get(0).altText());
+        assertEquals("系统架构", images.get(0).sectionPath());
+    }
+
     private byte[] twoPagePdf() throws Exception {
         return pdfWithPages(List.of("Page one", "Page two"));
     }

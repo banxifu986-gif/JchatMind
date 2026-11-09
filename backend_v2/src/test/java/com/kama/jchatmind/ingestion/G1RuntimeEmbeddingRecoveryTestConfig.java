@@ -147,7 +147,8 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             DocumentAssetMapper documentAssetMapper,
-            VchordBm25ProjectionService vchordBm25ProjectionService
+            VchordBm25ProjectionService vchordBm25ProjectionService,
+            PdfImageExtractor pdfImageExtractor
     ) {
         return new DefaultIngestionTaskProcessor(
                 documentMapper,
@@ -157,7 +158,8 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
                 ragService,
                 chunkBgeM3Mapper,
                 documentAssetMapper,
-                vchordBm25ProjectionService
+                vchordBm25ProjectionService,
+                pdfImageExtractor
         );
     }
 
@@ -254,6 +256,15 @@ public class G1RuntimeEmbeddingRecoveryTestConfig {
             return recovered.retrievePdfPageAssets(kbIds, query, context, limit);
         }
 
+        @Override
+        public List<RagRetrievalResult> retrieveImageAssets(
+                List<String> kbIds,
+                String query,
+                RagRetrievalContext context,
+                int limit
+        ) {
+            return List.of();
+        }
         @Override
         public List<RagRetrievalResult> retrieveMarkdownTableAssets(
                 List<String> kbIds,

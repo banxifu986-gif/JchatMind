@@ -110,7 +110,8 @@ public class G1RuntimeIngestionSuccessTestConfig {
             RagService ragService,
             ChunkBgeM3Mapper chunkBgeM3Mapper,
             DocumentAssetMapper documentAssetMapper,
-            VchordBm25ProjectionService vchordBm25ProjectionService
+            VchordBm25ProjectionService vchordBm25ProjectionService,
+            PdfImageExtractor pdfImageExtractor
     ) {
         return new DefaultIngestionTaskProcessor(
                 documentMapper,
@@ -120,7 +121,8 @@ public class G1RuntimeIngestionSuccessTestConfig {
                 ragService,
                 chunkBgeM3Mapper,
                 documentAssetMapper,
-                vchordBm25ProjectionService
+                vchordBm25ProjectionService,
+                pdfImageExtractor
         );
     }
 

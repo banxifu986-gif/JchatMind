@@ -543,6 +543,18 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
+        public List<RagRetrievalResult> similaritySearchImageAssets(
+                List<String> kbIds,
+                String vectorLiteral,
+                String sourceName,
+                String sourceType,
+                String contentPathPrefix,
+                int limit
+        ) {
+            return List.of();
+        }
+
+        @Override
         public List<RagRetrievalResult> similaritySearchMarkdownTableAssets(
                 List<String> kbIds,
                 String vectorLiteral,
