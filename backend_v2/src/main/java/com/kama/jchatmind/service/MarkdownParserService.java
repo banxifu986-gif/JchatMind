@@ -23,6 +23,14 @@ public interface MarkdownParserService {
         return List.of();
     }
 
+    default List<MarkdownImage> parseMarkdownImages(InputStream inputStream) {
+        return List.of();
+    }
+
+    default List<MarkdownImage> parseHtmlImages(InputStream inputStream) {
+        return List.of();
+    }
+
     default List<MarkdownSection> parseHtml(InputStream inputStream) {
         return parseMarkdown(inputStream);
     }
@@ -69,6 +77,17 @@ public interface MarkdownParserService {
         PARENT_OVERVIEW,
         LEAF_CONTENT,
         LEAF_QA
+    }
+
+    /**
+     * 文档内图片引用：仅保留文档自身可访问的相对引用，不下载外链。
+     */
+    record MarkdownImage(
+            String originalRef,
+            String altText,
+            String sectionPath,
+            int lineNumber
+    ) {
     }
 
     record MarkdownTable(

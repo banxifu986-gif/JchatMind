@@ -16,6 +16,7 @@ import com.kama.jchatmind.service.MarkdownParserService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.service.impl.VchordBm25ProjectionService;
 import com.kama.jchatmind.util.RagChunkSupport;
+import com.kama.jchatmind.ingestion.PdfImageExtractor.PdfEmbeddedImage;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,8 +27,10 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import javax.imageio.ImageIO;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -36,6 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.util.UUID;
 
 @Component
@@ -50,6 +55,7 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
     private final DocumentAssetMapper documentAssetMapper;
     private final VchordBm25ProjectionService vchordBm25ProjectionService;
+    private final PdfImageExtractor pdfImageExtractor;
 
     @Override
     @Transactional
@@ -67,11 +73,13 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         List<MarkdownParserService.MarkdownSection> sections = parseSections(document, storedFile);
         boolean pdfDocument = "pdf".equalsIgnoreCase(document.getFiletype());
         boolean markdownDocument = isMarkdownDocument(document);
+        boolean htmlDocument = "html".equalsIgnoreCase(document.getFiletype());
         LocalDateTime now = LocalDateTime.now();
         List<MarkdownTableAsset> markdownTableAssets = markdownDocument
                 ? createMarkdownTableAssets(document, storedFile, now)
                 : List.of();
-        if (pdfDocument || markdownDocument) {
+        List<ImageAsset> imageAssets = createImageAssets(document, storedFile, now, pdfDocument, markdownDocument, htmlDocument);
+        if (pdfDocument || markdownDocument || htmlDocument) {
             documentAssetMapper.deleteByDocumentId(document.getId());
         }
         for (ChunkBgeM3 existingChunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
@@ -80,6 +88,9 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         Map<Integer, DocumentAsset> pdfPageAssets = new LinkedHashMap<>();
         Map<Integer, String> pdfPageContents = pdfDocument ? collectPdfPageContents(sections) : Map.of();
         Set<Integer> persistedPdfPageNumbers = new HashSet<>();
+        Map<Integer, ChunkBgeM3> chunkByPage = new LinkedHashMap<>();
+        Map<String, ChunkBgeM3> chunkBySectionPath = new LinkedHashMap<>();
+        ChunkBgeM3 firstChunk = null;
 
         for (int index = 0; index < sections.size(); index++) {
             MarkdownParserService.MarkdownSection section = sections.get(index);
@@ -124,6 +135,13 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
             if (chunkBgeM3Mapper.insert(chunk) <= 0) {
                 throw new BizException("文档分块写入失败");
             }
+            if (firstChunk == null) {
+                firstChunk = chunk;
+            }
+            if (pdfDocument) {
+                chunkByPage.putIfAbsent(section.getPageNumber(), chunk);
+            }
+            chunkBySectionPath.putIfAbsent(section.getContentPath(), chunk);
             if (pdfPageAsset != null) {
                 if (persistedPdfPageNumbers.add(pdfPageAsset.getPageNumber())) {
                     persistDocumentAsset(document, pdfPageAsset, chunk);
@@ -133,6 +151,22 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
             }
             for (MarkdownTableAsset tableAsset : sectionTableAssets) {
                 persistDocumentAsset(document, tableAsset.asset(), chunk);
+            }
+        }
+
+        for (ImageAsset imageAsset : imageAssets) {
+            ChunkBgeM3 relatedChunk = imageAsset.asset().getPageNumber() != null
+                    ? chunkByPage.get(imageAsset.asset().getPageNumber())
+                    : imageAsset.sectionPath() == null
+                            ? null
+                            : chunkBySectionPath.get(imageAsset.sectionPath());
+            if (relatedChunk == null) {
+                relatedChunk = firstChunk;
+            }
+            if (relatedChunk != null) {
+                persistDocumentAsset(document, imageAsset.asset(), relatedChunk);
+            } else if (documentAssetMapper.insert(imageAsset.asset()) <= 0) {
+                throw new BizException("文档资产写入失败");
             }
         }
     }
@@ -376,6 +410,201 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         } catch (JsonProcessingException e) {
             throw new BizException("分块元数据序列化失败");
         }
+    }
+
+    private List<ImageAsset> createImageAssets(
+            Document document,
+            Path storedFile,
+            LocalDateTime now,
+            boolean pdfDocument,
+            boolean markdownDocument,
+            boolean htmlDocument
+    ) {
+        if (pdfDocument) {
+            return createPdfImageAssets(document, storedFile, now);
+        }
+        if (markdownDocument || htmlDocument) {
+            return createReferencedImageAssets(document, storedFile, now, markdownDocument);
+        }
+        return List.of();
+    }
+
+    private List<ImageAsset> createPdfImageAssets(
+            Document document,
+            Path storedFile,
+            LocalDateTime now
+    ) {
+        List<PdfEmbeddedImage> images;
+        try (InputStream inputStream = Files.newInputStream(storedFile)) {
+            images = pdfImageExtractor.extract(inputStream);
+        } catch (IOException e) {
+            throw new BizException("读取文档文件失败");
+        }
+        List<ImageAsset> assets = new ArrayList<>();
+        for (int index = 0; index < images.size(); index++) {
+            PdfEmbeddedImage image = images.get(index);
+            String contentHash = sha256(image.pngBytes());
+            String derivedRef = Paths.get(
+                    document.getKbId(),
+                    document.getId(),
+                    "derived",
+                    "image-" + contentHash + ".png"
+            ).toString().replace("\\", "/");
+            writeDerivedImage(derivedRef, image.pngBytes());
+            Map<String, Object> locator = new LinkedHashMap<>();
+            locator.put("source", "PDF");
+            locator.put("pageNumber", image.pageNumber());
+            locator.put("bbox", image.bbox());
+            locator.put("derivedImage", derivedRef);
+            assets.add(new ImageAsset(
+                    DocumentAsset.builder()
+                            .assetId(UUID.randomUUID().toString())
+                            .documentId(document.getId())
+                            .assetType("IMAGE")
+                            .assetKey("image-" + (index + 1))
+                            .pageNumber(image.pageNumber())
+                            .locator(buildImageLocator(locator))
+                            .contentHash(contentHash)
+                            .parserVersion("pdf-image-v1")
+                            .status("READY")
+                            .createdAt(now)
+                            .updatedAt(now)
+                            .build(),
+                    null
+            ));
+        }
+        return List.copyOf(assets);
+    }
+
+    private List<ImageAsset> createReferencedImageAssets(
+            Document document,
+            Path storedFile,
+            LocalDateTime now,
+            boolean markdownDocument
+    ) {
+        List<MarkdownParserService.MarkdownImage> images;
+        try (InputStream inputStream = Files.newInputStream(storedFile)) {
+            images = markdownDocument
+                    ? markdownParserService.parseMarkdownImages(inputStream)
+                    : markdownParserService.parseHtmlImages(inputStream);
+        } catch (IOException e) {
+            throw new BizException("读取文档文件失败");
+        }
+        List<ImageAsset> assets = new ArrayList<>();
+        for (int index = 0; index < images.size(); index++) {
+            MarkdownParserService.MarkdownImage image = images.get(index);
+            byte[] pngBytes = resolveReferencedImage(storedFile, image.originalRef());
+            Map<String, Object> locator = new LinkedHashMap<>();
+            locator.put("source", markdownDocument ? "MARKDOWN" : "HTML");
+            if (image.sectionPath() != null) {
+                locator.put("sectionPath", image.sectionPath());
+            }
+            locator.put("lineNumber", image.lineNumber());
+            locator.put("originalRef", image.originalRef());
+            String contentHash;
+            if (pngBytes != null) {
+                contentHash = sha256(pngBytes);
+                String derivedRef = Paths.get(
+                        document.getKbId(),
+                        document.getId(),
+                        "derived",
+                        "image-" + contentHash + ".png"
+                ).toString().replace("\\", "/");
+                writeDerivedImage(derivedRef, pngBytes);
+                locator.put("derivedImage", derivedRef);
+            } else {
+                contentHash = sha256(image.originalRef());
+            }
+            assets.add(new ImageAsset(
+                    DocumentAsset.builder()
+                            .assetId(UUID.randomUUID().toString())
+                            .documentId(document.getId())
+                            .assetType("IMAGE")
+                            .assetKey("image-" + (index + 1))
+                            .locator(buildImageLocator(locator))
+                            .contentHash(contentHash)
+                            .parserVersion(markdownDocument ? "markdown-image-v1" : "html-image-v1")
+                            .status("READY")
+                            .createdAt(now)
+                            .updatedAt(now)
+                            .build(),
+                    image.sectionPath()
+            ));
+        }
+        return List.copyOf(assets);
+    }
+
+    private byte[] resolveReferencedImage(Path storedFile, String originalRef) {
+        if (!StringUtils.hasText(originalRef)) {
+            return null;
+        }
+        Path documentDirectory = storedFile.getParent();
+        if (documentDirectory == null) {
+            return null;
+        }
+        Path reference = Paths.get(originalRef);
+        if (reference.isAbsolute()) {
+            return null;
+        }
+        Path resolved = documentDirectory.resolve(reference).normalize();
+        if (!resolved.startsWith(documentDirectory) || !Files.isRegularFile(resolved)) {
+            return null;
+        }
+        BufferedImage image;
+        try {
+            image = ImageIO.read(resolved.toFile());
+        } catch (IOException e) {
+            throw new BizException("读取引用图片文件失败");
+        }
+        if (image == null) {
+            return null;
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try {
+            if (!ImageIO.write(image, "png", output)) {
+                return null;
+            }
+        } catch (IOException e) {
+            throw new BizException("引用图片文件编码失败");
+        }
+        return output.toByteArray();
+    }
+
+    private void writeDerivedImage(String derivedRef, byte[] pngBytes) {
+        Path derivedPath = documentStorageService.getFilePath(derivedRef);
+        try {
+            Files.createDirectories(derivedPath.getParent());
+            Files.write(derivedPath, pngBytes);
+        } catch (IOException e) {
+            throw new BizException("图片派生文件写入失败");
+        }
+    }
+
+    private String buildImageLocator(Map<String, Object> locator) {
+        try {
+            return objectMapper.writeValueAsString(locator);
+        } catch (JsonProcessingException e) {
+            throw new BizException("文档资产定位信息序列化失败");
+        }
+    }
+
+    private String sha256(byte[] content) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content);
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                hex.append(String.format("%02x", value));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
+        }
+    }
+
+    private record ImageAsset(
+            DocumentAsset asset,
+            String sectionPath
+    ) {
     }
 
     private record MarkdownTableAsset(

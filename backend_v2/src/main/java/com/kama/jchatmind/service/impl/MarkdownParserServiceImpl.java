@@ -4,6 +4,7 @@ import com.kama.jchatmind.service.MarkdownParserService;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import com.vladsch.flexmark.ast.Heading;
+import com.vladsch.flexmark.ast.Image;
 import com.vladsch.flexmark.ext.tables.TableBlock;
 import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.parser.Parser;
@@ -13,6 +14,7 @@ import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 import com.vladsch.flexmark.util.sequence.BasedSequence;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
@@ -34,6 +36,7 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
     private static final Pattern HTML_HEADING_PATTERN = Pattern.compile(
             "(?is)<h([1-6])\\b[^>]*>(.*?)</h\\1\\s*>"
     );
+    private static final Pattern HTML_IMAGE_PATTERN = Pattern.compile("(?is)<img\\b[^>]*>");
 
     private final Parser parser;
     private final int maxSectionContentLength;
@@ -203,6 +206,53 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
                 throw illegalArgumentException;
             }
             throw new IllegalArgumentException("解析 PDF 失败", e);
+        }
+    }
+
+    @Override
+    public List<MarkdownImage> parseMarkdownImages(InputStream inputStream) {
+        try {
+            String markdown = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            Document document = parser.parse(markdown);
+            List<HeadingAnchor> headings = new ArrayList<>();
+            collectHeadingAnchors(document, headings);
+            List<MarkdownImage> images = new ArrayList<>();
+            collectMarkdownImages(document, markdown, headings, images);
+            return images;
+        } catch (IOException e) {
+            throw new RuntimeException("读取 Markdown 图片失败", e);
+        }
+    }
+
+    @Override
+    public List<MarkdownImage> parseHtmlImages(InputStream inputStream) {
+        try {
+            String html = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            List<HeadingAnchor> headings = new ArrayList<>();
+            Matcher matcher = HTML_HEADING_PATTERN.matcher(html);
+            while (matcher.find()) {
+                headings.add(new HeadingAnchor(
+                        Integer.parseInt(matcher.group(1)),
+                        stripHtml(matcher.group(2)).replace("\n", " ").trim(),
+                        matcher.start()
+                ));
+            }
+            List<MarkdownImage> images = new ArrayList<>();
+            Matcher imageMatcher = HTML_IMAGE_PATTERN.matcher(html);
+            while (imageMatcher.find()) {
+                String ref = htmlAttribute(imageMatcher.group(), "src");
+                if (isRelativeImageRef(ref)) {
+                    images.add(new MarkdownImage(
+                            ref,
+                            htmlAttribute(imageMatcher.group(), "alt"),
+                            sectionPathForOffset(headings, imageMatcher.start()),
+                            lineNumberAt(html, imageMatcher.start())
+                    ));
+                }
+            }
+            return images;
+        } catch (IOException e) {
+            throw new RuntimeException("读取 HTML 图片失败", e);
         }
     }
 
@@ -512,6 +562,89 @@ public class MarkdownParserServiceImpl implements MarkdownParserService {
             log.warn("提取表格 Markdown 失败，退回纯文本提取: {}", e.getMessage());
             return extractPlainText(tableNode);
         }
+    }
+
+    private void collectHeadingAnchors(Node node, List<HeadingAnchor> headings) {
+        if (node instanceof Heading heading) {
+            headings.add(new HeadingAnchor(
+                    heading.getLevel(),
+                    extractHeadingText(heading),
+                    heading.getChars().getStartOffset()
+            ));
+        }
+        Node child = node.getFirstChild();
+        while (child != null) {
+            collectHeadingAnchors(child, headings);
+            child = child.getNext();
+        }
+    }
+
+    private void collectMarkdownImages(
+            Node node,
+            String markdown,
+            List<HeadingAnchor> headings,
+            List<MarkdownImage> images
+    ) {
+        if (node instanceof Image image) {
+            String ref = image.getUrl().unescape().toString();
+            if (isRelativeImageRef(ref)) {
+                images.add(new MarkdownImage(
+                        ref,
+                        image.getText().unescape().toString(),
+                        sectionPathForOffset(headings, image.getChars().getStartOffset()),
+                        lineNumberAt(markdown, image.getChars().getStartOffset())
+                ));
+            }
+        }
+        Node child = node.getFirstChild();
+        while (child != null) {
+            collectMarkdownImages(child, markdown, headings, images);
+            child = child.getNext();
+        }
+    }
+
+    private String sectionPathForOffset(List<HeadingAnchor> headings, int offset) {
+        List<String> titles = new ArrayList<>();
+        List<Integer> levels = new ArrayList<>();
+        String sectionPath = null;
+        for (HeadingAnchor heading : headings) {
+            if (heading.offset() >= offset) {
+                break;
+            }
+            while (!levels.isEmpty() && levels.get(levels.size() - 1) >= heading.level()) {
+                levels.remove(levels.size() - 1);
+                titles.remove(titles.size() - 1);
+            }
+            titles.add(heading.title());
+            levels.add(heading.level());
+            sectionPath = String.join(" > ", titles);
+        }
+        return sectionPath;
+    }
+
+    private boolean isRelativeImageRef(String ref) {
+        return StringUtils.hasText(ref)
+                && !ref.startsWith("http://")
+                && !ref.startsWith("https://")
+                && !ref.startsWith("data:")
+                && !ref.startsWith("//");
+    }
+
+    private String htmlAttribute(String tag, String name) {
+        Matcher matcher = Pattern.compile("(?i)\\s" + name + "\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))")
+                .matcher(tag);
+        if (!matcher.find()) {
+            return null;
+        }
+        for (int group = 2; group <= 4; group++) {
+            if (matcher.group(group) != null) {
+                return matcher.group(group);
+            }
+        }
+        return null;
+    }
+
+    private record HeadingAnchor(int level, String title, int offset) {
     }
 
     private void collectMarkdownTables(Node node, String markdown, List<MarkdownTable> tables) {

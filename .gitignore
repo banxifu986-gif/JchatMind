@@ -5,3 +5,5 @@
 .understand-anything/
 .env
 /datasets/
+/.vscode/
+/backend_v2/rag-eval/

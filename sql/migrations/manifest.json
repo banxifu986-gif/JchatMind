@@ -2,7 +2,7 @@
   "manifestVersion": "1",
   "schemaVersion": "2026-10-22-g9",
   "catalogContract": "sql/migrations/catalog-contract.json",
-  "catalogContractSha256": "c942e6cd95e9b2e6f2770c82e522e89e0135fcd8c333217a8156b066404d9671",
+  "catalogContractSha256": "94bfb857574ff316430d89a29a438cbcf6869760a80a8cd7e942cd68ae37a6d9",
   "baseline": {
     "required": true,
     "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",
@@ -255,6 +255,16 @@
       "requires": [
         "user-memory.add-candidate-status",
         "chat.create-agent-execution-queue"
+      ]
+    },
+    {
+      "order": 240,
+      "id": "ingestion.create-document-asset-extraction",
+      "path": "sql/ingestion/2026-11-05-create-document-asset-extraction.sql",
+      "sha256": "a3b5ca433ef87998ffe1a462bb4c8b25a9b4ce5bad3c08795c30fbfb9c1fade8",
+      "transactional": true,
+      "requires": [
+        "ingestion.create-document-asset"
       ]
     }
   ]

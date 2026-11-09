@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kama.jchatmind.mapper.DocumentAssetEntityMapper">
+
+    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.DocumentAssetEntity">
+        INSERT INTO document_asset_entity
+        (entity_id,
+         extraction_id,
+         document_id,
+         asset_id,
+         entity_key,
+         name,
+         entity_type,
+         aliases,
+         attributes,
+         bbox,
+         confidence)
+        VALUES (CAST(#{entityId} AS uuid),
+                CAST(#{extractionId} AS uuid),
+                CAST(#{documentId} AS uuid),
+                CAST(#{assetId} AS uuid),
+                #{entityKey},
+                #{name},
+                #{entityType},
+                COALESCE(CAST(#{aliases} AS jsonb), NULL),
+                COALESCE(CAST(#{attributes} AS jsonb), NULL),
+                #{bbox,typeHandler=com.kama.jchatmind.typehandler.PgDoubleArrayTypeHandler},
+                #{confidence})
+    </insert>
+</mapper>
