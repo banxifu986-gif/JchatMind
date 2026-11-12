@@ -79,14 +79,14 @@ class BuiltinSkillTaskControllerHttpTest {
 
         mockMvc.perform(get("/api/skill-tasks/task-1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(500))
+                .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("用户未登录"));
         mockMvc.perform(post("/api/agents/agent-1/skills/technical-decision-comparison/tasks")
                         .contentType("application/json")
                         .header("Idempotency-Key", "request-key-1")
                         .content("{\"sessionId\":\"session-1\",\"input\":{\"question\":\"compare\"}}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(500))
+                .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("用户未登录"));
 
         verifyNoInteractions(taskService);

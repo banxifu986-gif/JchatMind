@@ -107,7 +107,7 @@ class BuiltinSkillHttpExecutionIntegrationTest {
                                     "input", Map.of("question", "比较方案", "kbIds", List.of("kb-outside"))
                             ))))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(500));
+                    .andExpect(jsonPath("$.code").value(400));
 
             assertThat(toolProbe.userId.get()).isNull();
             assertThat(toolProbe.sessionId.get()).isNull();

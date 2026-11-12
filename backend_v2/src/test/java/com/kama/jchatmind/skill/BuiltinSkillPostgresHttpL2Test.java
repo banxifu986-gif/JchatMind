@@ -103,7 +103,7 @@ class BuiltinSkillPostgresHttpL2Test {
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content(requestBody(ownerSessionId, List.of(foreignKb))))
                             .andExpect(status().isOk())
-                            .andExpect(jsonPath("$.code").value(500));
+                            .andExpect(jsonPath("$.code").value(400));
 
                     assertThat(probe.knowledgeBaseIds.get()).containsExactly(kb2);
 
@@ -112,7 +112,7 @@ class BuiltinSkillPostgresHttpL2Test {
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content(requestBody(corruptSessionId, List.of())))
                             .andExpect(status().isOk())
-                            .andExpect(jsonPath("$.code").value(500))
+                            .andExpect(jsonPath("$.code").value(400))
                             .andExpect(jsonPath("$.message").value("无权访问知识库"));
 
                     assertThat(probe.knowledgeBaseIds.get()).containsExactly(kb2);

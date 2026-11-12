@@ -18,6 +18,7 @@ import com.kama.jchatmind.model.response.GetChatSessionsResponse;
 import com.kama.jchatmind.model.vo.ChatSessionVO;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @AllArgsConstructor
 public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
@@ -92,7 +94,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
                     .chatSessionId(chatSession.getId())
                     .build();
         } catch (JsonProcessingException e) {
-            throw new BizException("创建聊天会话时序列化失败: " + e.getMessage());
+            log.error("创建聊天会话序列化失败", e);
+            throw new BizException("创建聊天会话时序列化失败");
         }
     }
 
@@ -130,7 +133,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
                 throw new BizException("更新聊天会话失败");
             }
         } catch (JsonProcessingException e) {
-            throw new BizException("更新聊天会话时序列化失败: " + e.getMessage());
+            log.error("更新聊天会话序列化失败", e);
+            throw new BizException("更新聊天会话时序列化失败");
         }
     }
 
@@ -149,7 +153,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
             }
             return chatSessionDTO.getMetadata().getRetrievalContext();
         } catch (JsonProcessingException e) {
-            throw new BizException("读取会话检索上下文失败: " + e.getMessage());
+            log.error("读取会话检索上下文失败", e);
+            throw new BizException("读取会话检索上下文失败");
         }
     }
 
@@ -182,7 +187,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
                 throw new BizException("更新会话检索上下文失败");
             }
         } catch (JsonProcessingException e) {
-            throw new BizException("更新会话检索上下文失败: " + e.getMessage());
+            log.error("更新会话检索上下文失败", e);
+            throw new BizException("更新会话检索上下文失败");
         }
     }
 
@@ -210,7 +216,8 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
         try {
             return chatSessionConverter.toVO(chatSession);
         } catch (JsonProcessingException e) {
-            throw new BizException("聊天会话反序列化失败: " + e.getMessage());
+            log.error("聊天会话反序列化失败", e);
+            throw new BizException("聊天会话反序列化失败");
         }
     }
 

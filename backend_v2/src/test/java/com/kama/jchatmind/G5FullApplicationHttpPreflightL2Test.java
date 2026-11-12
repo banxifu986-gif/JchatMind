@@ -521,7 +521,7 @@ class G5FullApplicationHttpPreflightL2Test {
                 );
                 assertThat(forbiddenHistory.statusCode()).isEqualTo(200);
                 JsonNode forbiddenBody = context.getBean(ObjectMapper.class).readTree(forbiddenHistory.body());
-                assertThat(forbiddenBody.path("code").asInt()).isEqualTo(500);
+                assertThat(forbiddenBody.path("code").asInt()).isEqualTo(400);
                 assertThat(forbiddenBody.path("data").isNull()).isTrue();
                 assertThat(forbiddenHistory.body()).doesNotContain("history-0", "history-69");
                 HttpResponse<String> forbiddenSse = client.send(
@@ -557,7 +557,7 @@ class G5FullApplicationHttpPreflightL2Test {
                 assertThat(forbiddenWrite.statusCode()).isEqualTo(200);
                 JsonNode forbiddenWriteBody = context.getBean(ObjectMapper.class)
                         .readTree(forbiddenWrite.body());
-                assertThat(forbiddenWriteBody.path("code").asInt()).isEqualTo(500);
+                assertThat(forbiddenWriteBody.path("code").asInt()).isEqualTo(400);
                 assertThat(forbiddenWriteBody.path("message").asText()).contains("聊天会话不存在");
                 assertThat(forbiddenWriteBody.path("data").isNull()).isTrue();
                 assertThat(jdbcTemplate.queryForObject(

@@ -16,6 +16,7 @@ import com.kama.jchatmind.service.AgentFacadeService;
 import com.kama.jchatmind.service.AgentKnowledgeBaseBindingService;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 
+@Slf4j
 @Service
 @AllArgsConstructor
 public class AgentFacadeServiceImpl implements AgentFacadeService {
@@ -119,7 +121,8 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
                     .agentId(agent.getId())
                     .build();
         } catch (JsonProcessingException e) {
-            throw new BizException("创建 agent 时发生序列化错误: " + e.getMessage());
+            log.error("创建 agent 序列化失败", e);
+            throw new BizException("创建 agent 时发生序列化错误");
         }
     }
 
@@ -170,7 +173,8 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
                     userId
             );
         } catch (JsonProcessingException e) {
-            throw new BizException("更新 agent 时发生序列化错误: " + e.getMessage());
+            log.error("更新 agent 序列化失败", e);
+            throw new BizException("更新 agent 时发生序列化错误");
         }
     }
 

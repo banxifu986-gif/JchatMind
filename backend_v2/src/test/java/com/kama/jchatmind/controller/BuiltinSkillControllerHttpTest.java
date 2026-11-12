@@ -70,7 +70,7 @@ class BuiltinSkillControllerHttpTest {
                         .contentType("application/json")
                         .content("{\"sessionId\":\"session-1\",\"input\":{\"question\":\"比较方案\"}}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(500))
+                .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("用户未登录"));
 
         verifyNoInteractions(executionService);

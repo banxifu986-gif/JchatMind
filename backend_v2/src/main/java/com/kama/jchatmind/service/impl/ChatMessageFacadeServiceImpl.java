@@ -17,6 +17,7 @@ import com.kama.jchatmind.model.vo.ChatMessageVO;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @AllArgsConstructor
 public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
@@ -188,7 +190,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
                 throw new BizException("更新聊天消息失败");
             }
         } catch (JsonProcessingException e) {
-            throw new BizException("更新聊天消息时序列化失败: " + e.getMessage());
+            log.error("更新聊天消息序列化失败", e);
+            throw new BizException("更新聊天消息时序列化失败");
         }
     }
 
@@ -231,7 +234,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
             }
             return chatMessage;
         } catch (JsonProcessingException e) {
-            throw new BizException("创建聊天消息时序列化失败: " + e.getMessage());
+            log.error("创建聊天消息序列化失败", e);
+            throw new BizException("创建聊天消息时序列化失败");
         }
     }
 
@@ -270,7 +274,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
         try {
             return chatMessageConverter.toVO(chatMessage);
         } catch (JsonProcessingException e) {
-            throw new BizException("聊天消息反序列化失败: " + e.getMessage());
+            log.error("聊天消息反序列化失败", e);
+            throw new BizException("聊天消息反序列化失败");
         }
     }
 
@@ -278,7 +283,8 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
         try {
             return chatMessageConverter.toDTO(chatMessage);
         } catch (JsonProcessingException e) {
-            throw new BizException("聊天消息反序列化失败: " + e.getMessage());
+            log.error("聊天消息反序列化失败", e);
+            throw new BizException("聊天消息反序列化失败");
         }
     }
 }

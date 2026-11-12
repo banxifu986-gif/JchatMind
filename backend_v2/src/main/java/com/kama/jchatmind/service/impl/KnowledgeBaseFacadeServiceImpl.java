@@ -18,12 +18,14 @@ import com.kama.jchatmind.model.vo.KnowledgeBaseVO;
 import com.kama.jchatmind.service.KnowledgeBaseFacadeService;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @AllArgsConstructor
 public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeService {
@@ -78,7 +80,8 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
                     .knowledgeBaseId(knowledgeBase.getId())
                     .build();
         } catch (JsonProcessingException e) {
-            throw new BizException("创建知识库时发生序列化错误: " + e.getMessage());
+            log.error("创建知识库序列化失败", e);
+            throw new BizException("创建知识库时发生序列化错误");
         }
     }
 
@@ -131,7 +134,8 @@ public class KnowledgeBaseFacadeServiceImpl implements KnowledgeBaseFacadeServic
                 throw new BizException("更新知识库失败");
             }
         } catch (JsonProcessingException e) {
-            throw new BizException("更新知识库时发生序列化错误: " + e.getMessage());
+            log.error("更新知识库序列化失败", e);
+            throw new BizException("更新知识库时发生序列化错误");
         }
     }
 
