@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const viewSource = readFileSync(
-  new URL("../src/components/views/AgentChatView.tsx", import.meta.url),
+const hookSource = readFileSync(
+  new URL("../src/hooks/useChatStream.ts", import.meta.url),
   "utf8",
 );
-const generatedContentStart = viewSource.indexOf('if (message.type === "AI_GENERATED_CONTENT")');
-const generatedContentEnd = viewSource.indexOf('if (message.type === "AI_CONTENT_DELTA")', generatedContentStart);
-const generatedContentHandler = viewSource.slice(generatedContentStart, generatedContentEnd);
+const generatedContentStart = hookSource.indexOf('if (message.type === "AI_GENERATED_CONTENT")');
+const generatedContentEnd = hookSource.indexOf('if (message.type === "AI_CONTENT_DELTA")', generatedContentStart);
+const generatedContentHandler = hookSource.slice(generatedContentStart, generatedContentEnd);
 
 assert.match(
   generatedContentHandler,

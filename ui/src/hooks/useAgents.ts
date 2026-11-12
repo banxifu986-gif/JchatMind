@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { message } from "antd";
 import {
   type AgentVO,
   createAgent,
@@ -30,6 +31,7 @@ export function useAgents() {
         const resp = await getAgents();
         setAgentState({ userId, agents: resp.agents });
       } catch {
+        message.error("加载智能体列表失败");
         setAgentState({ userId, agents: [] });
       }
     }

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const viewSource = readFileSync(
-  new URL("../src/components/views/AgentChatView.tsx", import.meta.url),
+const hookSource = readFileSync(
+  new URL("../src/hooks/useChatStream.ts", import.meta.url),
   "utf8",
 );
 const historySource = readFileSync(
@@ -10,8 +10,8 @@ const historySource = readFileSync(
   "utf8",
 );
 
-assert.match(viewSource, /const \[streamingContent, setStreamingContent\] = useState/);
-assert.match(viewSource, /message\.type === "AI_CONTENT_DELTA"/);
-assert.match(viewSource, /setStreamingContent\(/);
+assert.match(hookSource, /const \[streamingContent, setStreamingContent\] = useState/);
+assert.match(hookSource, /message\.type === "AI_CONTENT_DELTA"/);
+assert.match(hookSource, /setStreamingContent\(/);
 assert.match(historySource, /streamingContent\?: string/);
 assert.match(historySource, /streamingContent &&/);

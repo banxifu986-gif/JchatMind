@@ -30,6 +30,7 @@ import {
   getIngestionTask,
   getRetryableIngestionTasks,
   retryIngestionTask,
+  runSseReconnectLoop,
   subscribeIngestionTaskProgress,
   uploadDocument,
   type DocumentVO,
@@ -161,41 +162,33 @@ const KnowledgeBaseView: React.FC = () => {
         }
         applyTaskUpdate(nextTask);
       } catch {
-        return;
+        message.error("获取摄入任务状态失败");
       }
     };
 
     void refreshTask();
-    const connectProgress = async () => {
-      while (active && !controller.signal.aborted) {
-        try {
-          await subscribeIngestionTaskProgress(
-            ingestionTaskId,
-            (event) => {
-              if (event.sequence !== undefined) {
-                if (lastEventId !== undefined && event.sequence <= lastEventId) {
-                  return;
-                }
-                lastEventId = Math.max(lastEventId ?? 0, event.sequence);
-              }
-              applyTaskUpdate(event);
-            },
-            controller.signal,
-            lastEventId,
-          );
-          if (active && !controller.signal.aborted) {
-            await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    void runSseReconnectLoop(
+      () => subscribeIngestionTaskProgress(
+        ingestionTaskId,
+        (event) => {
+          if (event.sequence !== undefined) {
+            if (lastEventId !== undefined && event.sequence <= lastEventId) {
+              return;
+            }
+            lastEventId = Math.max(lastEventId ?? 0, event.sequence);
           }
-        } catch (error: unknown) {
-          if (!active || controller.signal.aborted) {
-            return;
-          }
-          console.error("摄入任务 SSE 连接失败:", error);
-          await new Promise((resolve) => window.setTimeout(resolve, 1000));
-        }
-      }
-    };
-    void connectProgress();
+          applyTaskUpdate(event);
+        },
+        controller.signal,
+        lastEventId,
+      ),
+      controller.signal,
+      () => active,
+      (error: unknown) => {
+        console.error("摄入任务 SSE 连接失败:", error);
+        return true;
+      },
+    );
     const timer = window.setInterval(() => {
       void refreshTask();
     }, 2000);

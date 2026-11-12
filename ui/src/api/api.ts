@@ -350,7 +350,7 @@ export type IngestionTaskProgressEvent = IngestionTaskVO & {
   sequence?: number;
 };
 
-const CHAT_SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL
+const SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL
   || `${BASE_URL.replace(/\/api\/?$/, "")}/sse`;
 
 export class ChatSseHttpError extends Error {
@@ -362,13 +362,7 @@ export class ChatSseHttpError extends Error {
   }
 }
 
-export async function subscribeChatSessionEvents(
-  chatSessionId: string,
-  onMessage: (message: SseMessage, eventId?: number) => void,
-  signal: AbortSignal,
-  lastEventId?: number,
-  onReplayGap?: (eventId?: number) => void,
-): Promise<void> {
+function buildSseHeaders(lastEventId?: number): Record<string, string> {
   const token = window.localStorage.getItem("jchatmind.token");
   const headers: Record<string, string> = {};
   if (token) {
@@ -377,23 +371,20 @@ export async function subscribeChatSessionEvents(
   if (lastEventId !== undefined) {
     headers["Last-Event-ID"] = String(lastEventId);
   }
+  return headers;
+}
 
-  const response = await fetch(
-    `${CHAT_SSE_BASE_URL}/connect/${encodeURIComponent(chatSessionId)}`,
-    { headers, signal },
-  );
-  if (!response.ok) {
-    throw new ChatSseHttpError(response.status);
-  }
-  if (!response.body) {
-    throw new Error("聊天事件流不可用");
-  }
+interface ParsedSseFrame {
+  eventName: string;
+  eventId: number | undefined;
+  rawData: string;
+  frame: string;
+}
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  const consumeFrame = (frame: string) => {
+function createSseFrameParser(
+  onFrame: (frame: ParsedSseFrame) => void,
+): (frame: string) => void {
+  return (frame: string) => {
     let eventName = "message";
     let eventId: number | undefined;
     const dataLines: string[] = [];
@@ -409,12 +400,26 @@ export async function subscribeChatSessionEvents(
         dataLines.push(line.slice("data:".length).trim());
       }
     }
-    if (eventName === "replay-gap") {
-      onReplayGap?.(eventId);
-    } else if (eventName === "message" && dataLines.length > 0) {
-      onMessage(JSON.parse(dataLines.join("\n")) as SseMessage, eventId);
-    }
+    onFrame({ eventName, eventId, rawData: dataLines.join("\n"), frame });
   };
+}
+
+function parseSseJsonData<T>(rawData: string, frame: string): T | null {
+  try {
+    return JSON.parse(rawData) as T;
+  } catch {
+    console.warn("跳过无法解析的 SSE 帧:", frame.slice(0, 200));
+    return null;
+  }
+}
+
+async function consumeSseResponseStream(
+  body: ReadableStream<Uint8Array>,
+  consumeFrame: (frame: string) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
 
   while (true) {
     const { value, done } = await reader.read();
@@ -431,8 +436,63 @@ export async function subscribeChatSessionEvents(
   }
 }
 
-const INGESTION_SSE_BASE_URL = import.meta.env.VITE_SSE_BASE_URL
-  || `${BASE_URL.replace(/\/api\/?$/, "")}/sse`;
+export async function runSseReconnectLoop(
+  subscribe: () => Promise<void>,
+  signal: AbortSignal,
+  isActive: () => boolean,
+  onError?: (error: unknown) => boolean,
+): Promise<void> {
+  while (isActive() && !signal.aborted) {
+    try {
+      await subscribe();
+    } catch (error: unknown) {
+      if (!isActive() || signal.aborted) {
+        return;
+      }
+      if (onError && !onError(error)) {
+        return;
+      }
+    }
+    if (isActive() && !signal.aborted) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+  }
+}
+
+export async function subscribeChatSessionEvents(
+  chatSessionId: string,
+  onMessage: (message: SseMessage, eventId?: number) => void,
+  signal: AbortSignal,
+  lastEventId?: number,
+  onReplayGap?: (eventId?: number) => void,
+): Promise<void> {
+  const response = await fetch(
+    `${SSE_BASE_URL}/connect/${encodeURIComponent(chatSessionId)}`,
+    { headers: buildSseHeaders(lastEventId), signal },
+  );
+  if (!response.ok) {
+    throw new ChatSseHttpError(response.status);
+  }
+  if (!response.body) {
+    throw new Error("聊天事件流不可用");
+  }
+
+  const consumeFrame = createSseFrameParser(({ eventName, eventId, rawData, frame }) => {
+    if (eventName === "replay-gap") {
+      onReplayGap?.(eventId);
+      return;
+    }
+    if (eventName !== "message" || !rawData) {
+      return;
+    }
+    const message = parseSseJsonData<SseMessage>(rawData, frame);
+    if (message) {
+      onMessage(message, eventId);
+    }
+  });
+
+  await consumeSseResponseStream(response.body, consumeFrame);
+}
 
 export async function subscribeIngestionTaskProgress(
   taskId: string,
@@ -440,18 +500,9 @@ export async function subscribeIngestionTaskProgress(
   signal: AbortSignal,
   lastEventId?: number,
 ): Promise<void> {
-  const token = window.localStorage.getItem("jchatmind.token");
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  if (lastEventId !== undefined) {
-    headers["Last-Event-ID"] = String(lastEventId);
-  }
-
   const response = await fetch(
-    `${INGESTION_SSE_BASE_URL}/ingestion/${encodeURIComponent(taskId)}`,
-    { headers, signal },
+    `${SSE_BASE_URL}/ingestion/${encodeURIComponent(taskId)}`,
+    { headers: buildSseHeaders(lastEventId), signal },
   );
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -460,49 +511,21 @@ export async function subscribeIngestionTaskProgress(
     throw new Error("摄入进度流不可用");
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  const consumeFrame = (frame: string) => {
-    let eventName = "message";
-    let eventId: number | undefined;
-    const dataLines: string[] = [];
-    for (const line of frame.split(/\r?\n/)) {
-      if (line.startsWith("event:")) {
-        eventName = line.slice("event:".length).trim();
-      } else if (line.startsWith("id:")) {
-        const parsedId = Number(line.slice("id:".length).trim());
-        if (Number.isFinite(parsedId)) {
-          eventId = parsedId;
-        }
-      } else if (line.startsWith("data:")) {
-        dataLines.push(line.slice("data:".length).trim());
-      }
-    }
-    if (eventName !== "ingestion-progress" || dataLines.length === 0) {
+  const consumeFrame = createSseFrameParser(({ eventName, eventId, rawData, frame }) => {
+    if (eventName !== "ingestion-progress" || !rawData) {
       return;
     }
-    const event = JSON.parse(dataLines.join("\n")) as IngestionTaskProgressEvent;
+    const event = parseSseJsonData<IngestionTaskProgressEvent>(rawData, frame);
+    if (!event) {
+      return;
+    }
     if (event.sequence === undefined && eventId !== undefined) {
       event.sequence = eventId;
     }
     onEvent(event);
-  };
+  });
 
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const frames = buffer.split(/\r?\n\r?\n/);
-    buffer = frames.pop() ?? "";
-    frames.filter((frame) => frame.trim()).forEach(consumeFrame);
-    if (done) {
-      if (buffer.trim()) {
-        consumeFrame(buffer);
-      }
-      return;
-    }
-  }
+  await consumeSseResponseStream(response.body, consumeFrame);
 }
 
 export async function getIngestionTask(

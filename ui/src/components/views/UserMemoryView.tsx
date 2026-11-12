@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Button, Card, Collapse, Empty, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from "antd";
+import { Button, Card, Collapse, Empty, Input, message, Modal, Popconfirm, Select, Space, Tag, Typography } from "antd";
 import {
   CheckOutlined,
   ClockCircleOutlined,
@@ -93,18 +93,30 @@ const UserMemoryView: React.FC = () => {
   }, [refresh]);
 
   const handleConfirm = async (candidateId: string) => {
-    await confirmUserMemoryCandidate(candidateId);
-    await refresh();
+    try {
+      await confirmUserMemoryCandidate(candidateId);
+      await refresh();
+    } catch {
+      message.error("确认保存记忆失败，请重试");
+    }
   };
 
   const handleDiscardCandidate = async (candidateId: string) => {
-    await discardUserMemoryCandidate(candidateId);
-    await refresh();
+    try {
+      await discardUserMemoryCandidate(candidateId);
+      await refresh();
+    } catch {
+      message.error("忽略候选记忆失败，请重试");
+    }
   };
 
   const handleDeleteMemory = async (memoryId: string) => {
-    await deleteUserMemory(memoryId);
-    await refresh();
+    try {
+      await deleteUserMemory(memoryId);
+      await refresh();
+    } catch {
+      message.error("删除记忆失败，请重试");
+    }
   };
 
   const handleStartEditMemory = (memory: UserMemoryVO) => {
@@ -116,35 +128,59 @@ const UserMemoryView: React.FC = () => {
     if (!editingMemory) {
       return;
     }
-    await updateUserMemory(editingMemory.id, { content: editingContent });
-    setEditingMemory(null);
-    setEditingContent("");
-    await refresh();
+    try {
+      await updateUserMemory(editingMemory.id, { content: editingContent });
+      setEditingMemory(null);
+      setEditingContent("");
+      await refresh();
+    } catch {
+      message.error("编辑记忆失败，请重试");
+    }
   };
 
   const handleClearMemories = async () => {
-    await clearUserMemories();
-    await refresh();
+    try {
+      await clearUserMemories();
+      await refresh();
+    } catch {
+      message.error("清空记忆失败，请重试");
+    }
   };
 
   const handleAutomationModeChange = async (mode: UserMemoryAutomationMode) => {
-    await updateUserMemoryAutomation(mode);
-    setAutomationMode(mode);
+    try {
+      await updateUserMemoryAutomation(mode);
+      setAutomationMode(mode);
+    } catch {
+      message.error("更新自动化程度失败，请重试");
+    }
   };
 
   const handleCreateConsolidationProposal = async () => {
-    await createUserMemoryConsolidationProposal();
-    await refresh();
+    try {
+      await createUserMemoryConsolidationProposal();
+      await refresh();
+    } catch {
+      message.error("创建整理建议失败，请重试");
+    }
   };
 
   const handleConfirmConsolidationProposal = async (proposalId: string) => {
-    await confirmUserMemoryConsolidationProposal(proposalId);
-    await refresh();
+    try {
+      await confirmUserMemoryConsolidationProposal(proposalId);
+      await refresh();
+    } catch {
+      message.error("确认整理建议失败，请重试");
+    }
   };
 
   const handleDiscardConsolidationProposal = async (proposalId: string) => {
-    await discardUserMemoryConsolidationProposal(proposalId);
-    await refresh();
+    try {
+      await discardUserMemoryConsolidationProposal(proposalId);
+      await refresh();
+    } catch {
+      message.error("丢弃整理建议失败，请重试");
+    }
   };
 
   const handleStartEditExpiration = (memory: UserMemoryVO) => {
@@ -156,12 +192,16 @@ const UserMemoryView: React.FC = () => {
     if (!editingExpirationMemory) {
       return;
     }
-    await updateUserMemoryExpiration(editingExpirationMemory.id, {
-      expiresAt: editingExpiration,
-    });
-    setEditingExpirationMemory(null);
-    setEditingExpiration("");
-    await refresh();
+    try {
+      await updateUserMemoryExpiration(editingExpirationMemory.id, {
+        expiresAt: editingExpiration,
+      });
+      setEditingExpirationMemory(null);
+      setEditingExpiration("");
+      await refresh();
+    } catch {
+      message.error("设置有效期失败，请重试");
+    }
   };
 
   return (

@@ -9,6 +9,10 @@ const chatViewSource = readFileSync(
   new URL("../src/components/views/AgentChatView.tsx", import.meta.url),
   "utf8",
 );
+const hookSource = readFileSync(
+  new URL("../src/hooks/useChatStream.ts", import.meta.url),
+  "utf8",
+);
 
 assert.match(
   layoutSource,
@@ -26,18 +30,18 @@ assert.match(
   "聊天视图首次挂载时必须恢复当前会话的轨迹",
 );
 assert.match(
-  chatViewSource,
+  hookSource,
   /const \[agentTrace, setAgentTrace\] = useState<AgentExecutionTraceItem\[\]>\(initialAgentTrace\);/,
   "恢复的会话轨迹必须作为视图初始 state，而非只读取不使用",
 );
 assert.match(
-  chatViewSource,
+  hookSource,
   /useEffect\(\(\) => \{\s*if \(chatSessionId\) \{\s*sessionTraceCache\?\.set\(chatSessionId, agentTrace\);/,
   "已提交的会话轨迹必须在 effect 中同步到缓存",
 );
-const recordAgentTrace = chatViewSource.slice(
-  chatViewSource.indexOf("const recordAgentTrace"),
-  chatViewSource.indexOf("const getChatMessages"),
+const recordAgentTrace = hookSource.slice(
+  hookSource.indexOf("const recordAgentTrace"),
+  hookSource.indexOf("const getChatMessages"),
 );
 assert.doesNotMatch(
   recordAgentTrace,
@@ -50,7 +54,7 @@ assert.match(
   "切回截断轨迹后必须从当前最后一条 ID 推导下一条 ID",
 );
 assert.match(
-  chatViewSource,
+  hookSource,
   /setAgentTrace\(\[\]\);\s*sessionTraceCache\?\.set\(chatSessionId, \[\]\);/,
   "发送新一轮消息时只能清空当前会话的执行轨迹缓存",
 );
