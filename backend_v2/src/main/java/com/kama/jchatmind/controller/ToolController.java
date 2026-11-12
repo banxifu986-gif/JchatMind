@@ -1,6 +1,7 @@
 package com.kama.jchatmind.controller;
 
 import com.kama.jchatmind.agent.tools.Tool;
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.service.ToolFacadeService;
 import lombok.AllArgsConstructor;
@@ -19,6 +20,7 @@ public class ToolController {
 
     // 给前端提供的可选的工具列表
     @GetMapping("/tools")
+    @NeedLogin
     public ApiResponse<List<Tool>> getOptionalTools() {
         return ApiResponse.success(toolFacadeService.getOptionalTools());
     }

@@ -1,6 +1,7 @@
 package com.kama.jchatmind.controller;
 
 import com.kama.jchatmind.auth.RequestScopeData;
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.entity.BuiltinSkillExecutionTask;
@@ -23,6 +24,7 @@ public class BuiltinSkillTaskController {
     private final BuiltinSkillTaskService taskService;
 
     @PostMapping("/api/agents/{agentId}/skills/{skillId}/tasks")
+    @NeedLogin
     public ApiResponse<BuiltinSkillTaskService.SubmissionResult> submit(
             @PathVariable String agentId,
             @PathVariable String skillId,
@@ -39,6 +41,7 @@ public class BuiltinSkillTaskController {
     }
 
     @GetMapping("/api/skill-tasks/{taskId}")
+    @NeedLogin
     public ApiResponse<TaskStatusResponse> getStatus(@PathVariable String taskId) {
         BuiltinSkillExecutionTask task = taskService.getOwnedTask(taskId, requireUserId());
         return ApiResponse.success(new TaskStatusResponse(

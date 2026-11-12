@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.CreateAgentRequest;
 import com.kama.jchatmind.model.request.UpdateAgentRequest;
@@ -18,18 +19,21 @@ public class AgentController {
 
     // 查询 agents
     @GetMapping("/agents")
+    @NeedLogin
     public ApiResponse<GetAgentsResponse> getAgents() {
         return ApiResponse.success(agentFacadeService.getAgents());
     }
 
     // 创建 agent
     @PostMapping("/agents")
+    @NeedLogin
     public ApiResponse<CreateAgentResponse> createAgent(@RequestBody CreateAgentRequest request) {
         return ApiResponse.success(agentFacadeService.createAgent(request));
     }
 
     // 删除 agent
     @DeleteMapping("/agents/{agentId}")
+    @NeedLogin
     public ApiResponse<Void> deleteAgent(@PathVariable String agentId) {
         agentFacadeService.deleteAgent(agentId);
         return ApiResponse.success();
@@ -37,6 +41,7 @@ public class AgentController {
 
     // 更新 agent
     @PatchMapping("/agents/{agentId}")
+    @NeedLogin
     public ApiResponse<Void> updateAgent(@PathVariable String agentId, @RequestBody UpdateAgentRequest request) {
         agentFacadeService.updateAgent(agentId, request);
         return ApiResponse.success();

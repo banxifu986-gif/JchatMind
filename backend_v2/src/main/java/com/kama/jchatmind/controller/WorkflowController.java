@@ -1,6 +1,7 @@
 package com.kama.jchatmind.controller;
 
 import com.kama.jchatmind.auth.RequestScopeData;
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.workflow.WorkflowExecutionService;
 import lombok.AllArgsConstructor;
@@ -18,6 +19,7 @@ public class WorkflowController {
     private final WorkflowExecutionService workflowExecutionService;
 
     @PostMapping("/execute")
+    @NeedLogin
     public ApiResponse<WorkflowExecutionService.WorkflowExecutionResponse> execute(
             @RequestBody ExecuteWorkflowRequest request
     ) {

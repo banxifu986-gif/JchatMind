@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.ingestion.IngestionTaskProgressService;
 import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.service.impl.IngestionTaskServiceImpl;
@@ -21,6 +22,7 @@ public class IngestionTaskSseController {
     private final IngestionTaskProgressService progressService;
 
     @GetMapping(value = "/{taskId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @NeedLogin
     public SseEmitter connect(
             @PathVariable String taskId,
             @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId

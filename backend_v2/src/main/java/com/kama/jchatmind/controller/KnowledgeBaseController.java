@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.CreateKnowledgeBaseRequest;
 import com.kama.jchatmind.model.request.UpdateKnowledgeBaseRequest;
@@ -20,29 +21,34 @@ public class KnowledgeBaseController {
 
     // 查询所有知识库
     @GetMapping("/knowledge-bases")
+    @NeedLogin
     public ApiResponse<GetKnowledgeBasesResponse> getKnowledgeBases() {
         return ApiResponse.success(knowledgeBaseFacadeService.getKnowledgeBases());
     }
 
     // 创建知识库
     @PostMapping("/knowledge-bases")
+    @NeedLogin
     public ApiResponse<CreateKnowledgeBaseResponse> createKnowledgeBase(@RequestBody CreateKnowledgeBaseRequest request) {
         return ApiResponse.success(knowledgeBaseFacadeService.createKnowledgeBase(request));
     }
 
     // 删除知识库
     @DeleteMapping("/knowledge-bases/{knowledgeBaseId}")
+    @NeedLogin
     public ApiResponse<DeleteKnowledgeBaseResponse> deleteKnowledgeBase(@PathVariable String knowledgeBaseId) {
         return ApiResponse.success(knowledgeBaseFacadeService.deleteKnowledgeBase(knowledgeBaseId));
     }
 
     @GetMapping("/knowledge-base-deletion-tasks/{taskId}")
+    @NeedLogin
     public ApiResponse<GetKnowledgeBaseDeletionTaskResponse> getKnowledgeBaseDeletionTask(@PathVariable String taskId) {
         return ApiResponse.success(knowledgeBaseFacadeService.getKnowledgeBaseDeletionTask(taskId));
     }
 
     // 更新知识库
     @PatchMapping("/knowledge-bases/{knowledgeBaseId}")
+    @NeedLogin
     public ApiResponse<Void> updateKnowledgeBase(@PathVariable String knowledgeBaseId, @RequestBody UpdateKnowledgeBaseRequest request) {
         knowledgeBaseFacadeService.updateKnowledgeBase(knowledgeBaseId, request);
         return ApiResponse.success();

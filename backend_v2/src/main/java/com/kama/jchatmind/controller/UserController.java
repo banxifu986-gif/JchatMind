@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.LoginRequest;
 import com.kama.jchatmind.model.request.RegisterRequest;
@@ -36,6 +37,7 @@ public class UserController {
     }
 
     @GetMapping("/whoami")
+    @NeedLogin
     public ApiResponse<LoginUserVO> whoami() {
         return userService.whoami();
     }

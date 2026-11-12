@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.model.vo.IngestionTaskVO;
@@ -22,6 +23,7 @@ public class IngestionTaskController {
     private final IngestionTaskServiceImpl ingestionTaskService;
 
     @GetMapping
+    @NeedLogin
     public ApiResponse<List<IngestionTaskVO>> getRetryableTasks(@RequestParam String kbId) {
         List<IngestionTaskVO> tasks = ingestionTaskService.getRetryableTasksForKnowledgeBase(kbId)
                 .stream()
@@ -31,17 +33,20 @@ public class IngestionTaskController {
     }
 
     @GetMapping("/{taskId}")
+    @NeedLogin
     public ApiResponse<IngestionTaskVO> getTask(@PathVariable String taskId) {
         return ApiResponse.success(toVO(ingestionTaskService.getTask(taskId)));
     }
 
     @PostMapping("/{taskId}/cancel")
+    @NeedLogin
     public ApiResponse<Void> cancelTask(@PathVariable String taskId) {
         ingestionTaskService.cancelTask(taskId);
         return ApiResponse.success();
     }
 
     @PostMapping("/{taskId}/retry")
+    @NeedLogin
     public ApiResponse<Void> retryTask(@PathVariable String taskId) {
         ingestionTaskService.retryTask(taskId);
         return ApiResponse.success();

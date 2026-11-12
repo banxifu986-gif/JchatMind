@@ -1,5 +1,6 @@
 package com.kama.jchatmind.controller;
 
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.model.request.CreateChatMessageRequest;
 import com.kama.jchatmind.model.request.UpdateChatMessageRequest;
@@ -17,6 +18,7 @@ public class ChatMessageController {
     private final ChatMessageFacadeService chatMessageFacadeService;
 
     @GetMapping("/chat-messages/session/{sessionId}")
+    @NeedLogin
     public ApiResponse<GetChatMessagesResponse> getChatMessagesBySessionId(
             @PathVariable String sessionId
     ) {
@@ -24,17 +26,20 @@ public class ChatMessageController {
     }
 
     @PostMapping("/chat-messages")
+    @NeedLogin
     public ApiResponse<CreateChatMessageResponse> createChatMessage(@RequestBody CreateChatMessageRequest request) {
         return ApiResponse.success(chatMessageFacadeService.createChatMessage(request));
     }
 
     @DeleteMapping("/chat-messages/{chatMessageId}")
+    @NeedLogin
     public ApiResponse<Void> deleteChatMessage(@PathVariable String chatMessageId) {
         chatMessageFacadeService.deleteChatMessage(chatMessageId);
         return ApiResponse.success();
     }
 
     @PatchMapping("/chat-messages/{chatMessageId}")
+    @NeedLogin
     public ApiResponse<Void> updateChatMessage(
             @PathVariable String chatMessageId,
             @RequestBody UpdateChatMessageRequest request

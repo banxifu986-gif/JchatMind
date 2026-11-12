@@ -1,6 +1,7 @@
 package com.kama.jchatmind.controller;
 
 import com.kama.jchatmind.auth.RequestScopeData;
+import com.kama.jchatmind.auth.annotation.NeedLogin;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.skill.BuiltinSkillExecutionService;
@@ -22,6 +23,7 @@ public class BuiltinSkillController {
     private final BuiltinSkillExecutionService executionService;
 
     @PostMapping("/{skillId}/execute")
+    @NeedLogin
     public ApiResponse<BuiltinSkillExecutionService.ExecutionResponse> execute(
             @PathVariable String agentId,
             @PathVariable String skillId,

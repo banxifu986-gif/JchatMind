@@ -3,6 +3,8 @@ package com.kama.jchatmind.controller;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.agent.harness.approval.ApprovalRequest;
 import com.kama.jchatmind.agent.harness.approval.ApprovalStatus;
+import com.kama.jchatmind.auth.annotation.NeedLogin;
+import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.model.common.ApiResponse;
 import com.kama.jchatmind.service.ChatSessionFacadeService;
 import lombok.AllArgsConstructor;
@@ -25,6 +27,7 @@ public class HarnessController {
     private final ChatSessionFacadeService chatSessionFacadeService;
 
     @PostMapping("/approve/{requestId}")
+    @NeedLogin
     public ApiResponse<ApprovalActionResponse> approve(
             @PathVariable String requestId
     ) {
@@ -37,6 +40,7 @@ public class HarnessController {
     }
 
     @PostMapping("/reject/{requestId}")
+    @NeedLogin
     public ApiResponse<ApprovalActionResponse> reject(
             @PathVariable String requestId
     ) {
@@ -49,6 +53,7 @@ public class HarnessController {
     }
 
     @GetMapping("/pending/{sessionId}")
+    @NeedLogin
     public ApiResponse<PendingApprovalsResponse> getPending(
             @PathVariable String sessionId
     ) {
@@ -73,7 +78,7 @@ public class HarnessController {
     private ApprovalRequest requireOwnedRequest(String requestId) {
         ApprovalRequest request = harnessRunner.getApprovalRequest(requestId);
         if (request == null) {
-            throw new IllegalArgumentException("审批请求不存在: " + requestId);
+            throw new BizException("审批请求不存在");
         }
         chatSessionFacadeService.getChatSession(request.getSessionId());
         return request;
