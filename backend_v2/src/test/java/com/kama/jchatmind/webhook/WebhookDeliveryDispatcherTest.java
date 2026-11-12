@@ -73,6 +73,7 @@ class WebhookDeliveryDispatcherTest {
     @Test
     void shouldMoveFinalFailedAttemptToDeadLetter() throws Exception {
         HttpServer server = server(exchange -> {
+            exchange.getRequestBody().readAllBytes();
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
         });
@@ -105,6 +106,7 @@ class WebhookDeliveryDispatcherTest {
         AtomicReference<String> callbackEventId = new AtomicReference<>();
         HttpServer server = server(exchange -> {
             callbackEventId.set(exchange.getRequestHeaders().getFirst("X-Webhook-Event-Id"));
+            exchange.getRequestBody().readAllBytes();
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
         });
