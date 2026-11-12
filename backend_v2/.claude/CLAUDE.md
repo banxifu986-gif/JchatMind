@@ -35,5 +35,6 @@
 
 ## 当前已知事项
 
-- 测试依赖完整应用上下文，缺少模型相关配置时容易在启动阶段失败
-- 当前已知一类失败原因是模型配置缺失导致 `ApplicationContext` 无法启动
+- 2026-11-12 测试基线全绿：1104 项 0 失败/errors，120 项门控跳过；全上下文测试缺环境变量（`DB_PASSWORD` 等）时 `ApplicationContext` 启动失败，属环境问题
+- 鉴权由 controller 层 `@NeedLogin` 切面强制（JWT + 封禁检查）；`SseController` 是唯一例外——手工 401 门卫（前端与测试契约锁定），封禁用户仍可建立只读 SSE 连接
+- 文档上传的事务口径：`uploadDocument` 不使用方法级事务（磁盘 IO 在事务外，`TransactionTemplate` 只包元数据更新与任务创建两步）；`deleteDocument` 整体包事务、文件删除挂 `afterCommit`

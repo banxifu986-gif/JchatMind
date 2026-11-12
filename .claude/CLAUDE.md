@@ -11,8 +11,10 @@
 
 ## 当前仓库基线认知
 - 后端测试入口存在：`backend_v2` 可执行 `mvnw.cmd test`
-- 当前后端测试基线不是绿色，`mvnw.cmd test` 失败，现状是 Spring Boot `ApplicationContext` 启动失败
-- 前端当前没有 `test` 脚本，现有校验入口主要是 `npm run lint` 和 `npm run build`
+- 2026-11-12 后端 `mvnw.cmd test` 基线通过：1104 项，0 failures/errors，120 项按条件跳过（门控 L2 运行时测试与评测类）；跳过项不代表真实基础设施或模型验收通过
+- 依赖完整应用上下文的测试需要真实环境变量（如 `DB_PASSWORD`）：缺配置的机器会在 `ApplicationContext` 启动阶段失败，属环境问题，不是代码基线问题
+- Codex Windows 沙箱内可能在 Mockito/Byte Buddy attach 阶段挂起；应先诊断执行环境，不能据此修改业务逻辑或关闭测试。基线分类与证据见 `docs/项目架构与关键链路.md` 的后端测试基线
+- 前端统一校验入口为 `npm run check`（lint、`npm test`、build）；`npm test` 执行 Node 源码契约与 TypeScript 类型契约，`npm run test:e2e` 显式执行需要前端服务和相应 fixture 的 Playwright 测试
 - 后续改动前应先复用这些现有入口确认基线，不要自创校验方式
 
 ## 代码风格
@@ -26,18 +28,23 @@
 - 除非逻辑确实不明显，不要新增注释；修改现有代码时保持原有注释密度
 - 不要未经允许新增兼容性分支、兜底逻辑或双写逻辑
 
+### 关键架构约定（2026-11-12 审查收口确立）
+- 鉴权三层：`SecurityConfig` 对 `/api/**` 等路径放行 + controller 方法挂 `@NeedLogin`（切面校验 JWT 与封禁）+ service 层数据归属校验；公开端点仅限登录/注册/验证码、webhook ingress（HMAC 签名）、MCP（API Key 过滤器）、health 与 `SseController`（手工 401 门卫，契约锁定）
+- 错误契约：HTTP 恒 200，语义走 `ApiResponse.code`；`BizException` 必须带码（401/403），内部异常细节不进响应体、只进日志
+- 事务边界：事务内不做磁盘 IO；多步破坏性删除必须包 `@Transactional`；文件删除挂 `afterCommit`
+- 防御等级按单机演示校准：不新增 write-only 审计、零调用的协调层、为多实例准备的锁与队列
+- `migration/`（手搓 schema 迁移框架）经 2026-11-12 审查评估决定保留：独立包、不在应用启动路径、自带测试；不换 Flyway，不新增该依赖
+
 ## 文档导航
 
-`docs/` 目录结构与查阅指引：
+`docs/` 当前只维护两份现行文档，历史方案与参考资料全部归档：
 
 - **`docs/README.md`** — 文档总索引，先读这个
-- **`docs/reference/`** — 稳定参考资料：简历表述版本、Agent 面试八股、RAG 收口规范
-- **`docs/plans/active/`** — 规划中的方案：MCP 双向集成、系统路线图、RAG 优化路线图、用户记忆系统
-- **`docs/plans/done/`** — 已完成的方案：Agent Harness、Query Rewrite、多路召回、工具调用改进
-- **`docs/records/`** — 重大 bug 修复与阶段性收口记录，按 rag/user-memory/startup/sse 分目录
-- **`docs/测试清单.md`** — 后端测试覆盖清单
+- **`docs/项目架构与关键链路.md`** — 当前架构、主链路、实现边界和源码索引
+- **`docs/archive/2026-08-15/`** — 历史方案与记录：plans、records、reference、root
+- **`docs/archive/2026-11-10/`** — 近期归档：plans、reference、spec
 
-涉及方案设计或历史决策时，优先查阅对应 `docs/plans/` 和 `docs/records/` 目录。
+历史结论只从归档区查阅；若仍然有效，先回填架构文档，再引用它。目录变更以 `docs/README.md` 为准。
 
 ### 前端风格
 - 使用 TypeScript + React 函数组件
