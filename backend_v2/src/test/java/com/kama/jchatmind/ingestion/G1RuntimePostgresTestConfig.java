@@ -26,6 +26,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.util.Properties;
@@ -196,7 +197,8 @@ public class G1RuntimePostgresTestConfig {
             DocumentStorageService documentStorageService,
             KnowledgeBaseAccessService knowledgeBaseAccessService,
             RequestScopeData requestScopeData,
-            IngestionTaskServiceImpl ingestionTaskService
+            IngestionTaskServiceImpl ingestionTaskService,
+            PlatformTransactionManager transactionManager
     ) {
         return new DocumentFacadeServiceImpl(
                 documentMapper,
@@ -206,7 +208,8 @@ public class G1RuntimePostgresTestConfig {
                 null,
                 knowledgeBaseAccessService,
                 requestScopeData,
-                ingestionTaskService
+                ingestionTaskService,
+                new TransactionTemplate(transactionManager)
         );
     }
 

@@ -24,6 +24,9 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -45,6 +48,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     private final KnowledgeBaseAccessService knowledgeBaseAccessService;
     private final RequestScopeData requestScopeData;
     private final IngestionTaskServiceImpl ingestionTaskService;
+    private final TransactionTemplate transactionTemplate;
 
     @Override
     public GetDocumentsResponse getDocuments() {
@@ -110,14 +114,15 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                     .documentId(document.getId())
                     .build();
         } catch (JsonProcessingException e) {
-            throw new BizException("创建文档时发生序列化错误: " + e.getMessage());
+            log.error("创建文档序列化失败", e);
+            throw new BizException("创建文档时发生序列化错误");
         }
     }
 
     @Override
-    @Transactional
     public CreateDocumentResponse uploadDocument(String kbId, String idempotencyKey, MultipartFile file) {
         String filePath = null;
+        String documentId = null;
         try {
             String userId = requireUserId();
             knowledgeBaseAccessService.requireAccessibleKnowledgeBase(kbId, userId);
@@ -160,12 +165,12 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                 throw new BizException("创建文档记录失败");
             }
 
-            String documentId = document.getId();
+            documentId = document.getId();
 
-            // 保存文件
+            // 保存文件（事务外磁盘 IO，不占用数据库连接）
             filePath = documentStorageService.saveFile(kbId, documentId, file);
 
-            // 更新文档记录，保存文件路径到 metadata
+            // 更新文档记录，保存文件路径到 metadata；与 ingestion 任务创建在同一事务提交，事务内不做磁盘 IO
             DocumentDTO.MetaData metadata = new DocumentDTO.MetaData();
             metadata.setFilePath(filePath);
             documentDTO.setMetadata(metadata);
@@ -178,42 +183,50 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             updatedDocument.setCreatedAt(now);
             updatedDocument.setUpdatedAt(now);
 
-            if (documentMapper.updateByIdAndOwnerId(updatedDocument, userId) <= 0) {
-                throw new BizException("更新文档失败");
-            }
+            final String submittedDocumentId = documentId;
+            IngestionTask task = transactionTemplate.execute(txStatus -> {
+                if (documentMapper.updateByIdAndOwnerId(updatedDocument, userId) <= 0) {
+                    throw new BizException("更新文档失败");
+                }
+                return ingestionTaskService.submitDocumentIngestion(kbId, submittedDocumentId, idempotencyKey);
+            });
+            String taskId = task.getId();
 
             log.info("文档上传成功: kbId={}, documentId={}, filename={}", kbId, documentId, originalFilename);
-
-            String taskId = ingestionTaskService
-                    .submitDocumentIngestion(kbId, documentId, idempotencyKey)
-                    .getId();
 
             return CreateDocumentResponse.builder()
                     .documentId(documentId)
                     .taskId(taskId)
                     .build();
         } catch (IOException e) {
-            compensateUploadedFile(filePath);
+            compensateUpload(documentId, filePath);
             log.error("文件保存失败", e);
             throw new BizException("文件保存失败");
         } catch (RuntimeException e) {
-            compensateUploadedFile(filePath);
+            compensateUpload(documentId, filePath);
             throw e;
         }
     }
 
-    private void compensateUploadedFile(String filePath) {
-        if (!StringUtils.hasText(filePath)) {
-            return;
+    private void compensateUpload(String documentId, String filePath) {
+        if (StringUtils.hasText(filePath)) {
+            try {
+                documentStorageService.deleteFile(filePath);
+            } catch (IOException cleanupException) {
+                log.warn("上传失败后的文件补偿删除失败: path={}", filePath, cleanupException);
+            }
         }
-        try {
-            documentStorageService.deleteFile(filePath);
-        } catch (IOException cleanupException) {
-            log.warn("上传失败后的文件补偿删除失败: path={}", filePath, cleanupException);
+        if (StringUtils.hasText(documentId)) {
+            try {
+                documentMapper.deleteById(documentId);
+            } catch (RuntimeException cleanupException) {
+                log.warn("上传失败后的文档记录补偿删除失败: documentId={}", documentId, cleanupException);
+            }
         }
     }
 
     @Override
+    @Transactional
     public void deleteDocument(String documentId) {
         Document document = documentMapper.selectById(documentId);
         if (document == null) {
@@ -225,23 +238,26 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             chunkBgeM3Mapper.deleteById(chunk.getId());
         }
 
-        // 删除文件
-        try {
-            DocumentDTO documentDTO = documentConverter.toDTO(document);
-            if (documentDTO.getMetadata() != null && documentDTO.getMetadata().getFilePath() != null) {
-                String filePath = documentDTO.getMetadata().getFilePath();
-                documentStorageService.deleteFile(filePath);
-            }
-        } catch (Exception e) {
-            log.warn("删除文件失败，继续删除文档记录: documentId={}, error={}", documentId, e.getMessage());
-            // 即使文件删除失败，也继续删除数据库记录
-        }
-
         // 删除数据库记录
         int result = documentMapper.deleteById(documentId);
         if (result <= 0) {
             throw new BizException("删除文档失败");
         }
+
+        // 文件删除移到事务提交后执行，事务内不做磁盘 IO；文件删失败仅记日志，遗留孤儿文件可接受
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    DocumentDTO documentDTO = documentConverter.toDTO(document);
+                    if (documentDTO.getMetadata() != null && documentDTO.getMetadata().getFilePath() != null) {
+                        documentStorageService.deleteFile(documentDTO.getMetadata().getFilePath());
+                    }
+                } catch (Exception e) {
+                    log.warn("删除文件失败，不影响删除结果: documentId={}, error={}", documentId, e.getMessage());
+                }
+            }
+        });
     }
 
     /**
@@ -286,7 +302,8 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                 throw new BizException("更新文档失败");
             }
         } catch (JsonProcessingException e) {
-            throw new BizException("更新文档时发生序列化错误: " + e.getMessage());
+            log.error("更新文档序列化失败", e);
+            throw new BizException("更新文档时发生序列化错误");
         }
     }
 

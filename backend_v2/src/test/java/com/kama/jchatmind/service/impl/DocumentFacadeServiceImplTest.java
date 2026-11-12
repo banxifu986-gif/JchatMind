@@ -15,6 +15,9 @@ import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.lang.reflect.InvocationTargetException;
@@ -148,7 +151,12 @@ class DocumentFacadeServiceImplTest {
                         .build());
         DocumentFacadeServiceImpl service = service(documentMapper, chunkBgeM3Mapper, knowledgeBaseAccessService);
 
-        service.deleteDocument("doc-1");
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.deleteDocument("doc-1");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
 
         verify(chunkBgeM3Mapper).deleteById("chunk-1");
     }
@@ -270,7 +278,7 @@ class DocumentFacadeServiceImplTest {
     }
 
     @Test
-    void shouldKeepUploadIdempotencyLockUntilTaskCreationCompletes() throws Exception {
+    void shouldKeepUploadFileIoOutsideMethodLevelTransaction() throws Exception {
         Method uploadDocument = DocumentFacadeServiceImpl.class.getMethod(
                 "uploadDocument",
                 String.class,
@@ -278,7 +286,7 @@ class DocumentFacadeServiceImplTest {
                 MultipartFile.class
         );
 
-        assertThat(uploadDocument.getAnnotation(Transactional.class)).isNotNull();
+        assertThat(uploadDocument.getAnnotation(Transactional.class)).isNull();
     }
 
     private DocumentFacadeServiceImpl service(
@@ -296,7 +304,8 @@ class DocumentFacadeServiceImplTest {
                 chunkBgeM3Mapper,
                 knowledgeBaseAccessService,
                 requestScopeData,
-                mock(IngestionTaskServiceImpl.class)
+                mock(IngestionTaskServiceImpl.class),
+                mock(TransactionTemplate.class)
         );
     }
 
@@ -325,6 +334,9 @@ class DocumentFacadeServiceImplTest {
             IngestionTaskServiceImpl ingestionTaskService
     ) {
         try {
+            TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+            when(transactionTemplate.execute(any())).thenAnswer(invocation ->
+                    ((TransactionCallback<?>) invocation.getArgument(0)).doInTransaction(null));
             return DocumentFacadeServiceImpl.class.getConstructor(
                     DocumentMapper.class,
                     DocumentConverter.class,
@@ -333,7 +345,8 @@ class DocumentFacadeServiceImplTest {
                     ChunkBgeM3Mapper.class,
                     KnowledgeBaseAccessService.class,
                     RequestScopeData.class,
-                    IngestionTaskServiceImpl.class
+                    IngestionTaskServiceImpl.class,
+                    TransactionTemplate.class
             ).newInstance(
                     documentMapper,
                     new DocumentConverter(new ObjectMapper()),
@@ -342,7 +355,8 @@ class DocumentFacadeServiceImplTest {
                     chunkBgeM3Mapper,
                     knowledgeBaseAccessService,
                     requestScopeData(),
-                    ingestionTaskService
+                    ingestionTaskService,
+                    transactionTemplate
             );
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("G1 异步上传门面尚未实现", e);
