@@ -15,6 +15,35 @@
 - **工具稳定性** — 压缩阶段防截断工具调用对、工具指标接入、SSE 超时处理
 - **基础设施** — docker-compose 一键启停（PostgreSQL + Redis + RabbitMQ）
 
+## 系统架构
+
+```mermaid
+flowchart LR
+    USER["用户（浏览器）"] --> UI["React + Vite UI<br/>ui/"]
+    MCPX["外部 MCP 客户端<br/>（如 Notion）"] -->|"X-API-Key"| MCP["MCP Server /mcp/*<br/>backend_v2/mcp/"]
+    subgraph BE["Spring Boot 后端（backend_v2）"]
+        UI -->|"REST / SSE"| API["Spring Boot API<br/>controller/"]
+        API --> AUTH["JWT / AOP / owner 校验<br/>auth/"]
+        API --> CHAT["会话与消息服务<br/>service/"]
+        CHAT --> AGENT["JChatMind Think-Execute 循环<br/>agent/"]
+        AGENT --> HARNESS["Harness<br/>allowlist / 熔断 / 审批 / 审计"]
+        HARNESS --> TOOLS["本地工具 + MCP 工具回调"]
+        TOOLS --> RAG["RAG 检索<br/>多路召回 + RRF + rerank"]
+        MCP --> RAG
+        MCP --> TOOLS
+        CHAT --> MEM["用户记忆抽取 / 召回"]
+        AGENT --> SSE["SSE 推送"]
+    end
+    RAG --> OLLAMA["Ollama embedding"]
+    RAG --> PG[("PostgreSQL + pgvector")]
+    MEM --> PG
+    API --> REDIS[("Redis：验证码 / 限流")]
+    API --> MQ[("RabbitMQ：异步邮件")]
+    SSE --> UI
+```
+
+更细的运行链路图（提问到回复、文档摄入、检索排序、记忆生命周期等）见 [docs/项目架构与关键链路.md](docs/项目架构与关键链路.md)。
+
 ## 项目结构
 
 ```text
