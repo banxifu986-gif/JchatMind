@@ -164,3 +164,18 @@ Tier 2-1 裁剪 `selectActiveByUserId` 的 embedding 列后，迁移 L2（真实
 修复：`UserMemory` 补 `@NoArgsConstructor + @AllArgsConstructor`（保留 @Builder），MyBatis 回到无参构造器 + resultMap 属性映射，缺列即 null。裁剪查询配套使用专属 `BaseResultMapNoEmbedding`。
 
 **约定**：实体若为 @Data+@Builder 且被 MyBatis resultMap 读取，裁剪/增删 SELECT 列时必须核对列序与构造器参数序，或显式补无参构造器；全量校验必须包含迁移 L2（mock 测试对这类问题零覆盖）。
+
+
+## 十一、order 270：补回候选表与文档表查找索引（2026-11-12）
+
+dev 库收编清理时删除的 `idx_user_memory_candidate_user_id` 被误判为冗余：契约中的 `user_memory_candidate_idempotency_uq` 是带 `WHERE evidence_message_id IS NOT NULL` 的部分唯一索引，**不能服务普通 `user_id` 查询**（查询谓词无法蕴含部分索引条件）。同时 `document(kb_id)`（`selectByKbId(s)`，文档列表热路径）生产一直无索引。
+
+order 270 迁移 `sql/knowledge-base/2026-11-12-add-lookup-indexes.sql` 补两个 B-tree：
+- `idx_user_memory_candidate_user_id`（修复收编清理引入的退化）
+- `idx_document_kb_id`
+
+契约 requiredIndexes 同步，dev 库经发布入口 upgrade 应用（applied=[create-lookup-indexes]，对账全空），报告 `release-dev-lookup-270.json`。
+
+**遗留项状态更新**：
+- Tier 3 摄入批量化：暂缓——chunk id 由 DB 生成回填、资产/关系与 chunk 插入交错、~15 个测试桩与 L2 压在关键路径上，收益为后台任务数十毫秒（防御等级按单机演示校准）
+- trigram `similarity()` 改 `%` 操作符：暂缓——需 SET LOCAL 事务包装（RagServiceImpl 构造器被 ~35 个测试装配点引用，波及面大），dev 规模下 trigram 本就亚毫秒；配方已在第九节
