@@ -2,7 +2,7 @@
   "manifestVersion": "1",
   "schemaVersion": "2026-10-22-g9",
   "catalogContract": "sql/migrations/catalog-contract.json",
-  "catalogContractSha256": "94bfb857574ff316430d89a29a438cbcf6869760a80a8cd7e942cd68ae37a6d9",
+  "catalogContractSha256": "f20a76da11a977a75359b7c9894f5df291abeebdd7ede263cfecfd90630651ef",
   "baseline": {
     "required": true,
     "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",
@@ -265,6 +265,30 @@
       "transactional": true,
       "requires": [
         "ingestion.create-document-asset"
+      ]
+    },
+    {
+      "order": 250,
+      "id": "knowledge-base.create-hot-filter-indexes",
+      "path": "sql/knowledge-base/2026-11-12-add-hot-filter-indexes.sql",
+      "sha256": "b59ccec9e6678912bfe81c9554bfccc91b515076209e69a4249229c901745811",
+      "transactional": true,
+      "requires": [
+        "ingestion.create-document-asset-extraction",
+        "baseline.chunk-bge-m3",
+        "baseline.user-memory",
+        "baseline.application-schema"
+      ]
+    },
+    {
+      "order": 260,
+      "id": "knowledge-base.create-title-trgm-indexes",
+      "path": "sql/knowledge-base/2026-11-12-add-title-trgm-indexes.sql",
+      "sha256": "5a08ea6631a23d9c931d6f16e9c2e0ddb2be4e3a8045105c43f6dc857f3d96ed",
+      "transactional": true,
+      "requires": [
+        "knowledge-base.create-hot-filter-indexes",
+        "baseline.chunk-bge-m3"
       ]
     }
   ]

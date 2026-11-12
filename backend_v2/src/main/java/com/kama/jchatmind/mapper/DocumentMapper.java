@@ -22,6 +22,8 @@ public interface DocumentMapper {
 
     List<Document> selectByKbId(String kbId);
 
+    List<Document> selectByKbIds(@Param("kbIds") List<String> kbIds);
+
     int deleteById(String id);
 
     int updateById(Document document);

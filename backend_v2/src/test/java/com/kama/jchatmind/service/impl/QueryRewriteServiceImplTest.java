@@ -499,6 +499,11 @@ class QueryRewriteServiceImplTest {
         }
 
         @Override
+        public int deleteByDocId(String docId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public int updateById(com.kama.jchatmind.model.entity.ChunkBgeM3 chunkBgeM3) {
             throw new UnsupportedOperationException();
         }

@@ -16,7 +16,6 @@ import com.kama.jchatmind.model.response.CreateDocumentResponse;
 import com.kama.jchatmind.model.response.GetDocumentsResponse;
 import com.kama.jchatmind.model.vo.DocumentVO;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
-import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import com.kama.jchatmind.service.DocumentFacadeService;
 import com.kama.jchatmind.service.DocumentStorageService;
 import com.kama.jchatmind.service.KnowledgeBaseAccessService;
@@ -52,10 +51,12 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
 
     @Override
     public GetDocumentsResponse getDocuments() {
-        List<Document> documents = new ArrayList<>();
-        for (KnowledgeBase knowledgeBase : knowledgeBaseAccessService.getOwnedKnowledgeBases(requireUserId())) {
-            documents.addAll(documentMapper.selectByKbId(knowledgeBase.getId()));
-        }
+        List<String> kbIds = knowledgeBaseAccessService.getOwnedKnowledgeBases(requireUserId()).stream()
+                .map(KnowledgeBase::getId)
+                .toList();
+        List<Document> documents = kbIds.isEmpty()
+                ? List.of()
+                : documentMapper.selectByKbIds(kbIds);
         List<DocumentVO> result = new ArrayList<>();
         for (Document document : documents) {
             try {
@@ -234,9 +235,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         }
         knowledgeBaseAccessService.requireAccessibleKnowledgeBase(document.getKbId(), requireUserId());
 
-        for (ChunkBgeM3 chunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
-            chunkBgeM3Mapper.deleteById(chunk.getId());
-        }
+        chunkBgeM3Mapper.deleteByDocId(document.getId());
 
         // 删除数据库记录
         int result = documentMapper.deleteById(documentId);

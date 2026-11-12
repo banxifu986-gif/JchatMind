@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -112,7 +113,8 @@ class AgentFacadeServiceImplTest {
         AgentConverter agentConverter = mock(AgentConverter.class);
         when(agentConverter.toVO(agent)).thenReturn(AgentVO.builder().allowedKbs(List.of("legacy-kb")).build());
         AgentKnowledgeBaseBindingService bindingService = mock(AgentKnowledgeBaseBindingService.class);
-        when(bindingService.getBoundKnowledgeBaseIds("agent-1")).thenReturn(List.of("relation-kb"));
+        when(bindingService.getBoundKnowledgeBaseIdsByAgentIds(List.of("agent-1")))
+                .thenReturn(Map.of("agent-1", List.of("relation-kb")));
         AgentFacadeServiceImpl service = service(
                 agentMapper,
                 agentConverter,

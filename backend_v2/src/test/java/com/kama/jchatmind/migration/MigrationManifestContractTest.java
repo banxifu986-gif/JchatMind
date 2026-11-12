@@ -43,7 +43,9 @@ class MigrationManifestContractTest {
             "sql/skill/2026-10-22-create-builtin-skill-task.sql",
             "sql/skill/2026-10-22-add-builtin-skill-task-lease-index.sql",
             "sql/user-memory/2026-10-22-add-memory-governance.sql",
-            "sql/ingestion/2026-11-05-create-document-asset-extraction.sql"
+            "sql/ingestion/2026-11-05-create-document-asset-extraction.sql",
+            "sql/knowledge-base/2026-11-12-add-hot-filter-indexes.sql",
+            "sql/knowledge-base/2026-11-12-add-title-trgm-indexes.sql"
     );
 
     @Test
@@ -224,7 +226,13 @@ class MigrationManifestContractTest {
             root = new ObjectMapper().readTree(input);
         }
 
-        JsonNode migration = root.path("migrations").get(root.path("migrations").size() - 1);
+        JsonNode migration = null;
+        for (JsonNode entry : root.path("migrations")) {
+            if (entry.path("order").asInt() == 240) {
+                migration = entry;
+                break;
+            }
+        }
         String path = "sql/ingestion/2026-11-05-create-document-asset-extraction.sql";
         assertThat(migration.path("id").asText()).isEqualTo("ingestion.create-document-asset-extraction");
         assertThat(migration.path("order").asInt()).isEqualTo(240);
@@ -251,6 +259,99 @@ class MigrationManifestContractTest {
                 .contains("'FAILED'")
                 .contains("'SUPERSEDED'")
                 .contains("attempt_count >= 0");
+    }
+
+    @Test
+    void shouldRegisterHotFilterIndexMigrationAfterDocumentAssetExtraction() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = null;
+        for (JsonNode entry : root.path("migrations")) {
+            if (entry.path("order").asInt() == 250) {
+                migration = entry;
+                break;
+            }
+        }
+        String path = "sql/knowledge-base/2026-11-12-add-hot-filter-indexes.sql";
+        assertThat(migration.path("id").asText()).isEqualTo("knowledge-base.create-hot-filter-indexes");
+        assertThat(migration.path("order").asInt()).isEqualTo(250);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("transactional").asBoolean()).isTrue();
+        assertThat(migration.path("requires").toString())
+                .contains("ingestion.create-document-asset-extraction")
+                .contains("baseline.chunk-bge-m3")
+                .contains("baseline.user-memory")
+                .contains("baseline.application-schema");
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+        assertThat(root.path("catalogContractSha256").asText())
+                .isEqualTo(sha256(Path.of("..", root.path("catalogContract").asText())));
+
+        JsonNode catalog;
+        String catalogPath = root.path("catalogContract").asText();
+        try (InputStream input = Files.newInputStream(Path.of("..", catalogPath))) {
+            catalog = new ObjectMapper().readTree(input);
+        }
+        assertThat(catalog.path("requiredIndexes").toString())
+                .contains("idx_chunk_bge_m3_doc_id")
+                .contains("idx_chunk_bge_m3_kb_id")
+                .contains("idx_chat_message_session_id")
+                .contains("idx_chat_session_user_id")
+                .contains("idx_user_memory_user_id");
+
+        String sql = Files.readString(Path.of("..", path));
+        assertThat(sql)
+                .contains("CREATE INDEX idx_chunk_bge_m3_doc_id")
+                .contains("CREATE INDEX idx_chunk_bge_m3_kb_id")
+                .contains("CREATE INDEX idx_chat_message_session_id")
+                .contains("CREATE INDEX idx_chat_session_user_id")
+                .contains("CREATE INDEX idx_user_memory_user_id");
+    }
+
+    @Test
+    void shouldRegisterTitleTrgmIndexMigrationAfterHotFilterIndexes() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = null;
+        for (JsonNode entry : root.path("migrations")) {
+            if (entry.path("order").asInt() == 260) {
+                migration = entry;
+                break;
+            }
+        }
+        String path = "sql/knowledge-base/2026-11-12-add-title-trgm-indexes.sql";
+        assertThat(migration.path("id").asText()).isEqualTo("knowledge-base.create-title-trgm-indexes");
+        assertThat(migration.path("order").asInt()).isEqualTo(260);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("transactional").asBoolean()).isTrue();
+        assertThat(migration.path("requires").toString())
+                .contains("knowledge-base.create-hot-filter-indexes")
+                .contains("baseline.chunk-bge-m3");
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+        assertThat(root.path("catalogContractSha256").asText())
+                .isEqualTo(sha256(Path.of("..", root.path("catalogContract").asText())));
+
+        JsonNode catalog;
+        String catalogPath = root.path("catalogContract").asText();
+        try (InputStream input = Files.newInputStream(Path.of("..", catalogPath))) {
+            catalog = new ObjectMapper().readTree(input);
+        }
+        assertThat(catalog.path("requiredExtensions").toString()).contains("pg_trgm");
+        assertThat(catalog.path("requiredIndexes").toString())
+                .contains("idx_chunk_bge_m3_title_trgm")
+                .contains("idx_chunk_bge_m3_content_path_trgm");
+
+        String sql = Files.readString(Path.of("..", path));
+        assertThat(sql)
+                .contains("CREATE EXTENSION pg_trgm")
+                .contains("CREATE INDEX idx_chunk_bge_m3_title_trgm")
+                .contains("CREATE INDEX idx_chunk_bge_m3_content_path_trgm")
+                .contains("gin_trgm_ops");
     }
 
     private String sha256(Path path) throws Exception {

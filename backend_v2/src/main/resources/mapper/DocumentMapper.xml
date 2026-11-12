@@ -88,6 +88,24 @@
         ORDER BY updated_at DESC
     </select>
 
+    <select id="selectByKbIds" resultMap="BaseResultMap">
+        SELECT
+            id,
+            kb_id,
+            filename,
+            filetype,
+            size,
+            metadata::text AS metadata,
+            created_at,
+            updated_at
+        FROM document
+        WHERE kb_id IN
+        <foreach collection="kbIds" item="kbId" open="(" separator="," close=")">
+            CAST(#{kbId} AS uuid)
+        </foreach>
+        ORDER BY updated_at DESC
+    </select>
+
     <delete id="deleteById">
         DELETE FROM document WHERE id = CAST(#{id} AS uuid)
     </delete>

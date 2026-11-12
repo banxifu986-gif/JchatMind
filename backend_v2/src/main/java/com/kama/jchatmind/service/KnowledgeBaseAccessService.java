@@ -9,9 +9,13 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -54,8 +58,12 @@ public class KnowledgeBaseAccessService {
             normalizedIds.add(knowledgeBaseId.trim());
         }
 
+        Map<String, KnowledgeBase> knowledgeBaseById = selectKnowledgeBasesByIds(normalizedIds);
         for (String knowledgeBaseId : normalizedIds) {
-            requireAccessibleKnowledgeBase(knowledgeBaseId, userId);
+            KnowledgeBase knowledgeBase = knowledgeBaseById.get(knowledgeBaseId);
+            if (knowledgeBase == null || !userId.equals(knowledgeBase.getOwnerId())) {
+                throw accessDenied();
+            }
         }
         return List.copyOf(normalizedIds);
     }
@@ -66,17 +74,39 @@ public class KnowledgeBaseAccessService {
             return List.of();
         }
 
-        List<KnowledgeBase> result = new ArrayList<>();
+        List<String> candidateIds = new ArrayList<>();
         for (String knowledgeBaseId : new LinkedHashSet<>(knowledgeBaseIds)) {
             if (!StringUtils.hasText(knowledgeBaseId)) {
                 continue;
             }
-            KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(knowledgeBaseId.trim());
+            candidateIds.add(knowledgeBaseId.trim());
+        }
+        if (candidateIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, KnowledgeBase> knowledgeBaseById = selectKnowledgeBasesByIds(candidateIds);
+        List<KnowledgeBase> result = new ArrayList<>();
+        for (String knowledgeBaseId : candidateIds) {
+            KnowledgeBase knowledgeBase = knowledgeBaseById.get(knowledgeBaseId);
             if (knowledgeBase != null && userId.equals(knowledgeBase.getOwnerId())) {
                 result.add(knowledgeBase);
             }
         }
         return result;
+    }
+
+    private Map<String, KnowledgeBase> selectKnowledgeBasesByIds(Collection<String> knowledgeBaseIds) {
+        if (knowledgeBaseIds.isEmpty()) {
+            return Map.of();
+        }
+        return knowledgeBaseMapper.selectByIdBatch(List.copyOf(knowledgeBaseIds)).stream()
+                .filter(knowledgeBase -> knowledgeBase != null && StringUtils.hasText(knowledgeBase.getId()))
+                .collect(Collectors.toMap(
+                        KnowledgeBase::getId,
+                        Function.identity(),
+                        (first, ignored) -> first
+                ));
     }
 
     private String requireUserId(String userId) {

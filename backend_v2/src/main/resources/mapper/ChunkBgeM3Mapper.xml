@@ -133,6 +133,12 @@
         WHERE id = CAST(#{id} AS uuid)
     </delete>
 
+    <delete id="deleteByDocId">
+        DELETE
+        FROM chunk_bge_m3
+        WHERE doc_id = CAST(#{docId} AS uuid)
+    </delete>
+
     <update id="updateById" parameterType="com.kama.jchatmind.model.entity.ChunkBgeM3">
         UPDATE chunk_bge_m3
         <set>
@@ -810,6 +816,8 @@
         <![CDATA[
           AND COALESCE(metadata->>'retrievableTitle', metadata->>'title', '') <> ''
           AND COALESCE(metadata->>'contentPath', '') <> ''
+        ORDER BY created_at ASC, id ASC
+        LIMIT 500
         ]]>
     </select>
 </mapper>

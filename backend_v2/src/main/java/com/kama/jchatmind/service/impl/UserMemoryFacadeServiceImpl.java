@@ -352,10 +352,8 @@ public class UserMemoryFacadeServiceImpl implements UserMemoryFacadeService {
 
             List<UserMemory> fallback;
             try {
-                fallback = getConfirmedMemoriesInternal(userId).stream()
-                        .filter(memory -> memory.getEmbedding() == null)
-                        .limit(topK - semanticResults.size())
-                        .toList();
+                fallback = userMemoryMapper.selectActiveWithoutEmbeddingByUserId(
+                        userId, topK - semanticResults.size());
             } catch (Exception e) {
                 log.warn("Failed to load non-embedding memories as fallback, returning semantic results only", e);
                 return fitRecallCharacterBudget(semanticResults);

@@ -82,9 +82,7 @@ public class DefaultIngestionTaskProcessor implements IngestionTaskProcessor {
         if (pdfDocument || markdownDocument || htmlDocument) {
             documentAssetMapper.deleteByDocumentId(document.getId());
         }
-        for (ChunkBgeM3 existingChunk : chunkBgeM3Mapper.selectByDocId(document.getId())) {
-            chunkBgeM3Mapper.deleteById(existingChunk.getId());
-        }
+        chunkBgeM3Mapper.deleteByDocId(document.getId());
         Map<Integer, DocumentAsset> pdfPageAssets = new LinkedHashMap<>();
         Map<Integer, String> pdfPageContents = pdfDocument ? collectPdfPageContents(sections) : Map.of();
         Set<Integer> persistedPdfPageNumbers = new HashSet<>();

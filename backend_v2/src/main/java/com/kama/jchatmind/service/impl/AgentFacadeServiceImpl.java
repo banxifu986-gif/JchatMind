@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 
 @Slf4j
@@ -46,10 +47,12 @@ public class AgentFacadeServiceImpl implements AgentFacadeService {
             agents = List.of(createDefaultAgent(userId));
         }
         List<AgentVO> result = new ArrayList<>();
+        Map<String, List<String>> bindingsByAgentId = agentKnowledgeBaseBindingService
+                .getBoundKnowledgeBaseIdsByAgentIds(agents.stream().map(Agent::getId).toList());
         for (Agent agent : agents) {
             try {
                 AgentVO vo = agentConverter.toVO(agent);
-                vo.setAllowedKbs(agentKnowledgeBaseBindingService.getBoundKnowledgeBaseIds(agent.getId()));
+                vo.setAllowedKbs(bindingsByAgentId.getOrDefault(agent.getId(), List.of()));
                 result.add(vo);
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);

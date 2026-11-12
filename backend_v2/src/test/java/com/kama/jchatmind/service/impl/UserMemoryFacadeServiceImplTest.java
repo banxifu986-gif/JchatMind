@@ -388,8 +388,8 @@ class UserMemoryFacadeServiceImplTest {
         UserMemory nonEmbeddingMemory = memory("memory-fallback", "7", "无向量记忆");
         when(userMemoryMapper.similaritySearch("7", "[1.0,0.0]", 2))
                 .thenReturn(List.of(semanticMemory));
-        when(userMemoryMapper.selectActiveByUserId("7"))
-                .thenReturn(List.of(semanticMemory, nonEmbeddingMemory));
+        when(userMemoryMapper.selectActiveWithoutEmbeddingByUserId("7", 1))
+                .thenReturn(List.of(nonEmbeddingMemory));
         RagService ragService = mock(RagService.class);
         when(ragService.embed("用户偏好")).thenReturn(new float[]{1.0F, 0.0F});
         UserMemoryFacadeServiceImpl service = createService(
@@ -403,7 +403,7 @@ class UserMemoryFacadeServiceImplTest {
         List<UserMemory> memories = service.recallRelevantMemories("7", "用户偏好", 2);
 
         assertThat(memories).containsExactly(semanticMemory, nonEmbeddingMemory);
-        verify(userMemoryMapper).selectActiveByUserId("7");
+        verify(userMemoryMapper).selectActiveWithoutEmbeddingByUserId("7", 1);
         verify(userMemoryMapper, never()).selectByUserId("7");
     }
 
@@ -851,7 +851,7 @@ class UserMemoryFacadeServiceImplTest {
         candidate.setContent("更新：我喜欢先给结论的简洁回答");
         UserMemory previousMemory = memory("memory-previous", "7", "我喜欢简洁回答");
         when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(previousMemory));
+        when(userMemoryMapper.selectActiveByUserIdAndMemoryType("7", "PREFERENCE")).thenReturn(previousMemory);
         when(userMemoryMapper.insert(any(UserMemory.class))).thenAnswer(invocation -> {
             invocation.getArgument(0, UserMemory.class).setId("memory-current");
             return 1;
@@ -891,8 +891,8 @@ class UserMemoryFacadeServiceImplTest {
         UserMemoryCandidate candidate = candidate("candidate-1", "7", UserMemoryCandidate.STATUS_PENDING);
         candidate.setContent("更新：我喜欢先给结论的简洁回答");
         when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7"))
-                .thenReturn(List.of(memory("memory-previous", "7", "我喜欢简洁回答")));
+        when(userMemoryMapper.selectActiveByUserIdAndMemoryType("7", "PREFERENCE"))
+                .thenReturn(memory("memory-previous", "7", "我喜欢简洁回答"));
         when(userMemoryMapper.insert(any(UserMemory.class))).thenAnswer(invocation -> {
             invocation.getArgument(0, UserMemory.class).setId("memory-current");
             return 1;
@@ -916,10 +916,9 @@ class UserMemoryFacadeServiceImplTest {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         UserMemoryCandidateMapper candidateMapper = candidateMapperThatClaimsPending();
         UserMemoryCandidate candidate = candidate("candidate-1", "7", UserMemoryCandidate.STATUS_PENDING);
-        UserMemory existingMemory = memory("memory-1", "7", "已有偏好");
-        existingMemory.setEmbedding(new float[]{1.0F, 0.0F});
         when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(existingMemory));
+        when(userMemoryMapper.existsActiveSemanticDuplicate("7", "PREFERENCE", "[1.0,0.0]", 0.05D))
+                .thenReturn(true);
         RagService ragService = mock(RagService.class);
         when(ragService.embed(candidate.getContent())).thenReturn(new float[]{1.0F, 0.0F});
         UserMemoryFacadeServiceImpl service = createService(
@@ -933,7 +932,7 @@ class UserMemoryFacadeServiceImplTest {
         assertThatCode(() -> confirmCandidate(service, "candidate-1")).doesNotThrowAnyException();
 
         verify(userMemoryMapper, never()).insert(any(UserMemory.class));
-        verify(userMemoryMapper).selectActiveByUserId("7");
+        verify(userMemoryMapper).existsActiveSemanticDuplicate("7", "PREFERENCE", "[1.0,0.0]", 0.05D);
         verify(ragService).embed(candidate.getContent());
         assertThat(mockingDetails(candidateMapper).getInvocations()).anySatisfy(invocation -> {
             assertThat(invocation.getMethod().getName()).isEqualTo("markPersistedIfPending");
@@ -942,41 +941,14 @@ class UserMemoryFacadeServiceImplTest {
     }
 
     @Test
-    void shouldNotInsertFiniteLargeMagnitudeSemanticDuplicateWhenConfirmingCandidate() {
-        UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
-        UserMemoryCandidateMapper candidateMapper = candidateMapperThatClaimsPending();
-        UserMemoryCandidate candidate = candidate("candidate-1", "7", UserMemoryCandidate.STATUS_PENDING);
-        float[] embedding = new float[]{Float.MAX_VALUE, 0.0F};
-        UserMemory existingMemory = memory("memory-1", "7", "已有偏好");
-        existingMemory.setEmbedding(embedding);
-        when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(existingMemory));
-        RagService ragService = mock(RagService.class);
-        when(ragService.embed(candidate.getContent())).thenReturn(embedding);
-        UserMemoryFacadeServiceImpl service = createService(
-                userMemoryMapper,
-                candidateMapper,
-                mock(ChatMessageFacadeService.class),
-                loggedInUser(7L),
-                ragService
-        );
-
-        assertThatCode(() -> confirmCandidate(service, "candidate-1")).doesNotThrowAnyException();
-
-        verify(userMemoryMapper, never()).insert(any(UserMemory.class));
-    }
-
-    @Test
     void shouldInsertCandidateWhenNearestSemanticMemoryHasDifferentType() {
         UserMemoryMapper userMemoryMapper = mock(UserMemoryMapper.class);
         when(userMemoryMapper.insert(any(UserMemory.class))).thenReturn(1);
         UserMemoryCandidateMapper candidateMapper = candidateMapperThatClaimsPending();
         UserMemoryCandidate candidate = candidate("candidate-1", "7", UserMemoryCandidate.STATUS_PENDING);
-        UserMemory existingMemory = memory("memory-1", "7", "已有事实");
-        existingMemory.setMemoryType("FACT");
-        existingMemory.setEmbedding(new float[]{1.0F, 0.0F});
         when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(existingMemory));
+        when(userMemoryMapper.existsActiveSemanticDuplicate("7", "PREFERENCE", "[1.0,0.0]", 0.05D))
+                .thenReturn(false);
         RagService ragService = mock(RagService.class);
         when(ragService.embed(candidate.getContent())).thenReturn(new float[]{1.0F, 0.0F});
         UserMemoryFacadeServiceImpl service = createService(
@@ -1001,10 +973,9 @@ class UserMemoryFacadeServiceImplTest {
         when(userMemoryMapper.insert(any(UserMemory.class))).thenReturn(1);
         UserMemoryCandidateMapper candidateMapper = candidateMapperThatClaimsPending();
         UserMemoryCandidate candidate = candidate("candidate-1", "7", UserMemoryCandidate.STATUS_PENDING);
-        UserMemory existingMemory = memory("memory-1", "7", "不同偏好");
-        existingMemory.setEmbedding(new float[]{0.0F, 1.0F});
         when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(existingMemory));
+        when(userMemoryMapper.existsActiveSemanticDuplicate("7", "PREFERENCE", "[1.0,0.0]", 0.05D))
+                .thenReturn(false);
         RagService ragService = mock(RagService.class);
         when(ragService.embed(candidate.getContent())).thenReturn(new float[]{1.0F, 0.0F});
         UserMemoryFacadeServiceImpl service = createService(
@@ -1040,7 +1011,11 @@ class UserMemoryFacadeServiceImplTest {
         confirmCandidate(service, "candidate-1");
 
         verify(userMemoryMapper).insert(any(UserMemory.class));
-        verify(userMemoryMapper, never()).selectActiveByUserId("7");
+        verify(userMemoryMapper, never()).existsActiveSemanticDuplicate(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyDouble());
     }
 
     @Test
@@ -1049,10 +1024,9 @@ class UserMemoryFacadeServiceImplTest {
         when(userMemoryMapper.insert(any(UserMemory.class))).thenReturn(1);
         UserMemoryCandidateMapper candidateMapper = candidateMapperThatClaimsPending();
         UserMemoryCandidate candidate = candidate("candidate-1", "7", UserMemoryCandidate.STATUS_PENDING);
-        UserMemory existingMemory = memory("memory-1", "7", "已有偏好");
-        existingMemory.setEmbedding(new float[]{Float.NaN, 0.0F});
         when(candidateMapper.selectByIdAndUserId("candidate-1", "7")).thenReturn(candidate);
-        when(userMemoryMapper.selectActiveByUserId("7")).thenReturn(List.of(existingMemory));
+        when(userMemoryMapper.existsActiveSemanticDuplicate("7", "PREFERENCE", "[1.0,0.0]", 0.05D))
+                .thenReturn(false);
         RagService ragService = mock(RagService.class);
         when(ragService.embed(candidate.getContent())).thenReturn(new float[]{1.0F, 0.0F});
         UserMemoryFacadeServiceImpl service = createService(

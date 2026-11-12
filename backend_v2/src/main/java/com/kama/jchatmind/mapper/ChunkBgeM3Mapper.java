@@ -24,6 +24,8 @@ public interface ChunkBgeM3Mapper {
 
     int deleteById(String id);
 
+    int deleteByDocId(@Param("docId") String docId);
+
     int updateById(ChunkBgeM3 chunkBgeM3);
 
     List<ChunkBgeM3> similaritySearch(

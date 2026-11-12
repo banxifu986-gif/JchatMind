@@ -73,8 +73,6 @@ class DefaultIngestionTaskProcessorTest {
                 .metadata("{\"filePath\":\"kb-1/doc-1/notes.txt\"}")
                 .build());
         when(documentStorageService.getFilePath("kb-1/doc-1/notes.txt")).thenReturn(storedFile);
-        when(chunkBgeM3Mapper.selectByDocId("doc-1"))
-                .thenReturn(List.of(ChunkBgeM3.builder().id("chunk-old").docId("doc-1").build()));
         when(markdownParserService.parseMarkdown(any())).thenReturn(List.of(section()));
         when(ragService.embed(any())).thenReturn(new float[]{0.1F, 0.2F});
         when(chunkBgeM3Mapper.insert(any(ChunkBgeM3.class))).thenReturn(1);
@@ -88,7 +86,7 @@ class DefaultIngestionTaskProcessorTest {
 
         process(processor, IngestionTask.builder().id("task-1").kbId("kb-1").documentId("doc-1").build());
 
-        verify(chunkBgeM3Mapper).deleteById("chunk-old");
+        verify(chunkBgeM3Mapper).deleteByDocId("doc-1");
         ArgumentCaptor<ChunkBgeM3> chunkCaptor = ArgumentCaptor.forClass(ChunkBgeM3.class);
         verify(chunkBgeM3Mapper).insert(chunkCaptor.capture());
         assertThat(chunkCaptor.getValue())

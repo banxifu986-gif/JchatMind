@@ -165,11 +165,7 @@ public class UserMemoryWriteService {
     }
 
     private void handleConflictUpdate(String userId, UserMemoryCandidate candidate, String newContent, float[] embedding) {
-        List<UserMemory> existingMemories = getConfirmedMemoriesInternal(userId);
-        UserMemory match = existingMemories.stream()
-                .filter(memory -> memory.getMemoryType().equals(candidate.getMemoryType()))
-                .findFirst()
-                .orElse(null);
+        UserMemory match = userMemoryMapper.selectActiveByUserIdAndMemoryType(userId, candidate.getMemoryType());
 
         LocalDateTime now = LocalDateTime.now();
         UserMemory userMemory = UserMemory.builder()
@@ -196,56 +192,31 @@ public class UserMemoryWriteService {
     }
 
     boolean hasSemanticDuplicate(String userId, String memoryType, float[] contentEmbedding) {
-        if (contentEmbedding == null) {
+        if (contentEmbedding == null || memoryType == null) {
             return false;
         }
         try {
-            return getConfirmedMemoriesInternal(userId).stream()
-                    .filter(memory -> memoryType != null && memoryType.equals(memory.getMemoryType()))
-                    .anyMatch(memory -> cosineDistance(contentEmbedding, memory.getEmbedding())
-                            <= SEMANTIC_DUPLICATE_MAX_COSINE_DISTANCE);
+            return userMemoryMapper.existsActiveSemanticDuplicate(
+                    userId, memoryType, toVectorLiteral(contentEmbedding), SEMANTIC_DUPLICATE_MAX_COSINE_DISTANCE);
         } catch (Exception e) {
             log.warn("Failed to check semantic memory duplicates: {}", e.getMessage());
             return false;
         }
     }
 
-    private double cosineDistance(float[] first, float[] second) {
-        if (first == null || second == null || first.length == 0 || first.length != second.length) {
-            return Double.POSITIVE_INFINITY;
-        }
-        double dotProduct = 0D;
-        double firstMagnitude = 0D;
-        double secondMagnitude = 0D;
-        for (int i = 0; i < first.length; i++) {
-            double firstValue = first[i];
-            double secondValue = second[i];
-            if (!Double.isFinite(firstValue) || !Double.isFinite(secondValue)) {
-                return Double.POSITIVE_INFINITY;
-            }
-            dotProduct += firstValue * secondValue;
-            firstMagnitude += firstValue * firstValue;
-            secondMagnitude += secondValue * secondValue;
-        }
-        if (!Double.isFinite(dotProduct)
-                || !Double.isFinite(firstMagnitude)
-                || !Double.isFinite(secondMagnitude)
-                || firstMagnitude == 0D
-                || secondMagnitude == 0D) {
-            return Double.POSITIVE_INFINITY;
-        }
-        double similarity = dotProduct / (Math.sqrt(firstMagnitude) * Math.sqrt(secondMagnitude));
-        if (!Double.isFinite(similarity)) {
-            return Double.POSITIVE_INFINITY;
-        }
-        return 1D - Math.max(-1D, Math.min(1D, similarity));
-    }
-
     private UserMemory findConfirmedMemoryByContent(String userId, String content) {
         return userMemoryMapper.selectByUserIdAndContent(userId, content);
     }
 
-    private List<UserMemory> getConfirmedMemoriesInternal(String userId) {
-        return userMemoryMapper.selectActiveByUserId(userId);
+    private String toVectorLiteral(float[] vector) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < vector.length; i++) {
+            sb.append(vector[i]);
+            if (i < vector.length - 1) {
+                sb.append(",");
+            }
+        }
+        sb.append("]");
+        return sb.toString();
     }
 }

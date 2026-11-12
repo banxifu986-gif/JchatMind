@@ -157,7 +157,7 @@ class MigrationLifecycleRuntimeL2Test {
             assertThat(release.status()).isEqualTo(SchemaMigrationReleaseEntry.ReleaseStatus.SUCCEEDED);
             assertThat(result.cleanInstall()).isTrue();
             assertThat(result.schemaVersion()).isEqualTo("2026-10-22-g9");
-            assertThat(result.appliedMigrationIds()).hasSize(23);
+            assertThat(result.appliedMigrationIds()).hasSize(26);
             assertThat(catalog.verified())
                     .withFailMessage("迁移后 catalog 对账失败: missing=%s, forbidden=%s",
                             catalog.missingObjects(), catalog.forbiddenObjects())
@@ -165,10 +165,10 @@ class MigrationLifecycleRuntimeL2Test {
             catalogVerified = true;
             catalogFingerprint = catalog.observedFingerprint();
             assertThat(queryForLong(dataSource,
-                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(24);
+                    "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger")).isEqualTo(27);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger WHERE status = 'APPLIED'"))
-                    .isEqualTo(24);
+                    .isEqualTo(27);
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.builtin_skill_execution_task")).isZero();
             assertThat(queryForLong(dataSource,
@@ -248,11 +248,11 @@ class MigrationLifecycleRuntimeL2Test {
             assertThat(prefix.cleanInstall()).isTrue();
             assertThat(prefix.appliedMigrationIds()).hasSize(8);
             assertThat(upgrade.cleanInstall()).isFalse();
-            assertThat(upgrade.appliedMigrationIds()).hasSize(15);
+            assertThat(upgrade.appliedMigrationIds()).hasSize(18);
             assertThat(replay.appliedMigrationIds()).isEmpty();
             assertThat(queryForLong(dataSource,
                     "SELECT COUNT(*) FROM public.jchatmind_schema_migration_ledger"))
-                    .isEqualTo(24);
+                    .isEqualTo(27);
             executionResult = "passed";
         } finally {
             dropDatabase(database);

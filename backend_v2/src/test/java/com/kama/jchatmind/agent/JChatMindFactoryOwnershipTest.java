@@ -67,7 +67,7 @@ class JChatMindFactoryOwnershipTest {
         KnowledgeBase foreignKnowledgeBase = KnowledgeBase.builder().id("foreign-kb").ownerId("8").build();
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
         when(agentConverter.toDTO(agent)).thenReturn(agentConfig(List.of("foreign-kb")));
-        when(knowledgeBaseMapper.selectById("foreign-kb")).thenReturn(foreignKnowledgeBase);
+        when(knowledgeBaseMapper.selectByIdBatch(List.of("foreign-kb"))).thenReturn(List.of(foreignKnowledgeBase));
         when(knowledgeBaseConverter.toDTO(foreignKnowledgeBase))
                 .thenReturn(KnowledgeBaseDTO.builder().id("foreign-kb").build());
         JChatMindFactory factory = factory(
@@ -91,7 +91,7 @@ class JChatMindFactoryOwnershipTest {
         Agent agent = Agent.builder().id("agent-1").userId("7").model("deepseek-chat").build();
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
         when(agentConverter.toDTO(agent)).thenReturn(agentConfig(List.of("deleted-kb")));
-        when(knowledgeBaseMapper.selectById("deleted-kb")).thenReturn(null);
+        when(knowledgeBaseMapper.selectByIdBatch(List.of("deleted-kb"))).thenReturn(List.of());
         JChatMindFactory factory = factory(
                 agentMapper,
                 agentConverter,
@@ -117,7 +117,7 @@ class JChatMindFactoryOwnershipTest {
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
         when(agentConverter.toDTO(agent)).thenReturn(agentConfig(List.of("legacy-kb")));
         when(bindingService.getBoundKnowledgeBaseIds("agent-1")).thenReturn(List.of("owned-kb"));
-        when(knowledgeBaseMapper.selectById("owned-kb")).thenReturn(ownedKnowledgeBase);
+        when(knowledgeBaseMapper.selectByIdBatch(List.of("owned-kb"))).thenReturn(List.of(ownedKnowledgeBase));
         when(knowledgeBaseConverter.toDTO(ownedKnowledgeBase))
                 .thenReturn(KnowledgeBaseDTO.builder().id("owned-kb").build());
         JChatMindFactory factory = factory(

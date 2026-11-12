@@ -6,7 +6,6 @@ import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.exception.BizException;
 import com.kama.jchatmind.mapper.ChunkBgeM3Mapper;
 import com.kama.jchatmind.mapper.DocumentMapper;
-import com.kama.jchatmind.model.entity.ChunkBgeM3;
 import com.kama.jchatmind.model.entity.Document;
 import com.kama.jchatmind.model.entity.IngestionTask;
 import com.kama.jchatmind.model.request.CreateDocumentRequest;
@@ -139,10 +138,8 @@ class DocumentFacadeServiceImplTest {
         DocumentMapper documentMapper = mock(DocumentMapper.class);
         ChunkBgeM3Mapper chunkBgeM3Mapper = mock(ChunkBgeM3Mapper.class);
         Document document = Document.builder().id("doc-1").kbId("owned-kb").build();
-        ChunkBgeM3 chunk = ChunkBgeM3.builder().id("chunk-1").docId("doc-1").build();
         when(documentMapper.selectById("doc-1")).thenReturn(document);
         when(documentMapper.deleteById("doc-1")).thenReturn(1);
-        when(chunkBgeM3Mapper.selectByDocId("doc-1")).thenReturn(List.of(chunk));
         KnowledgeBaseAccessService knowledgeBaseAccessService = mock(KnowledgeBaseAccessService.class);
         when(knowledgeBaseAccessService.requireAccessibleKnowledgeBase("owned-kb", "7"))
                 .thenReturn(com.kama.jchatmind.model.entity.KnowledgeBase.builder()
@@ -158,7 +155,7 @@ class DocumentFacadeServiceImplTest {
             TransactionSynchronizationManager.clearSynchronization();
         }
 
-        verify(chunkBgeM3Mapper).deleteById("chunk-1");
+        verify(chunkBgeM3Mapper).deleteByDocId("doc-1");
     }
 
     @Test

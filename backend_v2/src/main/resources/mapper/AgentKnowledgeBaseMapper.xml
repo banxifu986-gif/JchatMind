@@ -11,6 +11,23 @@
         ORDER BY bound_at, kb_id
     </select>
 
+    <resultMap id="AgentKnowledgeBaseBindingMap"
+               type="com.kama.jchatmind.model.dto.AgentKnowledgeBaseBindingDTO">
+        <result property="agentId" column="agent_id" jdbcType="VARCHAR"/>
+        <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <select id="selectKbIdsByAgentIds" resultMap="AgentKnowledgeBaseBindingMap">
+        SELECT agent_id,
+               kb_id
+        FROM agent_knowledge_base
+        WHERE agent_id IN
+        <foreach collection="agentIds" item="agentId" open="(" separator="," close=")">
+            CAST(#{agentId} AS uuid)
+        </foreach>
+        ORDER BY bound_at, kb_id
+    </select>
+
     <delete id="deleteByAgentId">
         DELETE FROM agent_knowledge_base
         WHERE agent_id = CAST(#{agentId} AS uuid)

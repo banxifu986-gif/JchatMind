@@ -38,6 +38,23 @@ public interface UserMemoryMapper {
 
     List<UserMemory> selectActiveByUserId(String userId);
 
+    List<UserMemory> selectActiveWithoutEmbeddingByUserId(
+            @Param("userId") String userId,
+            @Param("limit") int limit
+    );
+
+    boolean existsActiveSemanticDuplicate(
+            @Param("userId") String userId,
+            @Param("memoryType") String memoryType,
+            @Param("vectorLiteral") String vectorLiteral,
+            @Param("maxCosineDistance") double maxCosineDistance
+    );
+
+    UserMemory selectActiveByUserIdAndMemoryType(
+            @Param("userId") String userId,
+            @Param("memoryType") String memoryType
+    );
+
     List<UserMemory> selectActiveByIdsForUpdate(
             @Param("userId") String userId,
             @Param("ids") List<String> ids
