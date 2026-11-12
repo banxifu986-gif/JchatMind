@@ -3,7 +3,9 @@ package com.kama.jchatmind.agent.tools;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
+import javax.sql.DataSource;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.util.ArrayList;
@@ -15,8 +17,11 @@ public class DataBaseTools implements Tool {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public DataBaseTools(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public DataBaseTools(DataSource dataSource) {
+        JdbcTemplate toolJdbcTemplate = new JdbcTemplate(dataSource);
+        toolJdbcTemplate.setMaxRows(200);
+        toolJdbcTemplate.setQueryTimeout(5);
+        this.jdbcTemplate = toolJdbcTemplate;
     }
 
     @Override
@@ -40,6 +45,7 @@ public class DataBaseTools implements Tool {
      * @param sql SQL 查询语句（仅支持 SELECT 查询）
      * @return 格式化的查询结果字符串
      */
+    @Transactional(readOnly = true)
     @org.springframework.ai.tool.annotation.Tool(name = "databaseQuery", description = "用于在 PostgreSQL 中执行只读查询（SELECT）。接收由模型生成的查询语句，并返回结构化数据结果。该工具仅用于检索数据，严禁任何写入或修改数据库的语句。")
     public String query(String sql) {
         try {
