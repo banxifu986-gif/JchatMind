@@ -9,7 +9,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Component
 public class InMemoryApprovalStore implements ApprovalStore {
@@ -74,17 +76,23 @@ public class InMemoryApprovalStore implements ApprovalStore {
 
         CompletableFuture<ApprovalStatus> future = futures.get(requestId);
         if (future == null) {
-            return ApprovalStatus.EXPIRED;
+            return getRequest(requestId)
+                    .filter(current -> current.getStatus() != ApprovalStatus.PENDING)
+                    .map(ApprovalRequest::getStatus)
+                    .orElse(ApprovalStatus.EXPIRED);
         }
 
         try {
             future.get(timeoutSeconds, TimeUnit.SECONDS);
-            return getRequest(requestId)
-                    .map(ApprovalRequest::getStatus)
-                    .orElse(ApprovalStatus.EXPIRED);
-        } catch (Exception ignored) {
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return expire(requestId);
+        } catch (ExecutionException | TimeoutException exception) {
             return expire(requestId);
         }
+        return getRequest(requestId)
+                .map(ApprovalRequest::getStatus)
+                .orElse(ApprovalStatus.EXPIRED);
     }
 
     @Override
@@ -112,6 +120,7 @@ public class InMemoryApprovalStore implements ApprovalStore {
             return request;
         }) == null ? ApprovalStatus.EXPIRED : requests.get(requestId).getStatus();
 
+        futures.remove(requestId);
         if (future != null && future.isDone()) {
             try {
                 return future.getNow(finalStatus);

@@ -13,6 +13,7 @@ import com.kama.jchatmind.service.KnowledgeBaseAccessService;
 import com.kama.jchatmind.service.RagService;
 import com.kama.jchatmind.rag.RagRetrievalResultCache;
 import com.kama.jchatmind.webhook.WebhookProperties;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class WorkflowExecutionService {
 
@@ -168,6 +170,7 @@ public class WorkflowExecutionService {
                     step -> executeEvidenceStep(step, resultByChunkId)
             );
         } catch (RuntimeException exception) {
+            log.error("工作流执行失败, traceId: {}", traceId, exception);
             execution = WorkflowExecutionResult.halted(List.of(new WorkflowStepExecution(
                     "workflow-execution",
                     WorkflowStepExecutionStatus.FAILED,
@@ -220,7 +223,8 @@ public class WorkflowExecutionService {
         String answer = null;
         try {
             answer = fallbackAnswerService.answer(modelKey, command.request(), evidence);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException exception) {
+            log.warn("工作流兜底应答生成失败, traceId: {}", traceId, exception);
             answer = null;
         }
         long durationMs = elapsedMillis(startedAt);

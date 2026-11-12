@@ -1,5 +1,6 @@
 package com.kama.jchatmind.webhook;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -20,6 +21,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Component
 public class WebhookDeliveryDispatcher {
 
@@ -162,7 +164,10 @@ public class WebhookDeliveryDispatcher {
         try {
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                jdbcTemplate.update(MARK_DELIVERED_SQL, response.statusCode(), delivery.outboxId(), delivery.attemptCount());
+                int updatedRows = jdbcTemplate.update(MARK_DELIVERED_SQL, response.statusCode(), delivery.outboxId(), delivery.attemptCount());
+                if (updatedRows == 0) {
+                    log.warn("Webhook 送达状态更新未命中, claim 可能已过期, outboxId: {}", delivery.outboxId());
+                }
             } else {
                 markFailed(delivery, "HTTP_STATUS", response.statusCode());
             }
@@ -182,7 +187,7 @@ public class WebhookDeliveryDispatcher {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), clock.getZone());
         long backoffMinutes = Math.min(60L, 1L << Math.min(nextAttempt - 1, 6));
         LocalDateTime nextAttemptAt = deadLetter ? now : now.plusMinutes(backoffMinutes);
-        jdbcTemplate.update(
+        int updatedRows = jdbcTemplate.update(
                 MARK_FAILED_SQL,
                 deadLetter ? "DEAD_LETTER" : "RETRYING",
                 nextAttempt,
@@ -193,6 +198,9 @@ public class WebhookDeliveryDispatcher {
                 delivery.outboxId(),
                 delivery.attemptCount()
         );
+        if (updatedRows == 0) {
+            log.warn("Webhook 失败状态更新未命中, claim 可能已过期, outboxId: {}", delivery.outboxId());
+        }
     }
 
     private boolean hasValidPayloadHash(ClaimedWebhookDelivery delivery) {
