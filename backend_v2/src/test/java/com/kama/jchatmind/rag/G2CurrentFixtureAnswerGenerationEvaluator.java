@@ -18,6 +18,8 @@ import java.util.Set;
 final class G2CurrentFixtureAnswerGenerationEvaluator {
 
     static final String SYSTEM_PROMPT_VERSION = "citation-minimal-v3";
+    /** 与 G2CurrentFixtureProfileLoader.SUPPORTED_DATASET_IDS 保持一致，放行 kb-synthetic-v1 供统一评测 runner 复用。 */
+    private static final Set<String> SUPPORTED_DATASET_IDS = Set.of("fixture-fast-v1", "kb-synthetic-v1");
     private static final String SYSTEM_PROMPT = """
             Answer only from the supplied retrieved context. Answer the exact question and every requested part;
             omit related details the question did not ask for. For a general question, state the general rule only;
@@ -143,9 +145,9 @@ final class G2CurrentFixtureAnswerGenerationEvaluator {
     }
 
     private Set<String> validateInput(G2CurrentFixtureProfile profile, Map<String, String> contextsByCaseId) {
-        if (profile == null || !"fixture-fast-v1".equals(profile.datasetId())
+        if (profile == null || !SUPPORTED_DATASET_IDS.contains(profile.datasetId())
                 || profile.cases() == null || profile.caseCount() != profile.cases().size()) {
-            throw new IllegalArgumentException("current fixture answer generation profile 无效");
+            throw new IllegalArgumentException("answer generation profile 无效或数据集不在白名单: " + SUPPORTED_DATASET_IDS);
         }
         Set<String> caseIds = new HashSet<>();
         for (G2CurrentFixtureCase item : profile.cases()) {

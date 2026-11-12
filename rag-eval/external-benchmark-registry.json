@@ -57,5 +57,25 @@
         ]
       }
     }
+  },
+  "kbSyntheticV1": {
+    "description": "自合成企业知识库端到端评测数据集（手册/FAQ/技术/运维，约 2000 query）",
+    "origin": "original_synthetic",
+    "status": "frozen",
+    "version": "v1",
+    "verifiedAt": "2026-11-11",
+    "location": {
+      "cases": "backend_v2/src/test/resources/rag-eval/datasets/cases/kb-synthetic-v1.jsonl",
+      "corpus": "backend_v2/src/test/resources/rag-eval/datasets/corpus/kb-synthetic-v1/",
+      "answerGold": "backend_v2/src/test/resources/rag-eval/datasets/answer-gold/kb-synthetic-v1-answer-gold.jsonl",
+      "chunkInventory": "datasets/kb-synthetic-v1/working/chunk-inventory.jsonl"
+    },
+    "artifacts": {
+      "caseFileSha256": "2195e2c57aed19569479681a018411304825daa9988b9638941202297e4dc8e7",
+      "corpusSha256": "1ec8e6df58cde17d786a9c12d22c5ab4c014f6222ba78def75db857e5b527bc2",
+      "answerGoldSha256": "6816418205c11ce80b8ad7ac304c3ae28ace43811e62fbed9a1f0fd391998a3c",
+      "chunkInventorySha256": "6f63f265f2777759a34c52d7d2c60e78401d91a6ddc61c69ab61cb50427f1b1f"
+    },
+    "checksumPolicy": "requiredBeforeImport"
   }
 }

@@ -33,6 +33,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 
 import java.io.BufferedReader;
@@ -49,6 +50,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -89,6 +91,12 @@ class MultiCprEvaluationTest {
 
     @Value("${multi-cpr.rerun-import:false}")
     private boolean rerunImport;
+
+    @Value("${multi-cpr.embed-batch-size:32}")
+    private int embedBatchSize;
+
+    @Value("${ollama.base-url:http://127.0.0.1:11434}")
+    private String ollamaBaseUrl;
 
     @Value("${ollama.embedding-model}")
     private String embeddingModel;
@@ -135,9 +143,9 @@ class MultiCprEvaluationTest {
         System.out.println("语料采样数: " + corpusSampleSize);
 
         Map<String, String> queryMap = loadQueries();
-        Map<String, List<String>> qrelsMap = loadQrels();
+        Map<String, Map<String, Integer>> qrelsMap = loadQrels();
         Set<String> requiredPassageIds = qrelsMap.values().stream()
-                .flatMap(List::stream)
+                .flatMap(grades -> grades.keySet().stream())
                 .collect(Collectors.toSet());
         Map<String, String> passageTextMap = loadCorpus(requiredPassageIds);
 
@@ -176,29 +184,7 @@ class MultiCprEvaluationTest {
                 : Math.max(1, corpusSampleSize / corpusFiles.size());
 
         for (Path file : corpusFiles) {
-            List<String> lines = readAllLinesLenient(file);
-            for (String line : lines) {
-                int tabIdx = line.indexOf('\t');
-                if (tabIdx <= 0) {
-                    continue;
-                }
-                String docId = line.substring(0, tabIdx);
-                String text = line.substring(tabIdx + 1);
-                if (!StringUtils.hasText(text)) {
-                    continue;
-                }
-                if (requiredPassageIds.contains(docId)) {
-                    requiredPassages.put(docId, text);
-                }
-                if (corpus.size() < samplePerFile) {
-                    corpus.put(docId, text);
-                } else if (requiredPassages.size() >= requiredPassageIds.size()) {
-                    break;
-                }
-            }
-            if (corpus.size() >= samplePerFile && requiredPassages.size() >= requiredPassageIds.size()) {
-                break;
-            }
+            reservoirSampleFile(file, samplePerFile, requiredPassageIds, corpus, requiredPassages);
         }
 
         corpus.putAll(requiredPassages);
@@ -206,6 +192,50 @@ class MultiCprEvaluationTest {
         System.out.println("corpus 加载完成: " + corpus.size() + " 条 (采样 " + (corpus.size() - requiredPassages.size())
                 + " + 必需 " + requiredPassages.size() + ")");
         return corpus;
+    }
+
+    /**
+     * 每文件固定种子蓄水池采样，消除原先"取前 N 行"的头部偏置；requiredPassages 仍强制纳入。
+     */
+    private void reservoirSampleFile(
+            Path file,
+            int samplePerFile,
+            Set<String> requiredPassageIds,
+            Map<String, String> corpus,
+            Map<String, String> requiredPassages
+    ) throws IOException {
+        Random random = new Random(0L);
+        List<String> sampledIds = new ArrayList<>();
+        Map<String, String> sampled = new LinkedHashMap<>();
+        int seen = 0;
+        for (String line : readAllLinesLenient(file)) {
+            int tabIdx = line.indexOf('\t');
+            if (tabIdx <= 0) {
+                continue;
+            }
+            String docId = line.substring(0, tabIdx);
+            String text = line.substring(tabIdx + 1);
+            if (!StringUtils.hasText(text)) {
+                continue;
+            }
+            if (requiredPassageIds.contains(docId)) {
+                requiredPassages.put(docId, text);
+            }
+            seen++;
+            if (sampled.size() < samplePerFile) {
+                sampled.put(docId, text);
+                sampledIds.add(docId);
+            } else {
+                int replaceIdx = random.nextInt(seen);
+                if (replaceIdx < samplePerFile) {
+                    String replacedId = sampledIds.get(replaceIdx);
+                    sampled.remove(replacedId);
+                    sampledIds.set(replaceIdx, docId);
+                    sampled.put(docId, text);
+                }
+            }
+        }
+        corpus.putAll(sampled);
     }
 
     private List<Path> resolveCorpusFiles() throws IOException {
@@ -254,8 +284,8 @@ class MultiCprEvaluationTest {
         return queries;
     }
 
-    private Map<String, List<String>> loadQrels() throws IOException {
-        Map<String, List<String>> qrels = new LinkedHashMap<>();
+    private Map<String, Map<String, Integer>> loadQrels() throws IOException {
+        Map<String, Map<String, Integer>> qrels = new LinkedHashMap<>();
         List<String> lines = readAllLinesLenient(qrelsPath);
         for (String line : lines) {
             String[] parts = line.split("\t");
@@ -264,9 +294,17 @@ class MultiCprEvaluationTest {
             }
             String queryId = parts[0].trim();
             String docId = parts[2].trim();
-            qrels.computeIfAbsent(queryId, k -> new ArrayList<>()).add(docId);
+            int grade;
+            try {
+                grade = Integer.parseInt(parts[3].trim());
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            if (grade > 0) {
+                qrels.computeIfAbsent(queryId, k -> new LinkedHashMap<>()).put(docId, grade);
+            }
         }
-        System.out.println("qrels 加载完成: " + qrels.size() + " 条 query 有标注");
+        System.out.println("qrels 加载完成: " + qrels.size() + " 条 query 有标注 (仅 grade>0)");
         return qrels;
     }
 
@@ -339,8 +377,15 @@ class MultiCprEvaluationTest {
         int imported = 0;
         LocalDateTime now = LocalDateTime.now();
 
-        System.out.println("开始导入 " + total + " 条 passage (embedding 模型: " + embeddingModel + ")...");
+        System.out.println("开始导入 " + total + " 条 passage (embedding 模型: " + embeddingModel
+                + ", 批大小: " + embedBatchSize + ")...");
         long startTime = System.currentTimeMillis();
+
+        MmarcoZhSampledOllamaBatchEmbedder batchEmbedder = new MmarcoZhSampledOllamaBatchEmbedder(
+                WebClient.builder(), ollamaBaseUrl, embeddingModel, embedBatchSize
+        );
+        List<float[]> embeddings = batchEmbedder.embedAll(new ArrayList<>(passageTextMap.values()));
+        int embeddingIndex = 0;
 
         for (Map.Entry<String, String> entry : passageTextMap.entrySet()) {
             String passageId = entry.getKey();
@@ -357,7 +402,7 @@ class MultiCprEvaluationTest {
                     .build();
             documentMapper.insert(doc);
 
-            float[] embedding = ragService.embed(text);
+            float[] embedding = embeddings.get(embeddingIndex++);
 
             String chunkMetadata = buildChunkMetadata(domain, text);
             ChunkBgeM3 chunk = ChunkBgeM3.builder()
@@ -428,7 +473,7 @@ class MultiCprEvaluationTest {
     private EvaluationResult evaluate(
             String kbId,
             Map<String, String> queryMap,
-            Map<String, List<String>> qrelsMap,
+            Map<String, Map<String, Integer>> qrelsMap,
             Map<String, String> passageIdToDocDbId
     ) {
         List<String> kbIds = List.of(kbId);
@@ -446,9 +491,9 @@ class MultiCprEvaluationTest {
         int processed = 0;
         long startTime = System.currentTimeMillis();
 
-        for (Map.Entry<String, List<String>> entry : qrelsMap.entrySet()) {
+        for (Map.Entry<String, Map<String, Integer>> entry : qrelsMap.entrySet()) {
             String queryId = entry.getKey();
-            List<String> goldPassageIds = entry.getValue();
+            List<String> goldPassageIds = new ArrayList<>(entry.getValue().keySet());
 
             String queryText = queryMap.get(queryId);
             if (!StringUtils.hasText(queryText)) {

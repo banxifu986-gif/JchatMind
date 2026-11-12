@@ -18,6 +18,8 @@ final class G2CurrentFixtureAnswerQualityEvaluator {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int MAX_CONTEXT_CHARACTERS = 12_000;
+    /** 与 G2CurrentFixtureProfileLoader.SUPPORTED_DATASET_IDS 保持一致，放行 kb-synthetic-v1 供统一评测 runner 复用 judge。 */
+    private static final Set<String> SUPPORTED_DATASET_IDS = Set.of("fixture-fast-v1", "kb-synthetic-v1");
     private static final String SYSTEM_PROMPT = """
             Judge only from the supplied query and retrieved context. Do not use outside knowledge.
             Return exactly JSON with numeric faithfulness and answerRelevancy scores from 0 to 1.
@@ -36,9 +38,9 @@ final class G2CurrentFixtureAnswerQualityEvaluator {
             Map<String, String> contextsByCaseId,
             Map<String, String> answersByCaseId
     ) {
-        if (profile == null || !"fixture-fast-v1".equals(profile.datasetId())
+        if (profile == null || !SUPPORTED_DATASET_IDS.contains(profile.datasetId())
                 || profile.cases() == null || profile.caseCount() != profile.cases().size()) {
-            throw new IllegalArgumentException("current fixture answer quality profile 无效");
+            throw new IllegalArgumentException("answer quality profile 无效或数据集不在白名单: " + SUPPORTED_DATASET_IDS);
         }
         Set<String> caseIds = new HashSet<>();
         for (G2CurrentFixtureCase item : profile.cases()) {

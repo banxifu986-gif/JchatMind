@@ -1,6 +1,7 @@
 package com.kama.jchatmind.rag;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.util.List;
 
@@ -9,6 +10,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RagEvaluationDatasetLoaderTest {
+
+    /** kb-synthetic-v1 冻结后运行：-Drag.eval.dataset.frozen-check.enabled=true（quickstart P3 验收）。 */
+    @Test
+    @EnabledIfSystemProperty(named = "rag.eval.dataset.frozen-check.enabled", matches = "true")
+    void loadsAndValidatesFrozenKbSyntheticDataset() throws Exception {
+        RagEvaluationDataset dataset = RagEvaluationDatasetLoader.load("rag-eval/datasets/manifests/kb-synthetic-v1.json");
+
+        assertEquals("kb-synthetic-v1", dataset.manifest().datasetId());
+        assertEquals("frozen", dataset.manifest().status());
+        assertEquals(1990, dataset.cases().size());
+        assertTrue(dataset.cases().stream().anyMatch(RagEvaluationCase::shouldAbstain));
+        assertTrue(dataset.cases().stream().anyMatch(item -> item.queryType().endsWith("_en")));
+        assertTrue(dataset.cases().stream().allMatch(item -> "approved".equals(item.reviewStatus())));
+    }
 
     @Test
     void loadsAndValidatesFrozenFixtureFastDataset() throws Exception {
