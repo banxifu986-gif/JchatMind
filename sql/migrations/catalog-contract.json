@@ -1125,7 +1125,9 @@
     { "table": "chat_session", "name": "idx_chat_session_user_id", "method": "btree", "unique": false },
     { "table": "user_memory", "name": "idx_user_memory_user_id", "method": "btree", "unique": false },
     { "table": "chunk_bge_m3", "name": "idx_chunk_bge_m3_title_trgm", "method": "gin", "unique": false },
-    { "table": "chunk_bge_m3", "name": "idx_chunk_bge_m3_content_path_trgm", "method": "gin", "unique": false }
+    { "table": "chunk_bge_m3", "name": "idx_chunk_bge_m3_content_path_trgm", "method": "gin", "unique": false },
+    { "table": "user_memory_candidate", "name": "idx_user_memory_candidate_user_id", "method": "btree", "unique": false },
+    { "table": "document", "name": "idx_document_kb_id", "method": "btree", "unique": false }
   ],
   "allowedIndexes": [
     { "table": "jchatmind_schema_migration_ledger", "name": "jchatmind_schema_migration_ledger_pkey", "method": "btree", "unique": true },

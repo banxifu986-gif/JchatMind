@@ -2,7 +2,7 @@
   "manifestVersion": "1",
   "schemaVersion": "2026-10-22-g9",
   "catalogContract": "sql/migrations/catalog-contract.json",
-  "catalogContractSha256": "f20a76da11a977a75359b7c9894f5df291abeebdd7ede263cfecfd90630651ef",
+  "catalogContractSha256": "7d0f2207b416cc658c84fc848477974c73a8ac1367ecf6e84cd534637d278d05",
   "baseline": {
     "required": true,
     "source": "The original application schema is not included in this repository and must be supplied as an approved immutable baseline snapshot before clean install.",
@@ -289,6 +289,18 @@
       "requires": [
         "knowledge-base.create-hot-filter-indexes",
         "baseline.chunk-bge-m3"
+      ]
+    },
+    {
+      "order": 270,
+      "id": "knowledge-base.create-lookup-indexes",
+      "path": "sql/knowledge-base/2026-11-12-add-lookup-indexes.sql",
+      "sha256": "e54a33c21165c88e8fe5aee3f1698baababdbd5213c188a40df95369f4fc2273",
+      "transactional": true,
+      "requires": [
+        "knowledge-base.create-title-trgm-indexes",
+        "baseline.user-memory-candidate",
+        "baseline.document"
       ]
     }
   ]

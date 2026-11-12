@@ -45,7 +45,8 @@ class MigrationManifestContractTest {
             "sql/user-memory/2026-10-22-add-memory-governance.sql",
             "sql/ingestion/2026-11-05-create-document-asset-extraction.sql",
             "sql/knowledge-base/2026-11-12-add-hot-filter-indexes.sql",
-            "sql/knowledge-base/2026-11-12-add-title-trgm-indexes.sql"
+            "sql/knowledge-base/2026-11-12-add-title-trgm-indexes.sql",
+            "sql/knowledge-base/2026-11-12-add-lookup-indexes.sql"
     );
 
     @Test
@@ -352,6 +353,48 @@ class MigrationManifestContractTest {
                 .contains("CREATE INDEX idx_chunk_bge_m3_title_trgm")
                 .contains("CREATE INDEX idx_chunk_bge_m3_content_path_trgm")
                 .contains("gin_trgm_ops");
+    }
+
+    @Test
+    void shouldRegisterLookupIndexesMigrationAfterTitleTrgmIndexes() throws Exception {
+        JsonNode root;
+        try (InputStream input = Files.newInputStream(MANIFEST)) {
+            root = new ObjectMapper().readTree(input);
+        }
+
+        JsonNode migration = null;
+        for (JsonNode entry : root.path("migrations")) {
+            if (entry.path("order").asInt() == 270) {
+                migration = entry;
+                break;
+            }
+        }
+        String path = "sql/knowledge-base/2026-11-12-add-lookup-indexes.sql";
+        assertThat(migration.path("id").asText()).isEqualTo("knowledge-base.create-lookup-indexes");
+        assertThat(migration.path("order").asInt()).isEqualTo(270);
+        assertThat(migration.path("path").asText()).isEqualTo(path);
+        assertThat(migration.path("transactional").asBoolean()).isTrue();
+        assertThat(migration.path("requires").toString())
+                .contains("knowledge-base.create-title-trgm-indexes")
+                .contains("baseline.user-memory-candidate")
+                .contains("baseline.document");
+        assertThat(migration.path("sha256").asText()).isEqualTo(sha256(Path.of("..", path)));
+        assertThat(root.path("catalogContractSha256").asText())
+                .isEqualTo(sha256(Path.of("..", root.path("catalogContract").asText())));
+
+        JsonNode catalog;
+        String catalogPath = root.path("catalogContract").asText();
+        try (InputStream input = Files.newInputStream(Path.of("..", catalogPath))) {
+            catalog = new ObjectMapper().readTree(input);
+        }
+        assertThat(catalog.path("requiredIndexes").toString())
+                .contains("idx_user_memory_candidate_user_id")
+                .contains("idx_document_kb_id");
+
+        String sql = Files.readString(Path.of("..", path));
+        assertThat(sql)
+                .contains("CREATE INDEX idx_user_memory_candidate_user_id")
+                .contains("CREATE INDEX idx_document_kb_id");
     }
 
     private String sha256(Path path) throws Exception {
