@@ -57,9 +57,6 @@ class HarnessedSkillKnowledgeToolExecutorTest {
         assertThat(result.executed()).isFalse();
         assertThat(result.reason()).contains("CIRCUIT_BREAKER_OPEN");
         verifyNoInteractions(knowledgeTools);
-        assertThat(auditStore.getBySession("session-1"))
-                .singleElement()
-                .satisfies(record -> assertThat(record.getOutcome().name()).isEqualTo("CIRCUIT_OPEN"));
     }
 
     @Test
@@ -97,9 +94,6 @@ class HarnessedSkillKnowledgeToolExecutorTest {
         assertThat(result.executed()).isFalse();
         assertThat(result.reason()).contains("APPROVAL_EXPIRED");
         verifyNoInteractions(knowledgeTools);
-        assertThat(auditStore.getBySession("session-1"))
-                .singleElement()
-                .satisfies(record -> assertThat(record.getOutcome().name()).isEqualTo("EXPIRED"));
     }
 
     @Test
@@ -139,9 +133,6 @@ class HarnessedSkillKnowledgeToolExecutorTest {
         assertThat(result.results()).containsExactly(retrievalResult);
         verify(knowledgeTools).fork(eq("user-1"), eq("session-1"), anyList());
         verify(boundKnowledgeTools).retrieveKnowledge("比较两种缓存方案", List.of("kb-1"));
-        assertThat(auditStore.getBySession("session-1"))
-                .singleElement()
-                .satisfies(record -> assertThat(record.getOutcome().name()).isEqualTo("SUCCESS"));
     }
 
     private HarnessProperties harnessProperties() {

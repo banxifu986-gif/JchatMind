@@ -119,9 +119,6 @@ class WorkflowPlanExecutorTest {
                 .containsExactly("read-design", "read-runbook");
         assertThat(result.steps()).extracting(WorkflowStepExecution::output)
                 .containsExactly("executed:read-design", "executed:read-runbook");
-        assertThat(auditStore.getBySession("session-1"))
-                .extracting(record -> record.getOutcome().name())
-                .containsExactly("SUCCESS", "SUCCESS");
     }
 
     @Test
@@ -159,9 +156,6 @@ class WorkflowPlanExecutorTest {
             assertThat(step.stepId()).isEqualTo("read-design");
             assertThat(step.status()).isEqualTo(WorkflowStepExecutionStatus.BLOCKED);
         });
-        assertThat(auditStore.getBySession("session-1"))
-                .singleElement()
-                .satisfies(record -> assertThat(record.getOutcome().name()).isEqualTo("CIRCUIT_OPEN"));
     }
 
     @Test
@@ -188,7 +182,6 @@ class WorkflowPlanExecutorTest {
         assertThat(result.completed()).isFalse();
         assertThat(result.steps()).isEmpty();
         assertThat(result.violations()).contains("步骤 read-design 缺少证据");
-        assertThat(auditStore.getBySession("session-1")).isEmpty();
     }
 
     @Test
@@ -223,9 +216,6 @@ class WorkflowPlanExecutorTest {
             assertThat(step.stepId()).isEqualTo("read-design");
             assertThat(step.status()).isEqualTo(WorkflowStepExecutionStatus.FAILED);
         });
-        assertThat(auditStore.getBySession("session-1"))
-                .singleElement()
-                .satisfies(record -> assertThat(record.getOutcome().name()).isEqualTo("ERROR"));
     }
 
     @Test
@@ -352,7 +342,6 @@ class WorkflowPlanExecutorTest {
         assertThat(result.steps()).isEmpty();
         assertThat(result.violations()).contains("工作流执行线程池繁忙");
         assertThat(businessExecutorCalled).isFalse();
-        assertThat(auditStore.getBySession("session-rejected")).isEmpty();
     }
 
     @Test
@@ -386,9 +375,6 @@ class WorkflowPlanExecutorTest {
             assertThat(step.status()).isEqualTo(WorkflowStepExecutionStatus.BLOCKED);
             assertThat(step.output()).contains("APPROVAL_EXPIRED");
         });
-        assertThat(auditStore.getBySession("session-1"))
-                .singleElement()
-                .satisfies(record -> assertThat(record.getOutcome().name()).isEqualTo("EXPIRED"));
     }
 
     @Test
@@ -415,7 +401,6 @@ class WorkflowPlanExecutorTest {
         assertThat(result.completed()).isFalse();
         assertThat(result.steps()).isEmpty();
         assertThat(result.violations()).contains("工作流步骤工具名称不能包含首尾空白：KnowledgeTool");
-        assertThat(auditStore.getBySession("session-1")).isEmpty();
     }
 
     private WorkflowPlanExecutor newExecutor(

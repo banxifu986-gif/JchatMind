@@ -29,15 +29,4 @@ public class InMemoryAuditStore implements AuditStore {
             }
         }
     }
-
-    @Override
-    public List<ToolCallRecord> getBySession(String sessionId) {
-        List<ToolCallRecord> sessionRecords = records.get(sessionId);
-        if (sessionRecords == null) {
-            return List.of();
-        }
-        synchronized (sessionRecords) {
-            return List.copyOf(sessionRecords);
-        }
-    }
 }
