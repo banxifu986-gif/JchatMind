@@ -1,0 +1,22 @@
+{
+  "reportVersion" : "1",
+  "status" : "SUCCEEDED",
+  "generatedAtUtc" : "2026-11-12T09:37:29.395667900Z",
+  "manifestSha256" : "7b768fb0bd2c3e1b71991bc51dc5718f9eccac94027ab8860207030af2f3ac6a",
+  "approvedBaselineSha256" : "da61342e21a5bd180709c5cdf92bbf1a52b81ca0babaad595279ed8f843f9637",
+  "approvedPrerequisites" : [ "manual.owner-review" ],
+  "releaseId" : "migration-l2",
+  "codeRevision" : "test-revision",
+  "rollbackState" : "manual_restore_and_rebuild_required",
+  "knownLimitations" : "isolated runtime evidence only",
+  "cleanInstall" : true,
+  "schemaVersion" : "2026-10-22-g9",
+  "appliedMigrationIds" : [ "auth.create-user-table", "auth.create-email-failure-table", "user-memory.add-columns", "user-memory.add-embedding", "user-memory.add-candidate-status", "user-memory.add-expires-at", "user-memory.add-superseded-by", "user-memory.create-cosine-index", "knowledge-base.add-owner", "knowledge-base.migrate-agent-bindings", "knowledge-base.enforce-owner-not-null", "ingestion.create-task", "ingestion.create-document-asset", "knowledge-base.create-vchord-bm25-index", "mcp.create-principal-access", "knowledge-base.create-deletion-task", "workflow.create-execution-audit", "webhook.create-delivery-outbox", "knowledge-base.create-rag-index-revision", "chat.create-agent-execution-queue", "skill.create-builtin-execution-task", "skill.add-builtin-execution-task-lease-index", "user-memory.add-governance-state", "ingestion.create-document-asset-extraction", "knowledge-base.create-hot-filter-indexes" ],
+  "catalogVerified" : true,
+  "catalogContractSha256" : "200196ecbf8fc4705a789e9b815f9e80f86047706bd112ac18e8a92834bd9f8f",
+  "catalogFingerprint" : "b0cea444b59c0a76455475684be1ea989f49ad9ea969c2edbb9eabb1b00905f0",
+  "catalogMissingObjects" : [ ],
+  "catalogForbiddenObjects" : [ ],
+  "catalogUnexpectedObjects" : [ ],
+  "catalogDefinitionMismatches" : [ ]
+}

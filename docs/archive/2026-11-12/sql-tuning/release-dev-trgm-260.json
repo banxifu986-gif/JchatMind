@@ -1,0 +1,22 @@
+{
+  "reportVersion" : "1",
+  "status" : "SUCCEEDED",
+  "generatedAtUtc" : "2026-11-12T13:06:43.005965600Z",
+  "manifestSha256" : "687957091fb5db232a09559a28c6aa8d379f6ae1a523f14084b9ebcd10ddabc8",
+  "approvedBaselineSha256" : "dd11d9d2aed4057fd5735e2499dd54cdcb884febfe2dc60e188431886dea3e67",
+  "approvedPrerequisites" : [ "manual.owner-review" ],
+  "releaseId" : "dev-trgm-260",
+  "codeRevision" : "789dafe",
+  "rollbackState" : "manual_restore_and_rebuild_required",
+  "knownLimitations" : "maintenance-window execution only; no automatic application-start migration",
+  "cleanInstall" : false,
+  "schemaVersion" : "2026-10-22-g9",
+  "appliedMigrationIds" : [ "knowledge-base.create-title-trgm-indexes" ],
+  "catalogVerified" : true,
+  "catalogContractSha256" : "f20a76da11a977a75359b7c9894f5df291abeebdd7ede263cfecfd90630651ef",
+  "catalogFingerprint" : "cc057bd6349db23a194227ca77a09d655db96538b944c648fbb75c80acf719ef",
+  "catalogMissingObjects" : [ ],
+  "catalogForbiddenObjects" : [ ],
+  "catalogUnexpectedObjects" : [ ],
+  "catalogDefinitionMismatches" : [ ]
+}

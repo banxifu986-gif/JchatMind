@@ -1,0 +1,19 @@
+# dev 库遗留对象删除前留证（2026-11-12 收编清理）
+
+挂在 chunk_bge_m3 / chat_session / user_memory / user_memory_candidate 上的契约外索引，删除前 pg_get_indexdef 留证：
+
+```
+idx_chunk_embedding | CREATE INDEX idx_chunk_embedding ON public.chunk_bge_m3 USING ivfflat (embedding) WITH (lists='100')
+idx_chunk_title_trgm | CREATE INDEX idx_chunk_title_trgm ON public.chunk_bge_m3 USING gin (lower(regexp_replace(TRIM(BOTH FROM (metadata ->> 'title'::text)), '\s+'::text, ' '::text, 'g'::text)) gin_trgm_ops)
+idx_chunk_retrievable_title_trgm | CREATE INDEX idx_chunk_retrievable_title_trgm ON public.chunk_bge_m3 USING gin (lower(regexp_replace(TRIM(BOTH FROM COALESCE((metadata ->> 'retrievableTitle'::text), (metadata ->> 'title'::text))), '\s+'::text, ' '::text, 'g'::text)) gin_trgm_ops)
+idx_chunk_retrievable_title_search_tsv | CREATE INDEX idx_chunk_retrievable_title_search_tsv ON public.chunk_bge_m3 USING gin (to_tsvector('simple'::regconfig, COALESCE((metadata ->> 'retrievableTitleSearchText'::text), ''::text)))
+idx_chat_session_user_id | CREATE INDEX idx_chat_session_user_id ON public.chat_session USING btree (user_id)
+idx_user_memory_user_id | CREATE INDEX idx_user_memory_user_id ON public.user_memory USING btree (user_id)
+idx_user_memory_candidate_user_id | CREATE INDEX idx_user_memory_candidate_user_id ON public.user_memory_candidate USING btree (user_id)
+```
+
+说明：
+- 4 个 idx_chunk_* 为迁移框架前旧时代的 trgm/tsv/ivfflat 索引；`idx_chunk_retrievable_title_trgm` 的表达式与现行 searchByTitleTrigram 匹配，删除后标题检索在 dev 库回退为顺序扫描（dev 规模无感），Tier 2 计划用契约化迁移补回正式 trgm 索引
+- idx_chat_session_user_id / idx_user_memory_user_id 与 order 250 迁移同名同定义，删除后由迁移重建
+- idx_user_memory_candidate_user_id 为契约外冗余索引
+- 另删除 15 张 0 行的 t_* 遗留表（另一项目残留，删除时 CASCADE 连带其 24 个 pkey/key 索引），删除前 n_live_tup 全部为 0

@@ -1,0 +1,22 @@
+{
+  "reportVersion" : "1",
+  "status" : "SUCCEEDED",
+  "generatedAtUtc" : "2026-11-12T10:03:33.815723400Z",
+  "manifestSha256" : "071a618aa50d59b527fb42e84bd2dd7d71953d30fb73865d3be457cb8c61a9c4",
+  "approvedBaselineSha256" : "dd11d9d2aed4057fd5735e2499dd54cdcb884febfe2dc60e188431886dea3e67",
+  "approvedPrerequisites" : [ "manual.owner-review" ],
+  "releaseId" : "dev-onboarding-2026-11-12",
+  "codeRevision" : "789dafe",
+  "rollbackState" : "manual_restore_and_rebuild_required",
+  "knownLimitations" : "maintenance-window execution only; no automatic application-start migration",
+  "cleanInstall" : false,
+  "schemaVersion" : "2026-10-22-g9",
+  "appliedMigrationIds" : [ ],
+  "catalogVerified" : true,
+  "catalogContractSha256" : "23ed0ba557b03f3ad54be3408471b060c13f7d3707d238e521bbd8450114c3a9",
+  "catalogFingerprint" : "d2f7938a4e4e04b6539cd9f9e93cb88f21bd00763919809d27a230fe2bf5078b",
+  "catalogMissingObjects" : [ ],
+  "catalogForbiddenObjects" : [ ],
+  "catalogUnexpectedObjects" : [ ],
+  "catalogDefinitionMismatches" : [ ]
+}

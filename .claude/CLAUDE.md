@@ -11,7 +11,7 @@
 
 ## 当前仓库基线认知
 - 后端测试入口存在：`backend_v2` 可执行 `mvnw.cmd test`
-- 2026-11-12 后端 `mvnw.cmd test` 基线通过：1104 项，0 failures/errors，120 项按条件跳过（门控 L2 运行时测试与评测类）；跳过项不代表真实基础设施或模型验收通过
+- 2026-11-12 后端 `mvnw.cmd test` 基线通过：1105 项，0 failures/errors，120 项按条件跳过（门控 L2 运行时测试与评测类）；跳过项不代表真实基础设施或模型验收通过。迁移 L2（`-Dmigration.lifecycle.l2=true`）已单独跑通：25 条迁移 clean install + catalog 对账通过
 - 依赖完整应用上下文的测试需要真实环境变量（如 `DB_PASSWORD`）：缺配置的机器会在 `ApplicationContext` 启动阶段失败，属环境问题，不是代码基线问题
 - Codex Windows 沙箱内可能在 Mockito/Byte Buddy attach 阶段挂起；应先诊断执行环境，不能据此修改业务逻辑或关闭测试。基线分类与证据见 `docs/项目架构与关键链路.md` 的后端测试基线
 - 前端统一校验入口为 `npm run check`（lint、`npm test`、build）；`npm test` 执行 Node 源码契约与 TypeScript 类型契约，`npm run test:e2e` 显式执行需要前端服务和相应 fixture 的 Playwright 测试
