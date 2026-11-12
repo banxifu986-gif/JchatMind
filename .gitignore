@@ -1,4 +1,3 @@
-/.baseline_head/
 /RAGDataTest
 .claude/settings.local.json
 .claude/understand-anything-temp/
@@ -7,3 +6,5 @@
 /datasets/
 /.vscode/
 /backend_v2/rag-eval/
+.DS_Store
+*.log
