@@ -13,7 +13,7 @@
 - 后端测试入口存在：`backend_v2` 可执行 `mvnw.cmd test`
 - 2026-11-12 后端 `mvnw.cmd test` 基线通过：1105 项，0 failures/errors，120 项按条件跳过（门控 L2 运行时测试与评测类）；跳过项不代表真实基础设施或模型验收通过。迁移 L2（`-Dmigration.lifecycle.l2=true`）已单独跑通：25 条迁移 clean install + catalog 对账通过
 - 依赖完整应用上下文的测试需要真实环境变量（如 `DB_PASSWORD`）：缺配置的机器会在 `ApplicationContext` 启动阶段失败，属环境问题，不是代码基线问题
-- Codex Windows 沙箱内可能在 Mockito/Byte Buddy attach 阶段挂起；应先诊断执行环境，不能据此修改业务逻辑或关闭测试。基线分类与证据见 `docs/项目架构与关键链路.md` 的后端测试基线
+- Codex Windows 沙箱内可能在 Mockito/Byte Buddy attach 阶段挂起；应先诊断执行环境，不能据此修改业务逻辑或关闭测试。基线分类与证据见 `docs/wiki/14-评测体系与门禁.md` 的测试基线节
 - 前端统一校验入口为 `npm run check`（lint、`npm test`、build）；`npm test` 执行 Node 源码契约与 TypeScript 类型契约，`npm run test:e2e` 显式执行需要前端服务和相应 fixture 的 Playwright 测试
 - 后续改动前应先复用这些现有入口确认基线，不要自创校验方式
 
@@ -37,14 +37,14 @@
 
 ## 文档导航
 
-`docs/` 当前只维护两份现行文档，历史方案与参考资料全部归档：
+`docs/` 现行文档只有 `docs/wiki/` 一个来源，历史方案与参考资料全部归档：
 
 - **`docs/README.md`** — 文档总索引，先读这个
-- **`docs/项目架构与关键链路.md`** — 当前架构、主链路、实现边界和源码索引
+- **`docs/wiki/00-INDEX.md`** — 模块地图与按任务选路；01 为全局总览（能力边界、接口总表），02–16 为模块深潜页
 - **`docs/archive/2026-08-15/`** — 历史方案与记录：plans、records、reference、root
 - **`docs/archive/2026-11-10/`** — 近期归档：plans、reference、spec
 
-历史结论只从归档区查阅；若仍然有效，先回填架构文档，再引用它。目录变更以 `docs/README.md` 为准。
+原 `docs/项目架构与关键链路.md` 已并入 wiki 并经源码核验后删除（能力边界与接口总表见 wiki/01，SQL 调优基线见 wiki/13 §3.1），其 git 历史仍可查。历史结论只从归档区查阅；若仍然有效，先回填对应 wiki 页，再引用它。目录变更以 `docs/README.md` 为准。
 
 ### 前端风格
 - 使用 TypeScript + React 函数组件

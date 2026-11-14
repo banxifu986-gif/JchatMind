@@ -4,13 +4,11 @@
 
 归档内容用于追溯，不作为当前实现、当前计划或 Spec 的维护入口。仍然有效的结论必须先回填到：
 
-- [当前架构](../../项目架构与关键链路.md)
-- [当前计划](../../plans/active/trusted-knowledge-agent-roadmap.md)
-- [当前 Spec](../../spec/trusted-knowledge-agent-spec.md)
+- [docs/wiki](../../wiki/00-INDEX.md)（现行唯一文档来源）
 
 目录结构保留原有分类：
 
-- `root/`：旧根目录专题和测试清单
+- `root/`：旧根目录专题
 - `plans/active/`：被当前总计划取代的专项计划
 - `plans/done/`：历史完成计划
 - `records/`：故障、实验、基线和决策记录
