@@ -495,7 +495,6 @@ class UserMemoryFacadeServiceImplTest {
             invocation.getArgument(0, UserMemoryCandidate.class).setId("candidate-1");
             return 1;
         });
-        when(candidateMapper.updateStatusById(any(), any())).thenReturn(1);
         when(userMemoryMapper.insert(any(UserMemory.class))).thenReturn(1);
 
         ExtractionService extractionService = createExtractionService(
@@ -514,7 +513,6 @@ class UserMemoryFacadeServiceImplTest {
         verify(candidateMapper).insert(candidateCaptor.capture());
         assertThat(candidateCaptor.getValue().getStatus()).isEqualTo(UserMemoryCandidate.STATUS_PENDING);
         verify(userMemoryMapper, never()).insert(any(UserMemory.class));
-        verify(candidateMapper, never()).updateStatusById(any(), any());
     }
 
     @Test

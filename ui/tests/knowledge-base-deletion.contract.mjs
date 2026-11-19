@@ -6,10 +6,6 @@ const hookSource = readFileSync(
   new URL("../src/hooks/useKnowledgeBases.ts", import.meta.url),
   "utf8",
 );
-const tabSource = readFileSync(
-  new URL("../src/components/tabs/KnowledgeBaseTabContent.tsx", import.meta.url),
-  "utf8",
-);
 const sideMenuSource = readFileSync(
   new URL("../src/components/SideMenu.tsx", import.meta.url),
   "utf8",
@@ -34,7 +30,6 @@ assert.match(
 assert.match(hookSource, /deleteKnowledgeBaseHandle/, "知识库 Hook 必须暴露删除操作");
 assert.match(hookSource, /getKnowledgeBaseDeletionTask/, "删除操作必须查询最终任务状态");
 assert.match(hookSource, /SUCCEEDED|DEAD_LETTER/, "删除任务必须识别终态");
-assert.match(tabSource, /onDeleteKnowledgeBase/, "知识库列表必须接收删除回调");
-assert.match(tabSource, /Popconfirm/, "删除知识库必须二次确认");
-assert.match(tabSource, /删除知识库/, "删除确认必须明确知识库对象");
 assert.match(sideMenuSource, /onDeleteKnowledgeBase/, "侧边栏必须接入知识库删除操作");
+assert.match(sideMenuSource, /Popconfirm/, "删除知识库必须二次确认");
+assert.match(sideMenuSource, /删除这个知识库/, "删除确认必须明确知识库对象");

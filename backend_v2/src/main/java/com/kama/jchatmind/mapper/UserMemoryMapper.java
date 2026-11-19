@@ -96,8 +96,6 @@ public interface UserMemoryMapper {
             @Param("supersededByMemoryId") String supersededByMemoryId
     );
 
-    int updateEmbedding(@Param("id") String id, @Param("embedding") float[] embedding);
-
     List<UserMemory> similaritySearch(
             @Param("userId") String userId,
             @Param("vectorLiteral") String vectorLiteral,

@@ -152,13 +152,6 @@
           AND (expires_at IS NULL OR expires_at &gt; NOW())
     </update>
 
-    <update id="updateEmbedding">
-        UPDATE user_memory
-        SET embedding = #{embedding}::vector,
-            updated_at = NOW()
-        WHERE id = CAST(#{id} AS uuid)
-    </update>
-
     <update id="updateContentAndEmbedding">
         UPDATE user_memory
         SET content = #{content},

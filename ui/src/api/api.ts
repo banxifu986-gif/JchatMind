@@ -103,11 +103,6 @@ export interface GetChatSessionResponse {
   chatSession: ChatSessionVO;
 }
 
-export interface UpdateChatSessionRequest {
-  title?: string;
-  metadata?: ChatSessionMetadata;
-}
-
 export interface RagRetrievalContext {
   sourceType?: string;
   sourceName?: string;
@@ -126,19 +121,6 @@ export async function getChatSession(
   chatSessionId: string,
 ): Promise<GetChatSessionResponse> {
   return get<GetChatSessionResponse>(`/chat-sessions/${chatSessionId}`);
-}
-
-export async function getChatSessionsByAgentId(
-  agentId: string,
-): Promise<GetChatSessionsResponse> {
-  return get<GetChatSessionsResponse>(`/chat-sessions/agent/${agentId}`);
-}
-
-export async function updateChatSession(
-  chatSessionId: string,
-  request: UpdateChatSessionRequest,
-): Promise<void> {
-  return patch<void>(`/chat-sessions/${chatSessionId}`, request);
 }
 
 export async function deleteChatSession(
@@ -167,11 +149,6 @@ export interface CreateChatMessageResponse {
   chatMessageId: string;
 }
 
-export interface UpdateChatMessageRequest {
-  content?: string;
-  metadata?: MetaData;
-}
-
 export async function getChatMessagesBySessionId(
   sessionId: string,
 ): Promise<GetChatMessagesResponse> {
@@ -184,19 +161,6 @@ export async function createChatMessage(
   return post<CreateChatMessageResponse>("/chat-messages", request);
 }
 
-export async function updateChatMessage(
-  chatMessageId: string,
-  request: UpdateChatMessageRequest,
-): Promise<void> {
-  return patch<void>(`/chat-messages/${chatMessageId}`, request);
-}
-
-export async function deleteChatMessage(
-  chatMessageId: string,
-): Promise<void> {
-  return del<void>(`/chat-messages/${chatMessageId}`);
-}
-
 export interface KnowledgeBaseVO {
   id: string;
   name: string;
@@ -205,11 +169,6 @@ export interface KnowledgeBaseVO {
 
 export interface CreateKnowledgeBaseRequest {
   name: string;
-  description?: string;
-}
-
-export interface UpdateKnowledgeBaseRequest {
-  name?: string;
   description?: string;
 }
 
@@ -256,13 +215,6 @@ export async function getKnowledgeBaseDeletionTask(
   deletionTaskId: string,
 ): Promise<GetKnowledgeBaseDeletionTaskResponse> {
   return get<GetKnowledgeBaseDeletionTaskResponse>(`/knowledge-base-deletion-tasks/${deletionTaskId}`);
-}
-
-export async function updateKnowledgeBase(
-  knowledgeBaseId: string,
-  request: UpdateKnowledgeBaseRequest,
-): Promise<void> {
-  return patch<void>(`/knowledge-bases/${knowledgeBaseId}`, request);
 }
 
 export interface DocumentVO {

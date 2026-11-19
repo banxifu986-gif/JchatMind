@@ -16,7 +16,6 @@ public interface UserMemoryCandidateMapper {
 
     UserMemoryCandidate selectByUserIdAndContent(@Param("userId") String userId, @Param("content") String content);
 
-    int updateStatusById(@Param("id") String id, @Param("status") String status);
 
     int markPersistedIfPending(@Param("id") String id, @Param("userId") String userId);
 
