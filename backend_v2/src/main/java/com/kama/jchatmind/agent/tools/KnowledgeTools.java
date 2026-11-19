@@ -484,7 +484,8 @@ public class KnowledgeTools implements Tool {
         }
         return results.stream()
                 .map(this::formatResultBlock)
-                .collect(Collectors.joining("\n\n"));
+                .collect(Collectors.joining("\n\n"))
+                + "\n\n回答中引用知识库内容时，请逐字使用上述“引用:”后的标识，不得编造或改动。";
     }
 
     private String formatResultBlock(RagRetrievalResult result) {
