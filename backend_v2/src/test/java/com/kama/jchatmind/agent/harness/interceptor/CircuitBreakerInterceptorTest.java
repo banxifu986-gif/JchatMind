@@ -3,18 +3,18 @@ package com.kama.jchatmind.agent.harness.interceptor;
 import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessDecision;
 import com.kama.jchatmind.agent.harness.HarnessProperties;
-import com.kama.jchatmind.agent.harness.HarnessResult;
 import com.kama.jchatmind.agent.harness.circuit.InMemoryCircuitBreakerRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class CircuitBreakerInterceptorTest {
 
     @Test
-    void shouldNotOverrideExistingNonAllowDecision() {
+    void shouldReturnCircuitOpenDecisionWhenOpen() {
         HarnessProperties properties = new HarnessProperties();
         properties.getCircuitBreaker().setEnabled(true);
         properties.getCircuitBreaker().setTools(List.of("databaseQuery"));
@@ -25,18 +25,38 @@ class CircuitBreakerInterceptorTest {
         registry.get("databaseQuery").recordFailure();
 
         CircuitBreakerInterceptor interceptor = new CircuitBreakerInterceptor(properties, registry);
-        HarnessResult result = new HarnessResult();
         HarnessContext context = HarnessContext.builder()
                 .toolCallId("call-1")
                 .toolName("databaseQuery")
                 .toolInput("{\"sql\":\"SELECT 1\"}")
                 .build();
-        result.addContext(context);
-        result.setDecision("call-1", HarnessDecision.pending("approval-1"));
 
-        interceptor.beforeExecution(context, result);
+        HarnessDecision decision = interceptor.beforeExecution(context);
 
-        assertEquals(HarnessDecision.Status.PENDING_APPROVAL, result.getDecision("call-1").getStatus());
-        assertEquals("approval-1", result.getDecision("call-1").getApprovalRequestId());
+        assertEquals(HarnessDecision.Status.CIRCUIT_OPEN, decision.getStatus());
+    }
+
+    @Test
+    void shouldReturnNullWhenClosedOrNotConfigured() {
+        HarnessProperties properties = new HarnessProperties();
+        properties.getCircuitBreaker().setEnabled(true);
+        properties.getCircuitBreaker().setTools(List.of("databaseQuery"));
+
+        InMemoryCircuitBreakerRegistry registry = new InMemoryCircuitBreakerRegistry(properties);
+        CircuitBreakerInterceptor interceptor = new CircuitBreakerInterceptor(properties, registry);
+
+        HarnessContext allowedContext = HarnessContext.builder()
+                .toolCallId("call-1")
+                .toolName("databaseQuery")
+                .toolInput("{}")
+                .build();
+        HarnessContext unlistedContext = HarnessContext.builder()
+                .toolCallId("call-2")
+                .toolName("KnowledgeTool")
+                .toolInput("{}")
+                .build();
+
+        assertNull(interceptor.beforeExecution(allowedContext));
+        assertNull(interceptor.beforeExecution(unlistedContext));
     }
 }

@@ -30,7 +30,8 @@ class HarnessRunnerTest {
                 new AssistantMessage.ToolCall("call-2", "function", "sendEmail", "{\"to\":\"b\"}")
         );
 
-        HarnessResult result = runner.beforeExecution("user-1", "agent-1", "session-1", 1, toolCalls);
+        HarnessResult result = runner.beforeExecution(
+                "user-1", "agent-1", "session-1", 1, toolCalls, null, null, null, null);
 
         assertTrue(result.hasPendingApprovals());
         String firstRequestId = result.getDecision("call-1").getApprovalRequestId();
@@ -38,34 +39,6 @@ class HarnessRunnerTest {
         assertNotNull(firstRequestId);
         assertEquals(firstRequestId, secondRequestId);
         assertEquals(1, runner.getPendingApprovals("session-1").size());
-    }
-
-    @Test
-    void shouldBlockConfiguredToolWhenCircuitIsOpen() {
-        HarnessProperties properties = defaultProperties();
-        InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
-        InMemoryAuditStore auditStore = new InMemoryAuditStore(properties);
-        InMemoryCircuitBreakerRegistry circuitRegistry = new InMemoryCircuitBreakerRegistry(properties);
-        circuitRegistry.get("databaseQuery").recordFailure();
-        circuitRegistry.get("databaseQuery").recordFailure();
-        circuitRegistry.get("databaseQuery").recordFailure();
-
-        HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of(
-                new CircuitBreakerInterceptor(properties, circuitRegistry),
-                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
-                new AuditTrailInterceptor(properties, auditStore)
-        ));
-        HarnessRunner runner = new HarnessRunner(properties, chain, approvalStore, auditStore);
-
-        HarnessResult result = runner.beforeExecution(
-                "user-1",
-                "agent-1",
-                "session-1",
-                1,
-                List.of(new AssistantMessage.ToolCall("call-1", "function", "databaseQuery", "{\"sql\":\"SELECT 1\"}"))
-        );
-
-        assertEquals(HarnessDecision.Status.CIRCUIT_OPEN, result.getDecision("call-1").getStatus());
     }
 
     @Test
@@ -78,7 +51,10 @@ class HarnessRunnerTest {
                 "session-1",
                 1,
                 List.of(new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{}")),
-                Set.of("KnowledgeTool")
+                Set.of("KnowledgeTool"),
+                null,
+                null,
+                null
         );
 
         assertEquals(HarnessDecision.Status.REJECTED, result.getDecision("call-1").getStatus());
@@ -100,7 +76,9 @@ class HarnessRunnerTest {
                         new AssistantMessage.ToolCall("call-2", "function", "sendEmail", "{}")
                 ),
                 Set.of("sendEmail"),
-                Set.of("call-2")
+                Set.of("call-2"),
+                null,
+                null
         );
 
         assertEquals(HarnessDecision.Status.PENDING_APPROVAL, result.getDecision("call-1").getStatus());
@@ -115,7 +93,8 @@ class HarnessRunnerTest {
                 new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{\"to\":\"a\"}")
         );
 
-        HarnessResult result = runner.beforeExecution("user-1", "agent-1", "session-1", 1, toolCalls);
+        HarnessResult result = runner.beforeExecution(
+                "user-1", "agent-1", "session-1", 1, toolCalls, null, null, null, null);
         String requestId = result.getDecision("call-1").getApprovalRequestId();
         runner.reject(requestId);
 
@@ -132,7 +111,11 @@ class HarnessRunnerTest {
                 "agent-1",
                 "session-1",
                 1,
-                List.of(new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{\"to\":\"a\"}"))
+                List.of(new AssistantMessage.ToolCall("call-1", "function", "sendEmail", "{\"to\":\"a\"}")),
+                null,
+                null,
+                null,
+                null
         );
 
         runner.awaitApprovals(result);
@@ -151,13 +134,9 @@ class HarnessRunnerTest {
         InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
         InMemoryAuditStore auditStore = new InMemoryAuditStore(properties);
         InMemoryCircuitBreakerRegistry circuitRegistry = new InMemoryCircuitBreakerRegistry(properties);
-        List<HarnessInterceptor> interceptors = List.of(
-                new CircuitBreakerInterceptor(properties, circuitRegistry),
-                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
-                new AuditTrailInterceptor(properties, auditStore)
-        );
-        HarnessInterceptorChain chain = new HarnessInterceptorChain(interceptors);
-        return new HarnessRunner(properties, chain, approvalStore, auditStore);
+        HumanApprovalInterceptor approvalInterceptor = new HumanApprovalInterceptor(
+                properties, approvalStore, mock(WebhookApprovalOutboxService.class));
+        return new HarnessRunner(properties, approvalInterceptor, approvalStore, auditStore);
     }
 
     private HarnessProperties defaultProperties() {

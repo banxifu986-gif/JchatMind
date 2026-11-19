@@ -2,13 +2,16 @@ package com.kama.jchatmind.workflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.agent.harness.HarnessConstants;
 import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessDecision;
 import com.kama.jchatmind.agent.harness.HarnessResult;
+import com.kama.jchatmind.agent.harness.HarnessRunMetadata;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
+import com.kama.jchatmind.agent.harness.HarnessToolContexts;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
-import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.agent.harness.proxy.HarnessToolCallbackProxy;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.tool.ToolCallback;
@@ -128,9 +131,9 @@ public class WorkflowPlanExecutor {
         } catch (RejectedExecutionException exception) {
             return WorkflowExecutionResult.rejected(List.of("工作流执行线程池繁忙"));
         } catch (TimeoutException exception) {
-            if (!execution.cancel(true)) {
-                return completedResult(execution);
-            }
+            // 超时优先：cancel 尽力中断在飞任务；任务已先行异常完成（cancel 返回 false）时，
+            // 同样以 TIMED_OUT 收口，不把中断引发的异常改判为工作流失败
+            execution.cancel(true);
             return WorkflowExecutionResult.timedOut(executions, runningStepId.get());
         } catch (InterruptedException exception) {
             execution.cancel(true);
@@ -212,23 +215,17 @@ public class WorkflowPlanExecutor {
     ) {
         String toolInput = serializeInput(step);
         String toolCallId = UUID.randomUUID().toString();
-        HarnessResult harnessResult = webhookSourceId == null
-                ? harnessRunner.beforeExecution(
-                        userId,
-                        agentId,
-                        sessionId,
-                        stepNumber,
-                        List.of(new AssistantMessage.ToolCall(toolCallId, "function", step.toolName(), toolInput))
-                )
-                : harnessRunner.beforeExecutionForWebhookSource(
-                        userId,
-                        agentId,
-                        sessionId,
-                        stepNumber,
-                        List.of(new AssistantMessage.ToolCall(toolCallId, "function", step.toolName(), toolInput)),
-                        Set.copyOf(allowedTools),
-                        webhookSourceId
-                );
+        HarnessResult harnessResult = harnessRunner.beforeExecution(
+                userId,
+                agentId,
+                sessionId,
+                stepNumber,
+                List.of(new AssistantMessage.ToolCall(toolCallId, "function", step.toolName(), toolInput)),
+                webhookSourceId == null ? null : Set.copyOf(allowedTools),
+                null,
+                null,
+                webhookSourceId
+        );
         harnessRunner.awaitApprovals(harnessResult);
         HarnessDecision decision = harnessResult.getDecision(toolCallId);
         HarnessContext context = harnessResult.getContext(toolCallId);
@@ -248,18 +245,28 @@ public class WorkflowPlanExecutor {
 
         WorkflowToolCallback callback = new WorkflowToolCallback(step, workflowToolExecutor);
         HarnessToolCallbackProxy proxy = new HarnessToolCallbackProxy(callback, harnessInterceptorChain);
-        HarnessExecutionContextHolder.bind(
-                List.of(context),
-                new HarnessExecutionContextHolder.BatchMetadata(sessionId, agentId, userId, stepNumber)
-        );
         try {
-            proxy.call(toolInput);
+            HarnessToolCallbackProxy.ToolCallOutcome outcome = proxy.callWithOutcome(
+                    toolInput, harnessToolContext(List.of(context), sessionId, agentId, userId, stepNumber));
+            if (outcome.blocked() != null) {
+                return new WorkflowStepExecution(
+                        step.id(), WorkflowStepExecutionStatus.BLOCKED, outcome.blocked().getMessage());
+            }
             return new WorkflowStepExecution(step.id(), WorkflowStepExecutionStatus.SUCCEEDED, callback.output());
         } catch (RuntimeException exception) {
             return new WorkflowStepExecution(step.id(), WorkflowStepExecutionStatus.FAILED, "工作流工具执行失败");
-        } finally {
-            HarnessExecutionContextHolder.clear();
         }
+    }
+
+    private ToolContext harnessToolContext(
+            List<HarnessContext> contexts,
+            String sessionId,
+            String agentId,
+            String userId,
+            int stepNumber
+    ) {
+        return new ToolContext(HarnessToolContexts.toContextData(
+                new HarnessRunMetadata(userId, agentId, sessionId, stepNumber, null), contexts));
     }
 
     private String serializeInput(WorkflowStep step) {
@@ -337,8 +344,23 @@ record WorkflowExecutionResult(
     }
 
     static WorkflowExecutionResult timedOut(List<WorkflowStepExecution> steps, String runningStepId) {
-        List<WorkflowStepExecution> timedOutSteps = new ArrayList<>(steps);
-        if (runningStepId != null && timedOutSteps.stream().noneMatch(step -> step.stepId().equals(runningStepId))) {
+        // 超时优先（specs/003 T310 R3）：超时已触发后，running step 的状态以 TIMED_OUT 收口，
+        // 其后到达的异常/结果记录不再改写状态（对齐 pi aborted 优先语义）
+        List<WorkflowStepExecution> timedOutSteps = new ArrayList<>();
+        boolean runningStepRecorded = false;
+        for (WorkflowStepExecution step : steps) {
+            if (runningStepId != null && step.stepId().equals(runningStepId)) {
+                timedOutSteps.add(new WorkflowStepExecution(
+                        step.stepId(),
+                        WorkflowStepExecutionStatus.TIMED_OUT,
+                        "工作流执行超时"
+                ));
+                runningStepRecorded = true;
+            } else {
+                timedOutSteps.add(step);
+            }
+        }
+        if (runningStepId != null && !runningStepRecorded) {
             timedOutSteps.add(new WorkflowStepExecution(
                     runningStepId,
                     WorkflowStepExecutionStatus.TIMED_OUT,

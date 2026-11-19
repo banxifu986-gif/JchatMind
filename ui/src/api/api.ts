@@ -129,6 +129,12 @@ export async function deleteChatSession(
   return del<void>(`/chat-sessions/${chatSessionId}`);
 }
 
+export async function stopChatExecution(
+  chatSessionId: string,
+): Promise<void> {
+  return post<void>(`/chat-sessions/${chatSessionId}/stop`);
+}
+
 export interface MetaData {
   [key: string]: unknown;
 }

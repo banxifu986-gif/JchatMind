@@ -19,8 +19,10 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -38,8 +40,16 @@ class HarnessedSkillKnowledgeToolExecutorTest {
                 new CircuitBreakerInterceptor(properties, circuitRegistry),
                 new AuditTrailInterceptor(properties, auditStore)
         ));
-        HarnessRunner harnessRunner = new HarnessRunner(properties, interceptorChain, approvalStore, auditStore);
+        HarnessRunner harnessRunner = new HarnessRunner(
+                properties,
+                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
+                approvalStore,
+                auditStore
+        );
+        // P1 后熔断在 Proxy per-call 触发：fork（绑定）允许发生，但检索不得触达
         KnowledgeTools knowledgeTools = mock(KnowledgeTools.class);
+        KnowledgeTools boundKnowledgeTools = mock(KnowledgeTools.class);
+        when(knowledgeTools.fork(anyString(), anyString(), anyList())).thenReturn(boundKnowledgeTools);
         HarnessedSkillKnowledgeToolExecutor executor = new HarnessedSkillKnowledgeToolExecutor(
                 knowledgeTools,
                 harnessRunner,
@@ -56,7 +66,8 @@ class HarnessedSkillKnowledgeToolExecutorTest {
 
         assertThat(result.executed()).isFalse();
         assertThat(result.reason()).contains("CIRCUIT_BREAKER_OPEN");
-        verifyNoInteractions(knowledgeTools);
+        verify(boundKnowledgeTools, never()).retrieveKnowledge(anyString(), anyList());
+        verify(knowledgeTools, never()).retrieveKnowledge(anyString(), anyList());
     }
 
     @Test
@@ -70,12 +81,14 @@ class HarnessedSkillKnowledgeToolExecutorTest {
         InMemoryCircuitBreakerRegistry circuitRegistry = new InMemoryCircuitBreakerRegistry(properties);
         HarnessInterceptorChain interceptorChain = new HarnessInterceptorChain(List.of(
                 new CircuitBreakerInterceptor(properties, circuitRegistry),
-                new HumanApprovalInterceptor(
-                        properties, approvalStore, mock(WebhookApprovalOutboxService.class)
-                ),
                 new AuditTrailInterceptor(properties, auditStore)
         ));
-        HarnessRunner harnessRunner = new HarnessRunner(properties, interceptorChain, approvalStore, auditStore);
+        HarnessRunner harnessRunner = new HarnessRunner(
+                properties,
+                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
+                approvalStore,
+                auditStore
+        );
         KnowledgeTools knowledgeTools = mock(KnowledgeTools.class);
         HarnessedSkillKnowledgeToolExecutor executor = new HarnessedSkillKnowledgeToolExecutor(
                 knowledgeTools,
@@ -106,7 +119,12 @@ class HarnessedSkillKnowledgeToolExecutorTest {
                 new CircuitBreakerInterceptor(properties, circuitRegistry),
                 new AuditTrailInterceptor(properties, auditStore)
         ));
-        HarnessRunner harnessRunner = new HarnessRunner(properties, interceptorChain, approvalStore, auditStore);
+        HarnessRunner harnessRunner = new HarnessRunner(
+                properties,
+                new HumanApprovalInterceptor(properties, approvalStore, mock(WebhookApprovalOutboxService.class)),
+                approvalStore,
+                auditStore
+        );
         KnowledgeTools knowledgeTools = mock(KnowledgeTools.class);
         KnowledgeTools boundKnowledgeTools = mock(KnowledgeTools.class);
         RagRetrievalResult retrievalResult = new RagRetrievalResult();

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { message as antdMessage } from "antd";
-import { RobotOutlined } from "@ant-design/icons";
+import { Button, message as antdMessage } from "antd";
+import { RobotOutlined, StopOutlined } from "@ant-design/icons";
 import AgentChatHistory, {
   type AgentExecutionTraceItem,
 } from "./agentChatView/AgentChatHistory.tsx";
@@ -11,6 +11,7 @@ import {
   createChatMessage,
   createChatSession,
   rejectHarnessRequest,
+  stopChatExecution,
 } from "../../api/api.ts";
 import { useAgents } from "../../hooks/useAgents.ts";
 import { useChatStream } from "../../hooks/useChatStream.ts";
@@ -53,6 +54,22 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
 
   const [approvalOutcome, setApprovalOutcome] = useState<"approved" | "rejected" | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+
+  const handleStopExecution = async () => {
+    if (!chatSessionId || stopping) {
+      return;
+    }
+    setStopping(true);
+    try {
+      await stopChatExecution(chatSessionId);
+    } catch (error: unknown) {
+      antdMessage.error("停止执行失败，请稍后重试");
+      console.error("停止执行失败:", error);
+    } finally {
+      setStopping(false);
+    }
+  };
 
   useEffect(() => {
     if (!chatSessionId) {
@@ -205,6 +222,18 @@ const AgentChatView: React.FC<AgentChatViewProps> = ({ sessionTraceCache }) => {
       />
       <div className="app-chat__active-composer">
         <AgentChatInput onSend={handleSendMessage} />
+        {displayAgentStatus && (
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<StopOutlined />}
+            loading={stopping}
+            onClick={handleStopExecution}
+          >
+            停止
+          </Button>
+        )}
       </div>
     </div>
   );

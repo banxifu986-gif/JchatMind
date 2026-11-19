@@ -2,17 +2,20 @@ package com.kama.jchatmind.skill;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kama.jchatmind.agent.harness.HarnessConstants;
 import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessDecision;
 import com.kama.jchatmind.agent.harness.HarnessResult;
+import com.kama.jchatmind.agent.harness.HarnessRunMetadata;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
+import com.kama.jchatmind.agent.harness.HarnessToolContexts;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
-import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.agent.harness.proxy.HarnessToolCallbackProxy;
 import com.kama.jchatmind.agent.tools.KnowledgeTools;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.dto.RagRetrievalResult;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -62,7 +65,11 @@ class HarnessedSkillKnowledgeToolExecutor implements SkillKnowledgeToolExecutor 
                 SKILL_AGENT_ID,
                 sessionId,
                 1,
-                List.of(new AssistantMessage.ToolCall(toolCallId, "function", TOOL_NAME, toolInput))
+                List.of(new AssistantMessage.ToolCall(toolCallId, "function", TOOL_NAME, toolInput)),
+                null,
+                null,
+                null,
+                null
         );
         harnessRunner.awaitApprovals(harnessResult);
         HarnessDecision decision = harnessResult.getDecision(toolCallId);
@@ -87,19 +94,20 @@ class HarnessedSkillKnowledgeToolExecutor implements SkillKnowledgeToolExecutor 
                     knowledgeBaseIds
             );
             HarnessToolCallbackProxy proxy = new HarnessToolCallbackProxy(callback, harnessInterceptorChain);
-            HarnessExecutionContextHolder.bind(
-                    List.of(context),
-                    new HarnessExecutionContextHolder.BatchMetadata(sessionId, SKILL_AGENT_ID, userId, 1)
-            );
-            try {
-                proxy.call(toolInput);
-            } finally {
-                HarnessExecutionContextHolder.clear();
+            HarnessToolCallbackProxy.ToolCallOutcome outcome = proxy.callWithOutcome(
+                    toolInput, harnessToolContext(context, userId, sessionId));
+            if (outcome.blocked() != null) {
+                return SkillKnowledgeToolResult.blocked(outcome.blocked().getMessage());
             }
             return SkillKnowledgeToolResult.executed(callback.results());
         } catch (RuntimeException exception) {
             return SkillKnowledgeToolResult.blocked("知识库检索暂不可用");
         }
+    }
+
+    private ToolContext harnessToolContext(HarnessContext context, String userId, String sessionId) {
+        return new ToolContext(HarnessToolContexts.toContextData(
+                new HarnessRunMetadata(userId, SKILL_AGENT_ID, sessionId, 1, null), List.of(context)));
     }
 
     private String serializeInput(String question, List<String> knowledgeBaseIds) {

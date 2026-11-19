@@ -1,12 +1,16 @@
 package com.kama.jchatmind.agent;
 
-import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessConstants;
+import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessDecision;
 import com.kama.jchatmind.agent.harness.HarnessResult;
+import com.kama.jchatmind.agent.harness.HarnessRunMetadata;
 import com.kama.jchatmind.agent.harness.HarnessRunner;
+import com.kama.jchatmind.agent.loop.AgentCancelState;
+import com.kama.jchatmind.agent.loop.AgentLoop;
+import com.kama.jchatmind.agent.loop.AgentLoopEvent;
+import com.kama.jchatmind.agent.harness.HarnessToolContexts;
 import com.kama.jchatmind.agent.harness.approval.ApprovalRequest;
-import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.intent.IntentDecision;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
@@ -33,6 +37,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
@@ -42,6 +47,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -68,12 +74,15 @@ public class JChatMind {
     private List<KnowledgeBaseDTO> availableKbs;
     private ToolCallingManager toolCallingManager;
     private AgentToolExecutor toolExecutor;
+    private final AgentCancelState cancelState = new AgentCancelState();
     private ChatMemory chatMemory;
     private String chatSessionId;
 
     private static final Integer MAX_STEPS = 20;
     private static final Integer DEFAULT_MAX_MESSAGES = 20;
     private static final Integer DEFAULT_TOOL_TIMEOUT_SECONDS = 30;
+
+    public static final String PROMPT_VERSION = "agent-think-prompt-v1";
 
     private ChatOptions chatOptions;
     private SseService sseService;
@@ -280,7 +289,6 @@ public class JChatMind {
     private boolean think() {
         this.agentState = AgentState.THINKING;
         sendStatus(SseMessage.Type.AI_THINKING, "思考中...", currentStepNumber);
-        compressMemoryIfNeeded();
         String decisionCorrelationId = UUID.randomUUID().toString();
         String visualAssetSummary = visualAssetSummaryService == null
                 ? null
@@ -431,6 +439,7 @@ public class JChatMind {
     }
 
     private String buildThinkPrompt() {
+        log.info("Agent think prompt 构建: promptVersion={}", PROMPT_VERSION);
         StringBuilder prompt = new StringBuilder();
         prompt.append("""
                 现在你是负责当前回合决策的 Agent。
@@ -460,6 +469,12 @@ public class JChatMind {
                 - 代码示例使用独立的三反引号代码块，语言标记后换行写代码；不要输出空代码块。
                 - 列表中的每一项单独成行；表格的表头、分隔行和每一行数据也必须分别单独成行。
                 - 不要把多个标题、编号条目或表格行连写在同一段/同一行，也不要输出没有换行的伪表格。
+
+                【引用与拒答】
+                - 回答知识库类问题时，仅依据本轮 KnowledgeTool 返回的内容作答。
+                - 检索结果与问题不相关或不足以支持回答时，明确说明无法从知识库回答，不要输出引用标记。
+                - 事实性陈述须引用支撑它的检索结果：逐字使用工具返回中“引用:”后的标识，每个标识至多使用一次，只引用必要的结果。
+                - 不得编造、修改或拼接任何未出现在工具返回中的引用标识。
 
                 【额外信息】
                 - 你当前可访问的知识库：%s
@@ -536,6 +551,37 @@ public class JChatMind {
         this.agentState = AgentState.EXECUTING;
 
         List<AssistantMessage.ToolCall> toolCalls = this.lastChatResponse.getResult().getOutput().getToolCalls();
+
+        // 截断安全（契约 §3）：被截断的响应不进入守卫/审批/执行，全部 toolCall 判废
+        if (HarnessRunner.isOutputTruncated(this.lastChatResponse)) {
+            String discardMessage = harnessRunner.recordDiscardedToolCalls(
+                    userId, agentId, chatSessionId, currentStepNumber, toolCalls);
+            List<ToolResponseMessage.ToolResponse> discardedResponses = toolCalls.stream()
+                    .map(toolCall -> new ToolResponseMessage.ToolResponse(toolCall.id(), toolCall.name(), discardMessage))
+                    .toList();
+            ToolResponseMessage discarded = ToolResponseMessage.builder()
+                    .responses(discardedResponses)
+                    .build();
+            this.chatMemory.add(this.chatSessionId, discarded);
+            saveMessage(discarded);
+            refreshPendingMessages();
+            for (ToolResponseMessage.ToolResponse response : discardedResponses) {
+                String outcome = classifyToolOutcome(response.responseData());
+                completedToolSteps.add("step=%d call=%s tool=%s outcome=%s".formatted(
+                        currentStepNumber,
+                        response.id(),
+                        response.name(),
+                        outcome
+                ));
+                if (completedToolSteps.size() > MAX_STEPS) {
+                    completedToolSteps.remove(0);
+                }
+            }
+            log.warn("模型响应被输出长度截断，本轮全部 toolCall 判废: traceId={}, step={}, calls={}",
+                    currentTraceId, currentStepNumber, toolCalls.size());
+            return;
+        }
+
         Set<String> duplicateToolCallIds = registerToolCallSignatures(toolCalls);
         sendStatus(
                 SseMessage.Type.AI_EXECUTING,
@@ -551,7 +597,8 @@ public class JChatMind {
                 toolCalls,
                 currentTurnAllowedToolNames,
                 duplicateToolCallIds,
-                currentIntentDecisionMetadata
+                currentIntentDecisionMetadata,
+                null
         );
         if (harnessResult.hasPendingApprovals()) {
             sendApprovalEvents(harnessResult);
@@ -567,18 +614,23 @@ public class JChatMind {
 
         List<ToolResponseMessage.ToolResponse> syntheticResponses = buildSyntheticResponses(harnessResult, toolCalls);
 
+        List<HarnessContext> allowedContexts = allowedToolCalls.stream()
+                .map(toolCall -> harnessResult.getContext(toolCall.id()))
+                .filter(context -> context != null)
+                .toList();
+
+        // 契约 §2：ToolContext 注入共享 options 实例（该实例由 ChatClient 在 think 阶段原地写入
+        // 本轮 toolCallbacks，新建副本会丢失回调导致 manager 解析不到工具）
+        applyRunToolContext(allowedContexts);
+
         Prompt prompt = Prompt.builder()
                 .messages(this.chatMemory.get(this.chatSessionId))
                 .chatOptions(this.chatOptions)
                 .build();
 
         long startNanos = System.nanoTime();
-        List<HarnessContext> allowedContexts = allowedToolCalls.stream()
-                .map(toolCall -> harnessResult.getContext(toolCall.id()))
-                .filter(context -> context != null)
-                .toList();
 
-        ToolResponseMessage toolResponseMessage = executeWithTimeout(prompt, allowedToolCalls, allowedContexts);
+        ToolResponseMessage toolResponseMessage = executeWithTimeout(prompt, allowedToolCalls);
         if (!syntheticResponses.isEmpty()) {
             List<ToolResponseMessage.ToolResponse> mergedResponses = new ArrayList<>(toolResponseMessage.getResponses());
             mergedResponses.addAll(syntheticResponses);
@@ -649,10 +701,20 @@ public class JChatMind {
         return duplicateToolCallIds;
     }
 
+    /**
+     * per-run options（契约 §2）：run 元数据与 per-call 上下文经 ToolContext 显式注入。
+     */
+    private void applyRunToolContext(List<HarnessContext> allowedContexts) {
+        Assert.isInstanceOf(ToolCallingChatOptions.class, this.chatOptions,
+                "chatOptions 必须为 ToolCallingChatOptions 才能注入 run 级 ToolContext");
+        ((ToolCallingChatOptions) this.chatOptions).setToolContext(HarnessToolContexts.toContextData(
+                new HarnessRunMetadata(userId, agentId, chatSessionId, currentStepNumber, currentIntentDecisionMetadata),
+                allowedContexts));
+    }
+
     private ToolResponseMessage executeWithTimeout(
             Prompt prompt,
-            List<AssistantMessage.ToolCall> allowedToolCalls,
-            List<HarnessContext> allowedContexts
+            List<AssistantMessage.ToolCall> allowedToolCalls
     ) {
         if (allowedToolCalls.isEmpty()) {
             return ToolResponseMessage.builder()
@@ -662,15 +724,23 @@ public class JChatMind {
 
         ChatResponse responseToExecute = buildFilteredChatResponse(allowedToolCalls);
         try {
+            // R3.1：单 call 退化为顺序等价；多 call 走并行编排（无序发起、按声明顺序回填）
+            if (allowedToolCalls.size() > 1) {
+                return toolExecutor.executeParallel(
+                        toolCallingManager, prompt, responseToExecute, allowedToolCalls,
+                        Duration.ofSeconds(toolTimeoutSeconds), cancelState
+                );
+            }
             return toolExecutor.execute(
-                    toolCallingManager, prompt, responseToExecute, allowedContexts,
-                    new HarnessExecutionContextHolder.BatchMetadata(chatSessionId, agentId, userId, currentStepNumber),
-                    Duration.ofSeconds(toolTimeoutSeconds)
+                    toolCallingManager, prompt, responseToExecute,
+                    Duration.ofSeconds(toolTimeoutSeconds), cancelState
             );
         } catch (TimeoutException | InterruptedException exception) {
             if (exception instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
+            return unconfirmedToolResponse(allowedToolCalls);
+        } catch (CancellationException exception) {
             return unconfirmedToolResponse(allowedToolCalls);
         } catch (RejectedExecutionException exception) {
             runEndReason = "TOOL_EXECUTOR_BUSY";
@@ -747,53 +817,75 @@ public class JChatMind {
         completedToolSteps.clear();
         toolFailureObserved = false;
 
+        AgentLoop loop = new AgentLoop(this::loopStep, this::onLoopEvent, cancelState, MAX_STEPS);
+        loop.setBeforeTurnHook(this::compressMemoryIfNeeded);
         try {
-            this.agentState = AgentState.PLANNING;
-            sendStatus(SseMessage.Type.AI_PLANNING, "Agent 正在分析请求...", 0);
-            for (int i = 0; i <= MAX_STEPS && agentState != AgentState.FINISHED; i++) {
-                int currentStep = i + 1;
-                this.currentStepNumber = currentStep;
-                if (currentStep > MAX_STEPS) {
-                    handleFinalBudgetDecision(think());
-                } else {
-                    step();
-                }
-            }
-            if (agentState != AgentState.FINISHED) {
-                runEndReason = "BUDGET_EXHAUSTED";
-                agentState = AgentState.FINISHED;
-                log.warn("Max steps reached, stopping agent with budget exhausted");
-                sendStatus(SseMessage.Type.AI_ERROR, "执行步数已用尽，任务尚未确认完成", currentStepNumber);
-            } else if (runEndReason == null) {
-                runEndReason = "COMPLETED";
-                sendStatus(SseMessage.Type.AI_DONE, "任务完成", currentStepNumber);
-            } else if ("TOOL_OUTCOME_UNKNOWN".equals(runEndReason)) {
-                sendStatus(SseMessage.Type.AI_ERROR, "工具执行结果未确认，请核实后再操作", currentStepNumber);
-            } else if ("TOOL_EXECUTOR_BUSY".equals(runEndReason)) {
-                sendStatus(SseMessage.Type.AI_ERROR, "工具执行资源已满，本次调用未执行，请稍后重试", currentStepNumber);
-            } else if ("TOOL_FAILURE".equals(runEndReason)) {
-                sendStatus(SseMessage.Type.AI_ERROR, "工具执行失败，任务未确认完成", currentStepNumber);
-            } else {
-                sendStatus(SseMessage.Type.AI_DONE, "需要补充信息后继续", currentStepNumber);
-            }
-            log.info("Agent run ended: traceId={}, reason={}, steps={}, toolResults={}",
-                    currentTraceId,
-                    runEndReason,
-                    currentStepNumber,
-                    completedToolSteps.size());
-        } catch (Exception e) {
-            agentState = AgentState.ERROR;
-            runEndReason = "RUN_FAILURE";
-            log.error("Agent run failed: traceId={}, reason={}, step={}",
-                    currentTraceId,
-                    runEndReason,
-                    currentStepNumber,
-                    e);
-            sendStatus(SseMessage.Type.AI_ERROR, "Agent 执行失败，请稍后重试", currentStepNumber);
-            throw new RuntimeException("Error running agent", e);
+            loop.run();
+        } catch (RuntimeException exception) {
+            throw new RuntimeException("Error running agent", exception);
         }
     }
 
+    /**
+     * 显式停止（幂等）：步间不再进入下一步；在飞工具经共享 AgentCancelState 由执行器中断。
+     */
+    public void stop() {
+        cancelState.cancel();
+    }
+
+    private boolean loopStep(int stepNumber, boolean finalBudgetTurn) {
+        this.currentStepNumber = stepNumber;
+        if (finalBudgetTurn) {
+            handleFinalBudgetDecision(think());
+            return false;
+        }
+        step();
+        return agentState != AgentState.FINISHED;
+    }
+
+    private void onLoopEvent(AgentLoopEvent event) {
+        switch (event.type()) {
+            case AGENT_STARTED -> sendStatus(SseMessage.Type.AI_PLANNING, "Agent 正在分析请求...", 0);
+            case AGENT_FAILED -> {
+                agentState = AgentState.ERROR;
+                runEndReason = "RUN_FAILURE";
+                log.error("Agent run failed: traceId={}, reason={}, step={}",
+                        currentTraceId,
+                        runEndReason,
+                        currentStepNumber,
+                        event.error());
+                sendStatus(SseMessage.Type.AI_ERROR, "Agent 执行失败，请稍后重试", currentStepNumber);
+            }
+            case AGENT_FINISHED -> {
+                if (cancelState.isCancelled()) {
+                    runEndReason = "CANCELLED";
+                    agentState = AgentState.FINISHED;
+                    sendStatus(SseMessage.Type.AI_ERROR, "用户已停止执行", currentStepNumber);
+                } else if (agentState != AgentState.FINISHED) {
+                    runEndReason = "BUDGET_EXHAUSTED";
+                    agentState = AgentState.FINISHED;
+                    log.warn("Max steps reached, stopping agent with budget exhausted");
+                    sendStatus(SseMessage.Type.AI_ERROR, "执行步数已用尽，任务尚未确认完成", currentStepNumber);
+                } else if (runEndReason == null) {
+                    runEndReason = "COMPLETED";
+                    sendStatus(SseMessage.Type.AI_DONE, "任务完成", currentStepNumber);
+                } else if ("TOOL_OUTCOME_UNKNOWN".equals(runEndReason)) {
+                    sendStatus(SseMessage.Type.AI_ERROR, "工具执行结果未确认，请核实后再操作", currentStepNumber);
+                } else if ("TOOL_EXECUTOR_BUSY".equals(runEndReason)) {
+                    sendStatus(SseMessage.Type.AI_ERROR, "工具执行资源已满，本次调用未执行，请稍后重试", currentStepNumber);
+                } else if ("TOOL_FAILURE".equals(runEndReason)) {
+                    sendStatus(SseMessage.Type.AI_ERROR, "工具执行失败，任务未确认完成", currentStepNumber);
+                } else {
+                    sendStatus(SseMessage.Type.AI_DONE, "需要补充信息后继续", currentStepNumber);
+                }
+                log.info("Agent run ended: traceId={}, reason={}, steps={}, toolResults={}",
+                        currentTraceId,
+                        runEndReason,
+                        currentStepNumber,
+                        completedToolSteps.size());
+            }
+        }
+    }
     private ChatResponse buildFilteredChatResponse(List<AssistantMessage.ToolCall> allowedToolCalls) {
         AssistantMessage originalOutput = this.lastChatResponse.getResult().getOutput();
         AssistantMessage filteredOutput = AssistantMessage.builder()

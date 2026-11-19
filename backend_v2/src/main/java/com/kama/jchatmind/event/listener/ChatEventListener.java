@@ -22,6 +22,7 @@ public class ChatEventListener implements AgentExecutionTaskRunner {
     private final UserMemoryFacadeService userMemoryFacadeService;
     private final ChatSessionExecutionCoordinator chatSessionExecutionCoordinator;
     private final MemoryExtractionFailureRegistry memoryExtractionFailureRegistry;
+    private final com.kama.jchatmind.agent.AgentExecutionRegistry agentExecutionRegistry;
     private final Executor agentTaskExecutor;
     private final AtomicLong rejectedTaskCount = new AtomicLong();
 
@@ -30,12 +31,14 @@ public class ChatEventListener implements AgentExecutionTaskRunner {
             UserMemoryFacadeService userMemoryFacadeService,
             ChatSessionExecutionCoordinator chatSessionExecutionCoordinator,
             MemoryExtractionFailureRegistry memoryExtractionFailureRegistry,
+            com.kama.jchatmind.agent.AgentExecutionRegistry agentExecutionRegistry,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor
     ) {
         this.jChatMindFactory = jChatMindFactory;
         this.userMemoryFacadeService = userMemoryFacadeService;
         this.chatSessionExecutionCoordinator = chatSessionExecutionCoordinator;
         this.memoryExtractionFailureRegistry = memoryExtractionFailureRegistry;
+        this.agentExecutionRegistry = agentExecutionRegistry;
         this.agentTaskExecutor = agentTaskExecutor;
     }
 
@@ -113,7 +116,12 @@ public class ChatEventListener implements AgentExecutionTaskRunner {
                             event.getSessionId(),
                             event.getUserMessageId()
                     );
-            jChatMind.run();
+            agentExecutionRegistry.register(event.getSessionId(), jChatMind);
+            try {
+                jChatMind.run();
+            } finally {
+                agentExecutionRegistry.unregister(event.getSessionId(), jChatMind);
+            }
         } finally {
             try {
                 MemoryExtractionResult extractionResult = userMemoryFacadeService.extractMemoryCandidates(

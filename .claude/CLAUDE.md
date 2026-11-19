@@ -34,6 +34,9 @@
 - 事务边界：事务内不做磁盘 IO；多步破坏性删除必须包 `@Transactional`；文件删除挂 `afterCommit`
 - 防御等级按单机演示校准：不新增 write-only 审计、零调用的协调层、为多实例准备的锁与队列
 - `migration/`（手搓 schema 迁移框架）经 2026-11-12 审查评估决定保留：独立包、不在应用启动路径、自带测试；不换 Flyway，不新增该依赖
+- Agent 循环骨架（2026-11-19 specs/003 P2 落地）：`agent/loop/AgentLoop` 持状态机/步数预算（含 finalBudgetTurn 最终消费轮）/next-turn hook/步间取消检查/生命周期事件出口，零 Spring 依赖；`JChatMind` 只持 agent 定义、prompt 组装、SSE 桥（线上契约逐字节不变）与审批编排；用户停止走 `POST /api/chat-sessions/{id}/stop`（三层鉴权、幂等），在飞工具中断 + 步间停步
+- Harness hook 管线（2026-11-19 specs/003 P1 落地）：守卫分两级——`HarnessRunner`（单重载）做重复/白名单拒绝 + 审批闸门（loop 层，不进工具调用栈）；`HarnessToolCallbackProxy` 内单调用栈成对 hook（before 可拦截 / after 可改写 / onError / onBlocked，熔断审计为 per-call 实现，审计 order=9000 链尾记录改写后结果）。工具上下文经 `ToolContext` 显式传递（`HarnessToolContexts` 单点组装），缺失显式失败 `[HARNESS_CONTEXT_MISSING]`，不得回退 ThreadLocal/静默降级
+- 工具并行与截断（2026-11-19 specs/003 P3/P1 落地）：多 call 轮走 `AgentToolExecutor.executeParallel`（并发上限 = 池容量 4，无序发起、按声明顺序回填、失败隔离、aborted 前置）；批级超时/用户取消统一 `TOOL_OUTCOME_UNKNOWN` 收口；finishReason=length 的响应全部 toolCall 判废 `[TOOL_CALLS_TRUNCATED]`
 
 ## 文档导航
 
@@ -54,26 +57,3 @@
 - 现有代码使用双引号、分号、两空格缩进，修改时保持一致
 - 沿用现有 Ant Design 组件写法和已有交互模式，不要擅自改 UI 技术路线
 - 不要未经允许引入新的状态管理方案、请求库或组件库
-
-## 临时：线上限时迭代测试规则（测试结束后删除）
-> 适用场景：面试官指定 demo + 三轮迭代，三小时内完成
-
-### 迭代节奏
-- 每次编码前先口头复述"这轮要改什么、不改什么、边界在哪"，等我确认再动手
-- 每轮迭代结束时输出三段式总结：①改了什么 ②为什么这么改 ③下一轮的改进方向
-- 修改超过 3 个文件时，先列出文件清单再动手
-
-### 范围控制
-- 只做需求范围内的改动，不做任何优化、重构、加功能
-- 如果可以通过加参数/加字段/加条件解决，不要重构
-- AI 提出"更好的架构"时直接拒绝，把 idea 记到总结里的"后续可优化方向"，不动手
-- 遇到需求模糊的地方追问确认，不自行脑补
-
-### 验证纪律
-- 每轮结束至少跑一次已有校验命令（build/lint/test），确保基线没坏
-- 不要跳过验证直接进入下一轮
-- 如果校验失败且是环境/配置问题，明确说明原因，不伪称通过
-
-### 时间意识
-- 单轮编码超过 40 分钟时主动提醒
-- 最后一轮留足兜底时间回看三轮逻辑连贯性

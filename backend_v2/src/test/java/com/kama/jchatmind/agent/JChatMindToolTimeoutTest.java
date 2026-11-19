@@ -34,7 +34,7 @@ class JChatMindToolTimeoutTest {
 
     private void assertTerminalException(Exception exception, String reason) throws Exception {
         AgentToolExecutor executor = mock(AgentToolExecutor.class);
-        doThrow(exception).when(executor).execute(any(), any(), any(), any(), any(), any());
+        doThrow(exception).when(executor).execute(any(), any(), any(), any(), any());
         JChatMind agent = new JChatMind();
         ReflectionTestUtils.setField(agent, "toolExecutor", executor);
         List<AssistantMessage.ToolCall> calls = List.of(
@@ -43,7 +43,7 @@ class JChatMindToolTimeoutTest {
         ReflectionTestUtils.setField(agent, "lastChatResponse", new ChatResponse(List.of(new Generation(
                 AssistantMessage.builder().content("").toolCalls(calls).build()
         ))));
-        ReflectionTestUtils.invokeMethod(agent, "executeWithTimeout", new Prompt("test"), calls, List.of());
+        ReflectionTestUtils.invokeMethod(agent, "executeWithTimeout", new Prompt("test"), calls);
         assertThat(ReflectionTestUtils.getField(agent, "runEndReason")).isEqualTo(reason);
         assertThat(ReflectionTestUtils.getField(agent, "agentState")).isEqualTo(AgentState.FINISHED);
     }
@@ -75,7 +75,7 @@ class JChatMindToolTimeoutTest {
         ))));
         try {
             ToolResponseMessage result = ReflectionTestUtils.invokeMethod(
-                    agent, "executeWithTimeout", new Prompt("test"), calls, List.of()
+                    agent, "executeWithTimeout", new Prompt("test"), calls
             );
             assertThat(interrupted.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(result.getResponses()).singleElement().satisfies(response ->

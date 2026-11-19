@@ -158,7 +158,8 @@ class LongMemEvalReplayHistoryImportRuntimeL2Test {
                 new ChatSessionConverter(new ObjectMapper()),
                 requestScopeData,
                 mock(ChatSessionExecutionCoordinator.class),
-                eventPublisher
+                eventPublisher,
+                new com.kama.jchatmind.agent.AgentExecutionRegistry()
         );
         ChatMessageFacadeServiceImpl chatMessageService = new ChatMessageFacadeServiceImpl(
                 chatMessageMapper,
@@ -414,7 +415,8 @@ class LongMemEvalReplayHistoryImportRuntimeL2Test {
                             new ChatSessionConverter(new ObjectMapper()),
                             requestScopeData,
                             mock(ChatSessionExecutionCoordinator.class),
-                            eventPublisher
+                            eventPublisher,
+                            new com.kama.jchatmind.agent.AgentExecutionRegistry()
                     );
                     ChatMessageFacadeServiceImpl chatMessageService = new ChatMessageFacadeServiceImpl(
                             messageMapper,

@@ -19,7 +19,7 @@ public class InMemoryAuditStore implements AuditStore {
     }
 
     @Override
-    public void record(ToolCallRecord record) {
+    public synchronized void record(ToolCallRecord record) {
         List<ToolCallRecord> sessionRecords = records.computeIfAbsent(record.getSessionId(), key -> new ArrayList<>());
         synchronized (sessionRecords) {
             sessionRecords.add(record);
@@ -27,6 +27,17 @@ public class InMemoryAuditStore implements AuditStore {
             while (sessionRecords.size() > maxRecords) {
                 sessionRecords.remove(0);
             }
+        }
+    }
+
+    @Override
+    public List<ToolCallRecord> getRecords(String sessionId) {
+        List<ToolCallRecord> sessionRecords = records.get(sessionId);
+        if (sessionRecords == null) {
+            return List.of();
+        }
+        synchronized (sessionRecords) {
+            return List.copyOf(sessionRecords);
         }
     }
 }

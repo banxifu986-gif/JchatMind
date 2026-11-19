@@ -114,9 +114,11 @@ public class G5ChatHttpRecoveryTestConfig {
             ChatSessionConverter converter,
             RequestScopeData requestScopeData,
             ChatSessionExecutionCoordinator coordinator,
-            ApplicationEventPublisher publisher
+            ApplicationEventPublisher publisher,
+            com.kama.jchatmind.agent.AgentExecutionRegistry agentExecutionRegistry
     ) {
-        return new ChatSessionFacadeServiceImpl(mapper, converter, requestScopeData, coordinator, publisher);
+        return new ChatSessionFacadeServiceImpl(mapper, converter, requestScopeData, coordinator, publisher,
+                agentExecutionRegistry);
     }
 
     @Bean

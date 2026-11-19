@@ -148,6 +148,7 @@ class AsyncConfigTest {
             context.registerBean(UserMemoryFacadeService.class, () -> mock(UserMemoryFacadeService.class));
             context.registerBean(ChatSessionExecutionCoordinator.class, () -> new ChatSessionExecutionCoordinator());
             context.registerBean(MemoryExtractionFailureRegistry.class);
+            context.registerBean(com.kama.jchatmind.agent.AgentExecutionRegistry.class);
             context.registerBean(ChatEventListener.class);
             context.registerBean(AgentTaskExecutorMetrics.class);
             context.refresh();
@@ -188,6 +189,7 @@ class AsyncConfigTest {
                 context.registerBean(UserMemoryFacadeService.class, () -> mock(UserMemoryFacadeService.class));
                 context.registerBean(ChatSessionExecutionCoordinator.class, () -> new ChatSessionExecutionCoordinator());
                 context.registerBean(MemoryExtractionFailureRegistry.class);
+                context.registerBean(com.kama.jchatmind.agent.AgentExecutionRegistry.class);
                 context.registerBean(ChatEventListener.class);
                 context.registerBean(AgentTaskExecutorMetrics.class);
                 context.refresh();
@@ -280,6 +282,7 @@ class AsyncConfigTest {
                 context.registerBean(UserMemoryFacadeService.class, () -> memoryService);
                 context.registerBean(ChatSessionExecutionCoordinator.class, () -> new ChatSessionExecutionCoordinator());
                 context.registerBean(MemoryExtractionFailureRegistry.class);
+                context.registerBean(com.kama.jchatmind.agent.AgentExecutionRegistry.class);
                 context.registerBean(ChatEventListener.class);
                 context.registerBean(AgentTaskExecutorMetrics.class);
                 context.refresh();

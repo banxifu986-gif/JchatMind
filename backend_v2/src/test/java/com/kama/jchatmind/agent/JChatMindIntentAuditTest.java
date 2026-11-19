@@ -99,7 +99,8 @@ class JChatMindIntentAuditTest {
                 anyList(),
                 anySet(),
                 anySet(),
-                any(IntentDecisionMetadata.class)
+                any(IntentDecisionMetadata.class),
+                any()
         )).thenReturn(rejectedResult);
 
         JChatMind agent = new JChatMind(
@@ -133,7 +134,8 @@ class JChatMindIntentAuditTest {
                 anyList(),
                 anySet(),
                 anySet(),
-                metadataCaptor.capture()
+                metadataCaptor.capture(),
+                any()
         );
         IntentDecisionMetadata metadata = metadataCaptor.getValue();
         assertThat(telemetryEvents).isNotEmpty();

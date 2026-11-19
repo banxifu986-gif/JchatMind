@@ -39,39 +39,31 @@ class WorkflowPlanExecutorTest {
     @Test
     void shouldPropagateExplicitWebhookSourceIdIntoHarnessApprovalContext() {
         HarnessProperties properties = harnessProperties();
+        properties.getHumanApproval().setEnabled(true);
+        properties.getHumanApproval().setTools(List.of("KnowledgeTool"));
+        // 审批超时置 0：enqueue 后立即过期进入 BLOCKED，测试不阻塞
+        properties.getHumanApproval().setTimeoutSeconds(0);
         InMemoryAuditStore auditStore = new InMemoryAuditStore(properties);
         InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
-        AtomicReference<String> observedSourceId = new AtomicReference<>();
-        HarnessInterceptor sourceCapture = new HarnessInterceptor() {
-            @Override
-            public void beforeExecution(
-                    com.kama.jchatmind.agent.harness.HarnessContext context,
-                    com.kama.jchatmind.agent.harness.HarnessResult result
-            ) {
-                observedSourceId.set(context.getWebhookSourceId());
-            }
-
-            @Override
-            public void afterExecution(com.kama.jchatmind.agent.harness.HarnessContext context, String toolResult) {
-            }
-
-            @Override
-            public void onError(com.kama.jchatmind.agent.harness.HarnessContext context, Exception exception) {
-            }
-
-            @Override
-            public int getOrder() {
-                return 1;
-            }
-        };
-        HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of(sourceCapture));
+        // P1 后 webhookSourceId 由 Runner 直调审批拦截器传递，经 webhook outbox 出站可观测
+        WebhookApprovalOutboxService outbox = mock(WebhookApprovalOutboxService.class);
+        com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor approvalInterceptor =
+                new com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor(
+                        properties, approvalStore, outbox);
+        HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of());
         WorkflowPlanExecutor executor = new WorkflowPlanExecutor(
                 new WorkflowPlanVerifier(),
-                new HarnessRunner(properties, chain, approvalStore, auditStore),
+                new HarnessRunner(properties, approvalInterceptor, approvalStore, auditStore),
                 chain,
                 new ObjectMapper(),
                 Runnable::run
         );
+        AtomicReference<String> observedSourceId = new AtomicReference<>();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            observedSourceId.set(invocation.getArgument(0));
+            return null;
+        }).when(outbox).enqueue(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
 
         WorkflowExecutionResult result = executor.executeForWebhookSource(
                 "7",
@@ -83,7 +75,11 @@ class WorkflowPlanExecutorTest {
                 step -> "evidence"
         );
 
-        assertThat(result.completed()).isTrue();
+        org.mockito.Mockito.verify(outbox).enqueue(
+                org.mockito.ArgumentMatchers.eq("build-system"),
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq("session-1"));
         assertThat(observedSourceId.get()).isEqualTo("build-system");
     }
 
@@ -216,6 +212,52 @@ class WorkflowPlanExecutorTest {
             assertThat(step.stepId()).isEqualTo("read-design");
             assertThat(step.status()).isEqualTo(WorkflowStepExecutionStatus.FAILED);
         });
+    }
+
+    /**
+     * specs/003 T310 R3 竞态语义（确定性复现）：超时已触发后，running step 的晚到 FAILED
+     * 记录不得改写其 TIMED_OUT 状态（超时优先，对齐 pi aborted 优先）。
+     * 现实现 timedOut() 对"running step 已在列表"直接跳过合成 → FAILED 抢占 → 本测试红。
+     */
+    @Test
+    void timedOutShouldOverrideLateArrivingFailedStatusOfRunningStep() {
+        WorkflowStepExecution lateFailed =
+                new WorkflowStepExecution(
+                        "slow-step", WorkflowStepExecutionStatus.FAILED, "工作流工具执行失败");
+
+        WorkflowExecutionResult result = WorkflowExecutionResult.timedOut(
+                List.of(lateFailed), "slow-step");
+
+        assertThat(result.steps()).singleElement().satisfies(step -> {
+            assertThat(step.stepId()).isEqualTo("slow-step");
+            assertThat(step.status()).isEqualTo(WorkflowStepExecutionStatus.TIMED_OUT);
+        });
+        assertThat(result.completed()).isFalse();
+    }
+
+    @Test
+    void timedOutShouldSynthesizeTimedOutStepWhenRunningStepNotYetRecorded() {
+        WorkflowExecutionResult result = WorkflowExecutionResult.timedOut(
+                List.of(), "slow-step");
+
+        assertThat(result.steps()).singleElement().satisfies(step -> {
+            assertThat(step.stepId()).isEqualTo("slow-step");
+            assertThat(step.status()).isEqualTo(WorkflowStepExecutionStatus.TIMED_OUT);
+        });
+    }
+
+    @Test
+    void timedOutShouldKeepFinishedStepsUntouchedAndAppendRunningStep() {
+        WorkflowStepExecution succeeded =
+                new WorkflowStepExecution(
+                        "step-1", WorkflowStepExecutionStatus.SUCCEEDED, "done");
+
+        WorkflowExecutionResult result = WorkflowExecutionResult.timedOut(
+                List.of(succeeded), "step-2");
+
+        assertThat(result.steps()).hasSize(2);
+        assertThat(result.steps().get(0).status()).isEqualTo(WorkflowStepExecutionStatus.SUCCEEDED);
+        assertThat(result.steps().get(1).status()).isEqualTo(WorkflowStepExecutionStatus.TIMED_OUT);
     }
 
     @Test
@@ -437,14 +479,11 @@ class WorkflowPlanExecutorTest {
         InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
         List<com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptor> interceptors = new ArrayList<>();
         interceptors.add(new CircuitBreakerInterceptor(properties, circuitRegistry));
-        if (approvalEnabled) {
-            interceptors.add(new HumanApprovalInterceptor(
-                    properties, approvalStore, mock(WebhookApprovalOutboxService.class)
-            ));
-        }
         interceptors.add(new AuditTrailInterceptor(properties, auditStore));
+        HumanApprovalInterceptor approvalInterceptor = new HumanApprovalInterceptor(
+                properties, approvalStore, mock(WebhookApprovalOutboxService.class));
         HarnessInterceptorChain interceptorChain = new HarnessInterceptorChain(interceptors);
-        HarnessRunner harnessRunner = new HarnessRunner(properties, interceptorChain, approvalStore, auditStore);
+        HarnessRunner harnessRunner = new HarnessRunner(properties, approvalInterceptor, approvalStore, auditStore);
         return new WorkflowPlanExecutor(
                 new WorkflowPlanVerifier(),
                 harnessRunner,

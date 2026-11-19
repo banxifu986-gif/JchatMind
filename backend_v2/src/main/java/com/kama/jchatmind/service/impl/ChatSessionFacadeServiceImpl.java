@@ -1,6 +1,7 @@
 package com.kama.jchatmind.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.kama.jchatmind.agent.AgentExecutionRegistry;
 import com.kama.jchatmind.auth.RequestScopeData;
 import com.kama.jchatmind.converter.ChatSessionConverter;
 import com.kama.jchatmind.event.ChatSessionDeletedEvent;
@@ -36,6 +37,7 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     private final RequestScopeData requestScopeData;
     private final ChatSessionExecutionCoordinator chatSessionExecutionCoordinator;
     private final ApplicationEventPublisher eventPublisher;
+    private final AgentExecutionRegistry agentExecutionRegistry;
 
     @Override
     public GetChatSessionsResponse getChatSessions() {
@@ -102,6 +104,18 @@ public class ChatSessionFacadeServiceImpl implements ChatSessionFacadeService {
     @Override
     public void deleteChatSession(String chatSessionId) {
         chatSessionExecutionCoordinator.execute(chatSessionId, () -> deleteOwnedChatSession(chatSessionId));
+    }
+
+    @Override
+    public void stopExecution(String chatSessionId) {
+        ChatSession chatSession = chatSessionMapper.selectById(chatSessionId);
+        if (chatSession == null) {
+            throw new BizException("聊天会话不存在: " + chatSessionId);
+        }
+        if (!chatSession.getUserId().equals(requireUserId())) {
+            throw new BizException(403, "无权停止该会话的执行");
+        }
+        agentExecutionRegistry.stop(chatSessionId);
     }
 
     private void deleteOwnedChatSession(String chatSessionId) {

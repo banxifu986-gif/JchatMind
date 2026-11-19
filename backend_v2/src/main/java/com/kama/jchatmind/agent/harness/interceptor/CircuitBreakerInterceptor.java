@@ -3,7 +3,6 @@ package com.kama.jchatmind.agent.harness.interceptor;
 import com.kama.jchatmind.agent.harness.HarnessContext;
 import com.kama.jchatmind.agent.harness.HarnessDecision;
 import com.kama.jchatmind.agent.harness.HarnessProperties;
-import com.kama.jchatmind.agent.harness.HarnessResult;
 import com.kama.jchatmind.agent.harness.circuit.CircuitBreaker;
 import com.kama.jchatmind.agent.harness.circuit.CircuitBreakerRegistry;
 import org.springframework.stereotype.Component;
@@ -26,45 +25,37 @@ public class CircuitBreakerInterceptor implements HarnessInterceptor {
     }
 
     @Override
-    public void beforeExecution(HarnessContext context, HarnessResult result) {
-        if (!harnessProperties.getCircuitBreaker().isEnabled()) {
-            return;
-        }
-        HarnessDecision currentDecision = result.getDecision(context.getToolCallId());
-        if (currentDecision != null && currentDecision.getStatus() != HarnessDecision.Status.ALLOW) {
-            return;
-        }
-        Set<String> tools = harnessProperties.getCircuitBreaker().getTools().stream()
-                .collect(Collectors.toSet());
-        if (!tools.contains(context.getToolName())) {
-            return;
+    public HarnessDecision beforeExecution(HarnessContext context) {
+        if (!supports(context.getToolName())) {
+            return null;
         }
         CircuitBreaker circuitBreaker = circuitBreakerRegistry.get(context.getToolName());
         if (circuitBreaker.allowRequest()) {
-            return;
+            return null;
         }
-        result.setDecision(
-                context.getToolCallId(),
-                HarnessDecision.circuitOpen(
-                        "[CIRCUIT_BREAKER_OPEN] 工具 %s 暂时不可用，请稍后重试".formatted(context.getToolName())
-                )
+        return HarnessDecision.circuitOpen(
+                "[CIRCUIT_BREAKER_OPEN] 工具 %s 暂时不可用，请稍后重试".formatted(context.getToolName())
         );
     }
 
     @Override
-    public void afterExecution(HarnessContext context, String toolResult) {
-        if (!supports(context.getToolName())) {
-            return;
+    public String afterExecution(HarnessContext context, String toolResult) {
+        if (supports(context.getToolName())) {
+            circuitBreakerRegistry.get(context.getToolName()).recordSuccess();
         }
-        circuitBreakerRegistry.get(context.getToolName()).recordSuccess();
+        return null;
     }
 
     @Override
     public void onError(HarnessContext context, Exception exception) {
-        if (!supports(context.getToolName())) {
-            return;
+        if (supports(context.getToolName())) {
+            circuitBreakerRegistry.get(context.getToolName()).recordFailure();
         }
-        circuitBreakerRegistry.get(context.getToolName()).recordFailure();
+    }
+
+    @Override
+    public void onBlocked(HarnessContext context, HarnessDecision decision) {
+        // 熔断打开本身即拦截来源，无需额外记录
     }
 
     @Override
@@ -76,6 +67,8 @@ public class CircuitBreakerInterceptor implements HarnessInterceptor {
         if (!harnessProperties.getCircuitBreaker().isEnabled()) {
             return false;
         }
-        return harnessProperties.getCircuitBreaker().getTools().contains(toolName);
+        Set<String> tools = harnessProperties.getCircuitBreaker().getTools().stream()
+                .collect(Collectors.toSet());
+        return tools.contains(toolName);
     }
 }

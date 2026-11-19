@@ -6,6 +6,7 @@ import com.kama.jchatmind.agent.harness.HarnessRunner;
 import com.kama.jchatmind.agent.harness.approval.InMemoryApprovalStore;
 import com.kama.jchatmind.agent.harness.audit.InMemoryAuditStore;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
 import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.intent.IntentDecisionEvent;
 import com.kama.jchatmind.intent.IntentFallbackRouter;
@@ -56,7 +57,7 @@ class JChatMindShadowModeTest {
         InMemoryAuditStore auditStore = new InMemoryAuditStore(harnessProperties);
         HarnessRunner harnessRunner = new HarnessRunner(
                 harnessProperties,
-                new HarnessInterceptorChain(List.of()),
+                new HumanApprovalInterceptor(harnessProperties, new InMemoryApprovalStore(), null),
                 new InMemoryApprovalStore(),
                 auditStore
         );

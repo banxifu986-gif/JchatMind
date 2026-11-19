@@ -14,8 +14,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * 审批是 loop 层一等阶段（契约 §4）：由 HarnessRunner 在批处理阶段直调，
+ * 不进入工具调用栈的 per-call hook。
+ */
 @Component
-public class HumanApprovalInterceptor implements HarnessInterceptor {
+public class HumanApprovalInterceptor {
 
     private final HarnessProperties harnessProperties;
     private final ApprovalStore approvalStore;
@@ -31,7 +35,6 @@ public class HumanApprovalInterceptor implements HarnessInterceptor {
         this.webhookApprovalOutboxService = webhookApprovalOutboxService;
     }
 
-    @Override
     public void beforeExecution(HarnessContext context, HarnessResult result) {
         if (!harnessProperties.getHumanApproval().isEnabled()) {
             return;
@@ -83,18 +86,5 @@ public class HumanApprovalInterceptor implements HarnessInterceptor {
             groupedContext.getAttributes().put(HarnessConstants.ATTRIBUTE_APPROVAL_REQUEST_ID, request.getId());
             result.setDecision(groupedContext.getToolCallId(), HarnessDecision.pending(request.getId()));
         }
-    }
-
-    @Override
-    public void afterExecution(HarnessContext context, String toolResult) {
-    }
-
-    @Override
-    public void onError(HarnessContext context, Exception exception) {
-    }
-
-    @Override
-    public int getOrder() {
-        return 100;
     }
 }

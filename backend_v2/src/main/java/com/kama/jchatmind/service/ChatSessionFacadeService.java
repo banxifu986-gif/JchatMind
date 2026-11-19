@@ -20,6 +20,9 @@ public interface ChatSessionFacadeService {
 
     void deleteChatSession(String chatSessionId);
 
+    /** 停止该会话当前运行中的 agent 执行（幂等）。 */
+    void stopExecution(String chatSessionId);
+
     void updateChatSession(String chatSessionId, UpdateChatSessionRequest request);
 
     RagRetrievalContext getRetrievalContext(String chatSessionId);

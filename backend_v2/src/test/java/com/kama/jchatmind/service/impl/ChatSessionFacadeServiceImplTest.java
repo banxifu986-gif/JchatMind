@@ -67,7 +67,8 @@ class ChatSessionFacadeServiceImplTest {
                 mock(ChatSessionConverter.class),
                 requestScopeData,
                 coordinator,
-                eventPublisher
+                eventPublisher,
+                new com.kama.jchatmind.agent.AgentExecutionRegistry()
         );
     }
 

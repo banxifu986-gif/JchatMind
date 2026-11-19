@@ -5,9 +5,11 @@ import com.kama.jchatmind.agent.harness.approval.ApprovalStatus;
 import com.kama.jchatmind.agent.harness.approval.ApprovalStore;
 import com.kama.jchatmind.agent.harness.audit.AuditStore;
 import com.kama.jchatmind.agent.harness.audit.ToolCallRecord;
-import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
 import com.kama.jchatmind.intent.IntentDecisionMetadata;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -18,111 +20,31 @@ import java.util.UUID;
 @Component
 public class HarnessRunner {
 
+    public static final String TRUNCATED_TOOL_CALLS_MESSAGE =
+            "[TOOL_CALLS_TRUNCATED] 模型响应因输出长度上限被截断，工具调用参数可能不完整，未执行；请以完整参数重新发起调用";
+
     private final HarnessProperties harnessProperties;
-    private final HarnessInterceptorChain interceptorChain;
+    private final HumanApprovalInterceptor humanApprovalInterceptor;
     private final ApprovalStore approvalStore;
     private final AuditStore auditStore;
 
     public HarnessRunner(
             HarnessProperties harnessProperties,
-            HarnessInterceptorChain interceptorChain,
+            HumanApprovalInterceptor humanApprovalInterceptor,
             ApprovalStore approvalStore,
             AuditStore auditStore
     ) {
         this.harnessProperties = harnessProperties;
-        this.interceptorChain = interceptorChain;
+        this.humanApprovalInterceptor = humanApprovalInterceptor;
         this.approvalStore = approvalStore;
         this.auditStore = auditStore;
     }
 
+    /**
+     * 批处理级守卫：重复调用/白名单拒绝 + 审批闸门（loop 层，契约 §4）。
+     * 审计与熔断为 per-call 守卫，在 HarnessToolCallbackProxy 内成对触发，不经此方法。
+     */
     public HarnessResult beforeExecution(
-            String userId,
-            String agentId,
-            String sessionId,
-            int stepNumber,
-            List<AssistantMessage.ToolCall> toolCalls
-    ) {
-        return beforeExecution(userId, agentId, sessionId, stepNumber, toolCalls, null, null);
-    }
-
-    public HarnessResult beforeExecution(
-            String userId,
-            String agentId,
-            String sessionId,
-            int stepNumber,
-            List<AssistantMessage.ToolCall> toolCalls,
-            Set<String> allowedToolNames
-    ) {
-        return beforeExecution(userId, agentId, sessionId, stepNumber, toolCalls, allowedToolNames, null);
-    }
-
-    public HarnessResult beforeExecution(
-            String userId,
-            String agentId,
-            String sessionId,
-            int stepNumber,
-            List<AssistantMessage.ToolCall> toolCalls,
-            Set<String> allowedToolNames,
-            Set<String> blockedToolCallIds
-    ) {
-        return beforeExecution(
-                userId,
-                agentId,
-                sessionId,
-                stepNumber,
-                toolCalls,
-                allowedToolNames,
-                blockedToolCallIds,
-                null
-        );
-    }
-
-    public HarnessResult beforeExecution(
-            String userId,
-            String agentId,
-            String sessionId,
-            int stepNumber,
-            List<AssistantMessage.ToolCall> toolCalls,
-            Set<String> allowedToolNames,
-            Set<String> blockedToolCallIds,
-            IntentDecisionMetadata intentDecisionMetadata
-    ) {
-        return beforeExecutionInternal(
-                userId,
-                agentId,
-                sessionId,
-                stepNumber,
-                toolCalls,
-                allowedToolNames,
-                blockedToolCallIds,
-                intentDecisionMetadata,
-                null
-        );
-    }
-
-    public HarnessResult beforeExecutionForWebhookSource(
-            String userId,
-            String agentId,
-            String sessionId,
-            int stepNumber,
-            List<AssistantMessage.ToolCall> toolCalls,
-            Set<String> allowedToolNames,
-            String webhookSourceId
-    ) {
-        return beforeExecutionInternal(
-                userId,
-                agentId,
-                sessionId,
-                stepNumber,
-                toolCalls,
-                allowedToolNames,
-                null,
-                null,
-                webhookSourceId
-        );
-    }
-
-    private HarnessResult beforeExecutionInternal(
             String userId,
             String agentId,
             String sessionId,
@@ -170,7 +92,7 @@ public class HarnessRunner {
                 if (decision != null && decision.getStatus() != HarnessDecision.Status.ALLOW) {
                     continue;
                 }
-                interceptorChain.executeBefore(context, result);
+                humanApprovalInterceptor.beforeExecution(context, result);
             }
         }
         return result;
@@ -238,6 +160,47 @@ public class HarnessRunner {
                 .timestamp(Instant.now())
                 .stepNumber(context.getStepNumber())
                 .build());
+    }
+
+    /**
+     * 截断安全（契约 §3）：判定 LLM 响应是否因输出 token 上限被截断。
+     */
+    public static boolean isOutputTruncated(ChatResponse response) {
+        if (response == null || response.getResult() == null) {
+            return false;
+        }
+        ChatGenerationMetadata metadata = response.getResult().getMetadata();
+        if (metadata == null) {
+            return false;
+        }
+        String finishReason = metadata.getFinishReason();
+        return finishReason != null && "length".equalsIgnoreCase(finishReason);
+    }
+
+    /**
+     * 截断判废：为每个 tool call 构建上下文、记录审计（逐 call 一条）并返回判废消息，
+     * 供调用方组装合成 tool response。被截断的调用不进入守卫与审批流程。
+     */
+    public String recordDiscardedToolCalls(
+            String userId,
+            String agentId,
+            String sessionId,
+            int stepNumber,
+            List<AssistantMessage.ToolCall> toolCalls
+    ) {
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            HarnessContext context = HarnessContext.builder()
+                    .sessionId(sessionId)
+                    .agentId(agentId)
+                    .userId(userId)
+                    .toolCallId(toolCall.id())
+                    .toolName(toolCall.name())
+                    .toolInput(toolCall.arguments())
+                    .stepNumber(stepNumber)
+                    .build();
+            recordSyntheticOutcome(context, HarnessDecision.rejected(TRUNCATED_TOOL_CALLS_MESSAGE));
+        }
+        return TRUNCATED_TOOL_CALLS_MESSAGE;
     }
 
     private void applyApprovalDecision(

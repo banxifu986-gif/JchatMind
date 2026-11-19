@@ -64,7 +64,9 @@ class JChatMindAgentLoopIntegrationTest {
         ReflectionTestUtils.setField(agent, "toolTimeoutSeconds", 1);
         try {
             agent.run();
-            assertThat(executions).hasValue(1);
+            // P3 并行语义：同批两个调用并发执行（later 不再被 slow 阻塞串行跳过），
+            // 超时后批级"结果未确认"收口不变，下一轮不启动也不变
+            assertThat(executions).hasValue(2);
             assertThat(model.requestCount).hasValue(1);
             assertThat(ReflectionTestUtils.getField(agent, "runEndReason")).isEqualTo("TOOL_OUTCOME_UNKNOWN");
             assertThat(persisted).filteredOn(message -> message.getRole() == ChatMessageDTO.RoleType.TOOL)
@@ -220,8 +222,9 @@ class JChatMindAgentLoopIntegrationTest {
         ));
         ScriptedChatModel model = new ScriptedChatModel(turns);
         AtomicInteger toolExecutions = new AtomicInteger();
+        // P3 并行后执行顺序不再决定数据归属：结果按入参确定性映射，顺序断言只锁定 id 与 data 对应关系
         JChatMind agent = agent(model, callback(toolExecutions, input ->
-                "tool-result-" + toolExecutions.get()), new ArrayList<>(), new ArrayList<>());
+                "result-of-" + input), new ArrayList<>(), new ArrayList<>());
 
         agent.run();
 
@@ -231,7 +234,7 @@ class JChatMindAgentLoopIntegrationTest {
                 .containsExactly("call-a", "call-b");
         assertThat(model.finalTurnResponses.get())
                 .extracting(ToolResponseMessage.ToolResponse::responseData)
-                .containsExactly("tool-result-1", "tool-result-2");
+                .containsExactly("result-of-{\"query\":\"query-a\"}", "result-of-{\"query\":\"query-b\"}");
     }
 
     @Test
@@ -389,7 +392,7 @@ class JChatMindAgentLoopIntegrationTest {
         properties.getAudit().setEnabled(false);
         return new HarnessRunner(
                 properties,
-                new HarnessInterceptorChain(List.of()),
+                new HumanApprovalInterceptor(properties, new InMemoryApprovalStore(), null),
                 new InMemoryApprovalStore(),
                 new InMemoryAuditStore(properties)
         );
@@ -445,9 +448,7 @@ class JChatMindAgentLoopIntegrationTest {
         properties.getAudit().setEnabled(false);
         return new HarnessRunner(
                 properties,
-                new HarnessInterceptorChain(List.of(
-                        new HumanApprovalInterceptor(properties, approvalStore, null)
-                )),
+                new HumanApprovalInterceptor(properties, approvalStore, null),
                 approvalStore,
                 new InMemoryAuditStore(properties)
         );

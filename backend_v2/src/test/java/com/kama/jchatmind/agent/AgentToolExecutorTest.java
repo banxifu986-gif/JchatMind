@@ -1,9 +1,9 @@
 package com.kama.jchatmind.agent;
 
-import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
-import com.kama.jchatmind.agent.harness.proxy.HarnessExecutionContextHolder;
-import com.kama.jchatmind.agent.harness.proxy.HarnessToolCallbackProxy;
 import org.junit.jupiter.api.Test;
+import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.agent.harness.proxy.HarnessToolCallbackProxy;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.tool.ToolCallback;
@@ -15,6 +15,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,9 +44,8 @@ class AgentToolExecutorTest {
             }
         }).when(manager).executeToolCalls(any(), any());
         try {
-            var result = caller.submit(() -> executor.execute(manager, new Prompt("test"), null, List.of(),
-                    new HarnessExecutionContextHolder.BatchMetadata("session", "agent", "user", 1),
-                    Duration.ofSeconds(5)));
+            var result = caller.submit(() -> executor.execute(manager, new Prompt("test"), null,
+                    Duration.ofSeconds(5), null));
             assertThat(started.await(2, TimeUnit.SECONDS)).isTrue();
             executor.shutdown();
             assertThatThrownBy(() -> result.get(2, TimeUnit.SECONDS))
@@ -76,9 +76,8 @@ class AgentToolExecutorTest {
             return result;
         }).when(manager).executeToolCalls(any(), any());
         java.util.concurrent.Callable<org.springframework.ai.chat.messages.ToolResponseMessage> call =
-                () -> executor.execute(manager, new Prompt("test"), null, List.of(),
-                        new HarnessExecutionContextHolder.BatchMetadata("session", "agent", "user", 1),
-                        Duration.ofSeconds(5));
+                () -> executor.execute(manager, new Prompt("test"), null,
+                        Duration.ofSeconds(5), null);
         try {
             var running = new java.util.ArrayList<java.util.concurrent.Future<?>>();
             for (int i = 0; i < 4; i++) {
@@ -116,19 +115,19 @@ class AgentToolExecutorTest {
             }
         }), chain);
         ToolCallback later = new HarnessToolCallbackProxy(callback("later", laterCalls::incrementAndGet), chain);
+        ToolContext toolContext = harnessToolContext();
         ToolCallingManager manager = mock(ToolCallingManager.class);
         doAnswer(invocation -> {
             try {
-                slow.call("{}");
+                slow.call("{}", toolContext);
             } catch (CancellationException ignored) {
             }
-            later.call("{}");
+            later.call("{}", toolContext);
             return null;
         }).when(manager).executeToolCalls(any(), any());
         try {
-            var result = caller.submit(() -> executor.execute(manager, new Prompt("test"), null, List.of(),
-                    new HarnessExecutionContextHolder.BatchMetadata("session", "agent", "user", 1),
-                    Duration.ofSeconds(5)));
+            var result = caller.submit(() -> executor.execute(manager, new Prompt("test"), null,
+                    Duration.ofSeconds(5), null));
             assertThat(started.await(2, TimeUnit.SECONDS)).isTrue();
             executor.shutdown();
             release.countDown();
@@ -149,8 +148,8 @@ class AgentToolExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicInteger laterCalls = new AtomicInteger();
         AtomicInteger cancellations = new AtomicInteger();
-        HarnessInterceptorChain chain = new HarnessInterceptorChain(List.of());
-        ToolCallback slow = new HarnessToolCallbackProxy(callback("slow", () -> {
+        var chain = new HarnessInterceptorChain(List.of());
+        HarnessToolCallbackProxy slow = new HarnessToolCallbackProxy(callback("slow", () -> {
             boolean released = false;
             while (!released) {
                 try {
@@ -161,13 +160,14 @@ class AgentToolExecutorTest {
                 }
             }
         }), chain);
-        ToolCallback later = new HarnessToolCallbackProxy(callback("later", laterCalls::incrementAndGet), chain);
+        HarnessToolCallbackProxy later = new HarnessToolCallbackProxy(callback("later", laterCalls::incrementAndGet), chain);
+        ToolContext toolContext = harnessToolContext();
         ToolCallingManager manager = mock(ToolCallingManager.class);
         doAnswer(invocation -> {
             try {
-                for (ToolCallback callback : List.of(slow, later)) {
+                for (HarnessToolCallbackProxy callback : List.of(slow, later)) {
                     try {
-                        callback.call("{}");
+                        callback.call("{}", toolContext);
                     } catch (CancellationException exception) {
                         cancellations.incrementAndGet();
                     }
@@ -178,9 +178,8 @@ class AgentToolExecutorTest {
             }
         }).when(manager).executeToolCalls(any(), any());
         try {
-            assertThatThrownBy(() -> executor.execute(manager, new Prompt("test"), null, List.of(),
-                    new HarnessExecutionContextHolder.BatchMetadata("session", "agent", "user", 1),
-                    Duration.ofSeconds(1))).isInstanceOf(TimeoutException.class);
+            assertThatThrownBy(() -> executor.execute(manager, new Prompt("test"), null,
+                    Duration.ofSeconds(1), null)).isInstanceOf(TimeoutException.class);
             release.countDown();
             assertThat(finished.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(laterCalls).hasValue(0);
@@ -189,6 +188,25 @@ class AgentToolExecutorTest {
             release.countDown();
             executor.shutdown();
         }
+    }
+
+    /** 绑定 slow/later 两个工具的 per-call 上下文，供 Proxy 显式解析。 */
+    private ToolContext harnessToolContext() {
+        java.util.List<com.kama.jchatmind.agent.harness.HarnessContext> contexts = new java.util.ArrayList<>();
+        for (String name : List.of("slow", "later")) {
+            contexts.add(com.kama.jchatmind.agent.harness.HarnessContext.builder()
+                    .sessionId("session-1")
+                    .agentId("agent-1")
+                    .userId("user-1")
+                    .toolCallId("call-" + name)
+                    .toolName(name)
+                    .toolInput("{}")
+                    .stepNumber(1)
+                    .build());
+        }
+        return new ToolContext(com.kama.jchatmind.agent.harness.HarnessToolContexts.toContextData(
+                new com.kama.jchatmind.agent.harness.HarnessRunMetadata("user-1", "agent-1", "session-1", 1, null),
+                contexts));
     }
 
     private ToolCallback callback(String name, Runnable action) {

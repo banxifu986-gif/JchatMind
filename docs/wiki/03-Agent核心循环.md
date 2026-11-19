@@ -2,7 +2,7 @@
 
 > 页面定位：`JChatMind` 的 Think-Execute 循环、状态机、步数预算、消息窗口压缩与 Factory 装配。改 Agent 行为、上下文管理、循环预算前必读。
 >
-> 最后核对：2026-11-14（按源码核验）。
+> 最后核对：2026-11-19（按源码核验）。
 
 ## 1. 定位
 
@@ -14,46 +14,56 @@
 
 | 文件 | 职责 | 行数 |
 | --- | --- | --- |
-| [JChatMind.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/JChatMind.java) | Think-Execute 循环主体、状态机、持久化、SSE | 910 |
+| [JChatMind.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/JChatMind.java) | agent 定义、prompt 组装、SSE 桥、审批编排（循环骨架在 AgentLoop） | 1002 |
 | [JChatMindFactory.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/JChatMindFactory.java) | 每次运行装配：配置/历史/记忆/KB/工具/Harness | 509 |
 | [AgentMemoryCompressor.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/AgentMemoryCompressor.java) | 消息窗口压缩与摘要（包私有 final） | 133 |
-| [AgentToolExecutor.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/AgentToolExecutor.java) | 工具批执行线程池、超时取消 | 111 |
+| [AgentToolExecutor.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/AgentToolExecutor.java) | 工具批执行线程池、超时取消、并行编排 | 273 |
+| [loop/AgentLoop.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/loop/AgentLoop.java) | 循环骨架：状态机/预算/取消/hook/事件出口 | 106 |
 | [ToolSelectionPolicy.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/ToolSelectionPolicy.java) | 意图决策与工具收窄门面 | 82 |
 | [AgentState.java](../../backend_v2/src/main/java/com/kama/jchatmind/agent/AgentState.java) | 状态枚举 | 10 |
 
 ## 3. 状态机与循环预算
 
+**循环骨架（specs/003 P2 抽取后）**：`agent/loop/AgentLoop` 持状态机、步数预算、next-turn hook（内存压缩，每轮前含首轮）、步间取消检查、生命周期事件出口（`AgentLoopEvent`：STARTED/FINISHED/FAILED，经 JChatMind 的 SSE 桥映射为既有线上事件，**线上契约逐字节不变**）；每步业务由 `JChatMind.loopStep` 委托（think→execute）。`AgentLoop` 零 Spring 依赖，可注入 stub 单测。
+
 状态机：`IDLE → PLANNING → THINKING → EXECUTING → FINISHED / ERROR`。`run()` 仅接受 IDLE（否则 `IllegalStateException`）；ERROR 仅由 run 异常设置；每次 run 生成独立 `traceId`。
 
-**步数预算（代码行为）**：`run()` 循环 `for(i=0; i<=MAX_STEPS && !FINISHED; i++)`，`MAX_STEPS=20`——即 **20 个完整 step（think+execute），第 21 次迭代（i=20）执行一次仅供消费最后结果的 `think()`**：不再请求工具则正常 `COMPLETED`，仍请求工具才 `BUDGET_EXHAUSTED`（AI_ERROR）。（事实修正：架构文档 §4.2"最后一步即使刚产生 Observation 也不会额外获得一轮模型调用"与当前代码不符；根 README 1.1 的"额外保留一次仅供消费最后结果的模型决策"才是现状。）
+**步数预算（代码行为）**：`AgentLoop` 循环 `for(i=0; i<=MAX_STEPS; i++)`，`MAX_STEPS=20`——`i>=MAX_STEPS` 的迭代为 `finalBudgetTurn`（仅 think 不 execute）：不再请求工具则正常 `COMPLETED`，仍请求工具才 `BUDGET_EXHAUSTED`（AI_ERROR）。终态工具（terminate）由 `loopStep` 返回 false 提前结束循环。
 
-`runEndReason` 全集：`COMPLETED / BUDGET_EXHAUSTED / TOOL_OUTCOME_UNKNOWN / TOOL_EXECUTOR_BUSY / TOOL_FAILURE / CLARIFICATION_REQUIRED / RUN_FAILURE`。
+`runEndReason` 全集：`COMPLETED / BUDGET_EXHAUSTED / TOOL_OUTCOME_UNKNOWN / TOOL_EXECUTOR_BUSY / TOOL_FAILURE / CLARIFICATION_REQUIRED / RUN_FAILURE / CANCELLED`（用户停止，specs/003 P2）。
+
+**用户取消**：`JChatMind.stop()`（`POST /api/chat-sessions/{id}/stop` 端点，三层鉴权，幂等）→ `AgentCancelState` 共享取消状态 → 循环步间不再进入下一步 + 在飞工具由执行器中断；收尾 `AI_ERROR "用户已停止执行"`。
 
 ## 4. 一轮 think-execute
 
 ```text
-run() → sendStatus(AI_PLANNING)
-→ step():
-  think()（L280-338）:
+run() → AgentLoop 事件 AGENT_STARTED → sendStatus(AI_PLANNING)
+→ loopStep（AgentLoop 每轮先调 beforeTurnHook = compressMemoryIfNeeded，再入步）:
+  think():
     compressMemoryIfNeeded → ToolSelectionPolicy.decide(latestUserQuery, previousUserQuery, traceId, correlationId, visualAssetSummary)
       → IntentDecision（每轮新 correlationId；详见 [05]）
     → visualEvidenceHintHolder.set(decision.requiresVisualEvidence())
     → ToolSelectionPolicy.select(availableTools, decision) = turnTools → currentTurnAllowedToolNames
-    → buildThinkPrompt（L433-509：KB 清单、本回合允许工具、上一轮签名提醒、completedToolSteps 进度+剩余预算、runOriginalGoal、conversationSummary 摘要块）
+    → buildThinkPrompt（L433-514：KB 清单、本回合允许工具、上一轮签名提醒、completedToolSteps 进度+剩余预算、runOriginalGoal、conversationSummary 摘要块）
+      提示词版本锚点：`JChatMind.PROMPT_VERSION = "agent-think-prompt-v1"`（构建时输出一行溯源日志）；
+      静态规则段含【工具选择规则】【最终回答排版要求】【引用与拒答】【额外信息】——【引用与拒答】段
+      （specs/002-think-prompt-consistency，约束来源 citation-minimal-v3）：仅依据本轮 KnowledgeTool 返回内容作答、
+      检索不相关时明确拒答且不带引用标记、逐字使用“引用:”后标识且每标识至多一次用最少数量、不得编造改动引用标识
     → streamChatResponse（L340-379）：流式 filter(hasAssistantOutput) → 每 chunk AI_CONTENT_DELTA → collectList().block()
       toolCalls 取所有 chunk 中最后一个非空工具调用列表；空响应帧被跳过
     → 聚合 AssistantMessage → 内存 + saveMessage 持久化 → refreshPendingMessages（AI_GENERATED_CONTENT）
-  有 ToolCall → execute()（L531-621）:
+  有 ToolCall → execute():
     registerToolCallSignatures（重复签名 → 进 Harness 前即拒绝）→ sendStatus(AI_EXECUTING)
+    → 截断安全：finishReason=length（specs/003 P1）→ 全部 toolCall 判废为 `[TOOL_CALLS_TRUNCATED]` 合成响应（逐 call 审计，不进守卫/审批/执行）
     → harnessRunner.beforeExecution（见 [06]）
     → pending → sendApprovalEvents(TOOL_APPROVAL_REQUIRED) + awaitApprovals（Agent 线程内同步阻塞）
-    → 过滤 ALLOW → executeWithTimeout（默认 30s，固定不可配）
+    → 过滤 ALLOW → executeWithTimeout（默认 30s，固定不可配；多 call 走 `executeParallel` 并行编排——无序发起、按声明顺序回填、失败隔离，并发上限 = 线程池容量 4）
     → 合成/真实响应按模型原始调用顺序 sortResponses 合并 → 持久化 TOOL 消息 → classifyToolOutcome 记 completedToolSteps（上限 20 条滚动）
   无 ToolCall → finishWithoutToolCalls()（COMPLETED）
 ```
 
 - `classifyToolOutcome`（L623-632）：`"错误："前缀→FAILED`；`"[TOOL_"/"[APPROVAL_"前缀→REJECTED`；否则 RETURNED。
-- `executeWithTimeout`（L652-690）：超时/中断 → `TOOL_OUTCOME_UNKNOWN` + FINISHED（批取消、发未确认 Observation）；池拒绝 → `TOOL_EXECUTOR_BUSY` + FINISHED；普通执行异常 → `"错误：工具执行失败"` 合成响应，**不终止运行**。
+- `executeWithTimeout`：批级超时/用户取消 → 中断全部在飞调用并按 `TOOL_OUTCOME_UNKNOWN` + FINISHED 收口（并行路径同语义）；池拒绝 → `TOOL_EXECUTOR_BUSY` + FINISHED；单 call 执行异常在并行路径被隔离为该 call 的错误 result（其余正常完成）。
 
 ## 5. 消息窗口压缩（`AgentMemoryCompressor`）
 

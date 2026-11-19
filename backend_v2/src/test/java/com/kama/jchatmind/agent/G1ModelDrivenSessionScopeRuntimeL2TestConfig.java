@@ -8,6 +8,8 @@ import com.kama.jchatmind.agent.harness.approval.InMemoryApprovalStore;
 import com.kama.jchatmind.agent.harness.audit.AuditStore;
 import com.kama.jchatmind.agent.harness.audit.InMemoryAuditStore;
 import com.kama.jchatmind.agent.harness.interceptor.HarnessInterceptorChain;
+import com.kama.jchatmind.agent.harness.interceptor.HumanApprovalInterceptor;
+import com.kama.jchatmind.webhook.WebhookApprovalOutboxService;
 import com.kama.jchatmind.agent.tools.KnowledgeTools;
 import com.kama.jchatmind.agent.tools.TerminateTool;
 import com.kama.jchatmind.agent.tools.Tool;
@@ -251,14 +253,16 @@ public class G1ModelDrivenSessionScopeRuntimeL2TestConfig {
             ChatSessionConverter chatSessionConverter,
             ChatSessionExecutionCoordinator chatSessionExecutionCoordinator,
             ApplicationEventPublisher applicationEventPublisher,
-            RequestScopeData requestScopeData
+            RequestScopeData requestScopeData,
+            com.kama.jchatmind.agent.AgentExecutionRegistry agentExecutionRegistry
     ) {
         return new ChatSessionFacadeServiceImpl(
                 chatSessionMapper,
                 chatSessionConverter,
                 requestScopeData,
                 chatSessionExecutionCoordinator,
-                applicationEventPublisher
+                applicationEventPublisher,
+                agentExecutionRegistry
         );
     }
 
@@ -375,13 +379,22 @@ public class G1ModelDrivenSessionScopeRuntimeL2TestConfig {
     }
 
     @Bean
+    public HumanApprovalInterceptor humanApprovalInterceptor(
+            HarnessProperties harnessProperties,
+            ApprovalStore approvalStore,
+            WebhookApprovalOutboxService webhookApprovalOutboxService
+    ) {
+        return new HumanApprovalInterceptor(harnessProperties, approvalStore, webhookApprovalOutboxService);
+    }
+
+    @Bean
     public HarnessRunner harnessRunner(
             HarnessProperties harnessProperties,
-            HarnessInterceptorChain harnessInterceptorChain,
+            HumanApprovalInterceptor humanApprovalInterceptor,
             ApprovalStore approvalStore,
             AuditStore auditStore
     ) {
-        return new HarnessRunner(harnessProperties, harnessInterceptorChain, approvalStore, auditStore);
+        return new HarnessRunner(harnessProperties, humanApprovalInterceptor, approvalStore, auditStore);
     }
 
     @Bean

@@ -55,6 +55,13 @@ public class ChatSessionController {
         return ApiResponse.success();
     }
 
+    @PostMapping("/chat-sessions/{chatSessionId}/stop")
+    @NeedLogin
+    public ApiResponse<Void> stopExecution(@PathVariable String chatSessionId) {
+        chatSessionFacadeService.stopExecution(chatSessionId);
+        return ApiResponse.success();
+    }
+
     @PatchMapping("/chat-sessions/{chatSessionId}")
     @NeedLogin
     public ApiResponse<Void> updateChatSession(

@@ -46,6 +46,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 failureRegistry,
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 DIRECT_EXECUTOR
         );
         ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
@@ -74,6 +75,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 failureRegistry,
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 DIRECT_EXECUTOR
         );
         ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
@@ -102,6 +104,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 failureRegistry,
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 DIRECT_EXECUTOR
         );
         ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
@@ -127,6 +130,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 failureRegistry,
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 DIRECT_EXECUTOR
         );
         ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
@@ -152,6 +156,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 new MemoryExtractionFailureRegistry(),
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 DIRECT_EXECUTOR
         );
         ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
@@ -174,6 +179,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 new MemoryExtractionFailureRegistry(),
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 DIRECT_EXECUTOR
         );
         ChatEvent event = new ChatEvent("7", "agent-1", "session-1", null, null, "请总结这段内容");
@@ -202,6 +208,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 coordinator,
                 new MemoryExtractionFailureRegistry(),
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 queuedExecutor
         );
         ChatEvent firstEvent = new ChatEvent("7", "agent-1", "session-1", null, null, "第一条消息");
@@ -270,6 +277,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 coordinator,
                 new MemoryExtractionFailureRegistry(),
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 executor
         );
         when(jChatMindFactory.create("7", "agent-2", "session-1")).thenReturn(agent);
@@ -308,6 +316,7 @@ class ChatEventListenerTest {
                 userMemoryFacadeService,
                 new ChatSessionExecutionCoordinator(),
                 new MemoryExtractionFailureRegistry(),
+                new com.kama.jchatmind.agent.AgentExecutionRegistry(),
                 executor
         );
         when(jChatMindFactory.create("7", "agent-1", "session-1")).thenReturn(agent);
